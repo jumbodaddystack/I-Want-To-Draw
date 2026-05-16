@@ -34,3 +34,53 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         db.execSQL("ALTER TABLE messages ADD COLUMN metadata TEXT")
     }
 }
+
+/**
+ * Migration from version 3 to 4:
+ * Adds the stylus-notes data layer:
+ * - `notes` table for note metadata (title, background style, bounds, OCR text, thumbnail).
+ * - `note_items` table for strokes / text items, keyed by noteId with cascade delete.
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `notes` (
+                `id` TEXT NOT NULL,
+                `title` TEXT NOT NULL,
+                `backgroundStyle` TEXT NOT NULL,
+                `schemaVersion` INTEGER NOT NULL,
+                `minX` REAL NOT NULL,
+                `minY` REAL NOT NULL,
+                `maxX` REAL NOT NULL,
+                `maxY` REAL NOT NULL,
+                `thumbnailPath` TEXT,
+                `ocrText` TEXT,
+                `createdAt` INTEGER NOT NULL,
+                `updatedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `note_items` (
+                `id` TEXT NOT NULL,
+                `noteId` TEXT NOT NULL,
+                `zIndex` INTEGER NOT NULL,
+                `kind` TEXT NOT NULL,
+                `tool` TEXT,
+                `colorArgb` INTEGER NOT NULL,
+                `baseWidthPx` REAL NOT NULL,
+                `payload` BLOB NOT NULL,
+                PRIMARY KEY(`id`),
+                FOREIGN KEY(`noteId`) REFERENCES `notes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_items_noteId` ON `note_items` (`noteId`)")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_note_items_noteId_zIndex` ON `note_items` (`noteId`, `zIndex`)"
+        )
+    }
+}

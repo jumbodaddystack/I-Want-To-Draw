@@ -4,8 +4,8 @@
 
 ## Status
 
-- **Current phase:** Phase 1 — not started
-- **Next sub-phase:** [1.1 — Data layer foundation](./STYLUS_NOTES_PHASE_1.md#sub-phase-11--data-layer-foundation)
+- **Current phase:** Phase 1 — in progress
+- **Next sub-phase:** [1.2 — Navigation + empty Notes screens](./STYLUS_NOTES_PHASE_1.md#sub-phase-12--navigation--empty-notes-screens)
 - **Last verified device pass:** none yet
 
 ## Phase index
@@ -27,7 +27,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 
 ### Phase 1 — Canvas feel · [`details`](./STYLUS_NOTES_PHASE_1.md)
 
-- [ ] **1.1** Data layer foundation — entities, DAO, `MIGRATION_3_4`, DI, repository ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-11--data-layer-foundation))
+- [x] **1.1** Data layer foundation — entities, DAO, `MIGRATION_3_4`, DI, repository ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-11--data-layer-foundation))
 - [ ] **1.2** Navigation + empty Notes screens ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-12--navigation--empty-notes-screens))
 - [ ] **1.3** Minimum-viable `DrawingSurface` (single tool, no front buffer) ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-13--minimum-viable-drawingsurface-single-tool-no-front-buffer))
 - [ ] **1.4** Front-buffer rendering, motion prediction, pressure & tilt ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-14--front-buffer-rendering-motion-prediction-pressure--tilt))
