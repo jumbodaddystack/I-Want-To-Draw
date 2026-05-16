@@ -1,4 +1,69 @@
-# Plan: Stylus Notes for S25 Ultra (revised)
+# Stylus Notes for S25 Ultra — Master Plan
+
+> This is the working document. Open it at the start of every implementation session, find the next unchecked sub-phase in the tracker, open the linked phase doc, and execute it.
+
+## Status
+
+- **Current phase:** Phase 1 — not started
+- **Next sub-phase:** [1.1 — Data layer foundation](./STYLUS_NOTES_PHASE_1.md#sub-phase-11--data-layer-foundation)
+- **Last verified device pass:** none yet
+
+## Phase index
+
+| Phase | Focus | Breakdown doc | Sub-phases |
+| --- | --- | --- | --- |
+| 1 | Canvas feel (shippable as v1) | [`STYLUS_NOTES_PHASE_1.md`](./STYLUS_NOTES_PHASE_1.md) | 10 |
+| 2 | AI on canvas | [`STYLUS_NOTES_PHASE_2.md`](./STYLUS_NOTES_PHASE_2.md) | 8 |
+| 3 | Quick capture | [`STYLUS_NOTES_PHASE_3.md`](./STYLUS_NOTES_PHASE_3.md) | 4 |
+| 4 | Export & chat integration | [`STYLUS_NOTES_PHASE_4.md`](./STYLUS_NOTES_PHASE_4.md) | 4 |
+
+---
+
+## Master implementation tracker
+
+Update the check state in this section as work lands. One sub-phase per PR. Mark a sub-phase complete only after its "Definition of done" is met **and** the build is green on `main` (or this feature branch).
+
+Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (note reason inline)
+
+### Phase 1 — Canvas feel · [`details`](./STYLUS_NOTES_PHASE_1.md)
+
+- [ ] **1.1** Data layer foundation — entities, DAO, `MIGRATION_3_4`, DI, repository ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-11--data-layer-foundation))
+- [ ] **1.2** Navigation + empty Notes screens ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-12--navigation--empty-notes-screens))
+- [ ] **1.3** Minimum-viable `DrawingSurface` (single tool, no front buffer) ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-13--minimum-viable-drawingsurface-single-tool-no-front-buffer))
+- [ ] **1.4** Front-buffer rendering, motion prediction, pressure & tilt ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-14--front-buffer-rendering-motion-prediction-pressure--tilt))
+- [ ] **1.5** Infinite viewport + background layer ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-15--infinite-viewport-pan-pinch-zoom--background-layer))
+- [ ] **1.6** Tool palette + highlighter + pencil + erasers + side-button mapping ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-16--tool-palette--highlighter--pencil--erasers--side-button-mapping))
+- [ ] **1.7** Undo / redo (event log) ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-17--undo--redo-event-log))
+- [ ] **1.8** Lasso + selection + transforms + cross-note clipboard ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-18--lasso-selection-transforms-cross-note-clipboard))
+- [ ] **1.9** Text-box tool ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-19--text-box-tool))
+- [ ] **1.10** Thumbnails + list polish + S25 verification ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-110--thumbnails-list-polish-delete-confirmation-manual-verification-pass))
+
+### Phase 2 — AI on canvas · [`details`](./STYLUS_NOTES_PHASE_2.md)
+
+- [ ] **2.1** Vision-capability registry + ML Kit dep + manifest ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-21--vision-capability-registry--dependencies--manifest))
+- [ ] **2.2** `NoteRasterizer` (selection + whole note → PNG bytes) ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-22--note-rasterizer-selection--whole-note--png-bytes))
+- [ ] **2.3** `HandwritingOcr` (ML Kit Digital Ink) ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-23--handwriting-ocr-ml-kit-digital-ink))
+- [ ] **2.4** OCR on save (lazy pipeline) ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-24--ocr-on-save-lazy-pipeline))
+- [ ] **2.5** `NoteAiService` core (no UI) ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-25--noteaiservice-core-no-ui))
+- [ ] **2.6** `AiSideSheet` UI shell + streaming ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-26--aisidesheet-ui-shell--streaming-render))
+- [ ] **2.7** Entry points: toolbar Ask + lasso Ask + canned prompts + Convert-to-text ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-27--entry-points-toolbar-ask--lasso-ask--canned-prompts--convert-to-text-fast-path))
+- [ ] **2.8** Reply actions: Copy / Insert as text box / Send to chat + verification ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-28--reply-actions-copy-insert-as-text-box-send-to-chat--polish--verification))
+
+### Phase 3 — Quick capture · [`details`](./STYLUS_NOTES_PHASE_3.md)
+
+- [ ] **3.1** Deep-link plumbing + home-screen static shortcut ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-31--deep-link-plumbing--home-screen-static-shortcut))
+- [ ] **3.2** Quick Settings tile ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-32--quick-settings-tile))
+- [ ] **3.3** `ACTION_CREATE_NOTE` activity-alias (Android 14 default note-taking app) ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-33--action_create_note-activity-alias-android-14-default-note-taking-app))
+- [ ] **3.4** Sketch composer attachment sheet + verification ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-34--sketch-composer-attachment-sheet--phase-3-verification))
+
+### Phase 4 — Export & chat integration · [`details`](./STYLUS_NOTES_PHASE_4.md)
+
+- [ ] **4.1** `NoteExporter` + PNG share + `FileProvider` bootstrap ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-41--noteexporter-core--png-share-target))
+- [ ] **4.2** PDF export with fit-page / tile dialog ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-42--pdf-export-with-fit-page--tile-to-pages-dialog))
+- [ ] **4.3** "Send to chat" picker ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-43--send-to-chat-picker))
+- [ ] **4.4** Pin note as context + verification ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-44--chat-side-pin-note-as-context-affordance--phase-4-verification))
+
+---
 
 ## Context
 
@@ -10,7 +75,7 @@ Android's standard `MotionEvent` already reports `TOOL_TYPE_STYLUS`, pressure, t
 
 | Axis | Decision |
 | --- | --- |
-| Editor / chat coupling | Editor is standalone. AI hooks live in the editor; chat-side gets a "pin note as context" affordance later. |
+| Editor / chat coupling | Editor is standalone. AI hooks live in the editor; chat-side gets a "pin note as context" affordance in Phase 4. |
 | Canvas shape | Truly infinite single surface, pan/zoom anywhere. |
 | Canvas polish | Go big: front-buffered low-latency rendering, motion prediction, hover cursor, side-button eraser, pressure + tilt. |
 | Background style | User-selectable per note: plain / dot-grid / lines / graph. |
@@ -88,13 +153,13 @@ Point packing: `FloatArray` flattened to bytes via `ByteBuffer` — `(x, y, pres
 
 **Database** — `data/local/AppDatabase.kt`:
 - Add `Note::class` and `NoteItem::class` to `@Database(entities = ...)`
-- Bump version `3 → 4`
+- Bump version `3 → 4` (Phase 1); `4 → 5` later for the chat-side pinned-note column (Phase 4.4)
 - Add `MIGRATION_3_4` in `data/local/Migrations.kt` that creates both tables + indices (follow the `MIGRATION_2_3` pattern)
 - `abstract fun noteDao(): NoteDao`
 
 **Repository** — `data/repository/NoteRepository.kt`:
 - Thin pass-through, plus `renderThumbnail(noteId)` that rasterizes the bounding box to a 512px PNG in `filesDir/note-thumbs/` and updates `thumbnailPath`. Runs on a background dispatcher after save.
-- `runOcr(noteId)` (later phase) — wraps ML Kit Digital Ink, writes `ocrText`.
+- `runOcr(noteId)` (Phase 2.4) — wraps ML Kit Digital Ink, writes `ocrText`.
 
 **DI** — `di/AppModule.kt`: add `provideNoteDao` and the repository.
 
@@ -186,117 +251,75 @@ ML Kit Digital Ink (`com.google.mlkit:digital-ink-recognition`) is on-device and
 
 **Canned prompt buttons** in the lasso menu: *Explain*, *Expand*, *Convert to text*, *Summarize*, *Continue this*. Plus a free-form input.
 
-## Quick-capture entry points (phase 3)
+## Quick-capture entry points (Phase 3)
 
 - **Stylus icon in chat input** — `ChatScreen`'s composer gets a pen button that opens a bottom-sheet sketch surface (a stripped-down `DrawingSurface`, fixed-size). On confirm, the sketch is rasterized and attached to the outgoing message as an image (reuses existing image-attachment flow).
 - **Android 14 default note-taking app** — declare an activity-alias for `Intent.ACTION_CREATE_NOTE` in `AndroidManifest.xml`. Launches `NoteEditorScreen` with `note/new`. Honours `EXTRA_USE_STYLUS_MODE`. Gated by `Build.VERSION_CODES.UPSIDE_DOWN_CAKE`.
 - **Home-screen shortcut** — static shortcut in `app/src/main/res/xml/shortcuts.xml` pointing at `note/new`.
 - **Quick Settings tile** — `TileService` subclass that launches the same deep link.
 
-## Export (phase 4)
+All four entry points share a single deep link (`aichat://notes/new?source=…&stylus=…`) introduced in Phase 3.1.
 
-- **PNG**: rasterize the stroke bounding box (with margin), expose via `FileProvider` + `Intent.ACTION_SEND`.
-- **PDF**: `PdfDocument` API. Infinite canvas → ask the user to pick "fit page" or "tile to multiple pages" at export time.
-- **Send to chat**: bottom-sheet picker over existing chats; opens the target chat with the rendered PNG + OCR text attached to the draft message.
+## Export (Phase 4)
+
+- **PNG**: rasterize the stroke bounding box (with margin), expose via `FileProvider` + `Intent.ACTION_SEND`. (4.1 introduces the `FileProvider`, which the rest of Phase 4 reuses.)
+- **PDF**: `PdfDocument` API. Infinite canvas → ask the user to pick "Fit to one page" or "Tile across pages" at export time.
+- **Send to chat**: bottom-sheet picker over existing chats; opens the target chat with the rendered PNG + OCR text attached to the draft message. Image handover uses an in-memory `PendingDraftStore`, not a navigation argument.
+- **Pin note as context** (chat-side): per-chat `pinnedNoteId` column. On every send, the pinned note is re-rendered and attached transparently to the API call only (not persisted on the user `Message` row).
+
+## Cross-cutting design decisions
+
+These are the non-obvious decisions captured in the phase docs that future sessions should not re-litigate without good cause.
+
+- **Stroke payload format is fixed at Phase 1.3.** `(x, y, pressure, tilt)` per sample, packed `FloatArray`, no per-point timestamps. Bumping this requires `schemaVersion` change + migration.
+- **OCR timestamps are synthetic.** ML Kit Digital Ink (Phase 2.3) wants per-point timestamps that the codec doesn't store. We synthesize evenly-spaced ones at the recognizer call site. Acceptable accuracy hit for printed handwriting; documented in the Phase 2.3 doc.
+- **AI side sheet is one-shot, not multi-turn.** Each `AskTurn` is independent; prior turns are not packed into the request. Multi-turn is a deliberate follow-up.
+- **"Send to chat" image handover uses an in-memory store, not a query-string blob.** See Phase 4.3 for the reasoning (URL length, log leakage).
+- **Pinned-note image attaches only to the API call.** The DB `Message` row stays clean — pinning is additive, removable, and doesn't bloat persistence. See Phase 4.4.
+- **High-risk sub-phases to front-load:** 1.4 (front buffer), 2.3 (ML Kit lifecycle), 4.4 (pinning + migration + ApiClient changes).
 
 ## Manifest
 
 `app/src/main/AndroidManifest.xml`:
-- `<uses-feature android:name="android.hardware.type.stylus" android:required="false" />`
-- Activity-alias with `<intent-filter>` for `android.intent.action.CREATE_NOTE` (phase 3).
-- `<service>` for the Quick Settings tile (phase 3).
+- `<uses-feature android:name="android.hardware.type.stylus" android:required="false" />` (Phase 1.10)
+- `aichat://` deep-link intent filter on `MainActivity` (Phase 3.1)
+- Static shortcuts metadata (Phase 3.1)
+- Quick Settings `<service>` (Phase 3.2)
+- `<activity-alias>` for `ACTION_CREATE_NOTE` (Phase 3.3)
+- `<provider>` for `FileProvider` (Phase 4.1)
 
-## Files to create / modify
+## Verification matrices
 
-**Create (phase 1 — canvas feel):**
-- `data/model/Note.kt`
-- `data/model/NoteItem.kt`
-- `data/local/NoteDao.kt`
-- `data/repository/NoteRepository.kt`
-- `ui/components/notes/DrawingSurface.kt`
-- `ui/components/notes/BackgroundLayer.kt`
-- `ui/components/notes/ViewportController.kt`
-- `ui/screens/notes/NotesListScreen.kt`
-- `ui/screens/notes/NoteEditorScreen.kt`
-- `ui/screens/notes/NoteEditorViewModel.kt`
-- `ui/screens/notes/LassoController.kt`
+Each phase's closing sub-phase contains its full verification matrix:
 
-**Create (phase 2 — AI):**
-- `data/notes/NoteAiService.kt`
-- `data/notes/HandwritingOcr.kt`
-- `ui/screens/notes/AiSideSheet.kt`
+- [Phase 1 matrix (12 items)](./STYLUS_NOTES_PHASE_1.md#sub-phase-110--thumbnails-list-polish-delete-confirmation-manual-verification-pass) — run on real S25 Ultra at end of Phase 1.
+- [Phase 2 matrix (12 items)](./STYLUS_NOTES_PHASE_2.md#sub-phase-28--reply-actions-copy-insert-as-text-box-send-to-chat--polish--verification) — at end of Phase 2.
+- [Phase 3 matrix (10 items)](./STYLUS_NOTES_PHASE_3.md#sub-phase-34--sketch-composer-attachment-sheet--phase-3-verification) — at end of Phase 3.
+- [Phase 4 matrix (12 items)](./STYLUS_NOTES_PHASE_4.md#sub-phase-44--chat-side-pin-note-as-context-affordance--phase-4-verification) — at end of Phase 4.
 
-**Create (phase 3 — capture):**
-- `ui/components/chat/SketchAttachmentSheet.kt`
-- `service/NotesQuickTileService.kt`
-- `app/src/main/res/xml/shortcuts.xml`
+Update the **Status** block at the top of this doc each time a matrix passes.
 
-**Create (phase 4 — export):**
-- `data/notes/NoteExporter.kt`
-- `ui/screens/notes/SendToChatSheet.kt`
-
-**Modify:**
-- `data/local/AppDatabase.kt` (entities, version 3 → 4)
-- `data/local/Migrations.kt` (`MIGRATION_3_4`)
-- `di/AppModule.kt` (DAO + repository + AI service)
-- `ui/navigation/Navigation.kt` (Screen entry, bottomNavItems, NavHost routes)
-- `app/build.gradle.kts` (deps: `androidx.graphics:graphics-core`, `androidx.input:input-motionprediction`, `com.google.mlkit:digital-ink-recognition`)
-- `app/src/main/AndroidManifest.xml` (stylus feature, CREATE_NOTE intent, tile service)
-- `ui/screens/chat/ChatScreen.kt` (composer pen button — phase 3)
-
-## Phased build order
-
-**Phase 1 — Canvas feel (this is "v1" by itself; we can ship it).**
-- Room schema + migration, repository, DI.
-- `DrawingSurface` with front-buffer rendering, motion prediction, pressure/tilt, palm rejection, side-button eraser, hover cursor.
-- Infinite viewport (pan/pinch-zoom on touch, ink on stylus).
-- Pen, highlighter, pencil, dual eraser, lasso (with move/scale/rotate, duplicate/delete, cross-note clipboard), text box.
-- Background styles (plain / dot / line / graph).
-- Undo/redo as event log.
-- Save/load, thumbnail caching.
-- Manual S25 Ultra test pass.
-
-**Phase 2 — AI on canvas.**
-- ML Kit Digital Ink integration; OCR runs on save.
-- `NoteAiService` + side sheet.
-- Lasso "Ask" menu and toolbar "Ask about this note" button.
-- Canned prompts (Explain / Expand / Convert to text / Summarize / Continue).
-- "Insert as text box" / "Send to chat" actions on replies.
-
-**Phase 3 — Quick capture.**
-- Pen button in chat composer → sketch attachment sheet.
-- `ACTION_CREATE_NOTE` alias (API 34+ gated).
-- Static home-screen shortcut + Quick Settings tile.
-
-**Phase 4 — Export.**
-- PNG / PDF share targets.
-- "Send to chat" picker.
-- Chat-side "pin note as context" affordance (re-renders pinned note on every turn).
-
-## Verification (phase 1 manual pass, S25 Ultra)
-
-1. Build, install, app still launches and existing chats load (migration succeeded).
-2. New "Notes" tab in bottom nav; "New note" FAB opens an empty infinite canvas with chosen background.
-3. Draw with S-Pen: line tracks the nib with no perceptible lag, width varies with pressure, pencil widens and softens with tilt.
-4. Rest palm while drawing — palm strokes do not appear.
-5. Hold the S-Pen side button — strokes erase as if eraser were selected; release returns to previous tool.
-6. Hover the S-Pen — small cursor preview tracks the nib above the screen.
-7. One-finger drag pans, two-finger pinch zooms; stylus continues to ink during gestures.
-8. Switch tools, change colors, run undo / redo, lasso a region → move / scale / rotate / duplicate / delete.
-9. Copy a lasso selection, navigate to a different note, paste — items land with offset.
-10. Set a title, back out → list shows new note at the top with a thumbnail; reopen → all items redrawn identically.
-11. Force-quit and relaunch → note still there.
-12. Long-press in list → delete confirmation removes the note and its items (FK cascade).
-
-Lightweight tests alongside:
-- `NoteDao` upsert / read / cascade-delete (in-memory Room).
-- Stroke point binary round-trip preserves pressure / tilt within float tolerance.
-- `LassoController` polygon hit-test unit cases.
-
-## Out of scope (deliberately, even after v1 phases)
+## Out of scope (deliberately, even after all four phases)
 
 - Cloud sync.
 - Full pencil-style segment-splitting eraser (v1 erases whole strokes for partial overlap).
 - Multi-user collaboration on a note.
 - S Pen Bluetooth-button air gestures (would need the Samsung S Pen Remote SDK).
 - Handwriting → math LaTeX (separate ML Kit model; revisit if requested).
+- Multi-turn conversation history packed into AI side-sheet requests (each turn is one-shot).
+- Multiple pinned notes per chat.
+- Returning a note URI from `ACTION_CREATE_NOTE` to the caller.
+- Vector PDF export (we rasterize per page).
+- Selectable text layer in exported PDFs.
+
+## How to use this document in a session
+
+1. Open this file. Read the **Status** block.
+2. Find the next unchecked sub-phase in the **Master implementation tracker**.
+3. Open the linked phase doc; read that sub-phase's full spec (scope, files, step-by-step, definition of done, non-goals, risks).
+4. Implement. One sub-phase, one PR.
+5. When the definition of done is met and the build is green:
+   - Flip the checkbox in the tracker from `[ ]` to `[x]`.
+   - Update the **Status** block (next sub-phase, plus device-pass date if a verification matrix was run).
+   - Commit this doc with the implementation PR or in a small follow-up.
+6. If blocked, flip to `[!]` and note the reason inline in the tracker.
