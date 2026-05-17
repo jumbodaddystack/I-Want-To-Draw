@@ -17,6 +17,10 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE id = :noteId")
     suspend fun getNote(noteId: String): Note?
 
+    /** Notes that have never been thumbnailed yet — used for the backfill pass. */
+    @Query("SELECT * FROM notes WHERE thumbnailPath IS NULL")
+    suspend fun getNotesMissingThumbnail(): List<Note>
+
     @Query("SELECT * FROM note_items WHERE noteId = :noteId ORDER BY zIndex ASC")
     suspend fun getItems(noteId: String): List<NoteItem>
 

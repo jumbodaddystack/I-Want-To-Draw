@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.input.motionprediction.MotionEventPredictor
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.ui.screens.notes.LassoController
 import kotlin.math.hypot
 
 /**
