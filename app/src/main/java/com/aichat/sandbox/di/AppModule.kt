@@ -9,6 +9,9 @@ import com.aichat.sandbox.data.local.MIGRATION_2_3
 import com.aichat.sandbox.data.local.MIGRATION_3_4
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.notes.HandwritingOcr
+import com.aichat.sandbox.data.notes.NoteAiService
+import com.aichat.sandbox.data.remote.ApiClient
+import com.aichat.sandbox.data.remote.ChatStreamer
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.ui.components.MarkwonProvider
 import dagger.Module
@@ -62,5 +65,20 @@ object AppModule {
     @Singleton
     fun provideHandwritingOcr(): HandwritingOcr {
         return HandwritingOcr()
+    }
+
+    @Provides
+    @Singleton
+    fun provideChatStreamer(apiClient: ApiClient): ChatStreamer = apiClient
+
+    @Provides
+    @Singleton
+    fun provideNoteAiService(
+        chatStreamer: ChatStreamer,
+        ocr: HandwritingOcr,
+    ): NoteAiService {
+        // Pass the concrete recognizer in; the service holds the
+        // `HandwritingRecognizer` interface so tests can substitute a fake.
+        return NoteAiService(chatStreamer, ocr)
     }
 }

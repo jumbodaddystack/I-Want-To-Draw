@@ -34,7 +34,7 @@ sealed class StreamEvent {
 }
 
 @Singleton
-class ApiClient @Inject constructor() {
+class ApiClient @Inject constructor() : ChatStreamer {
     private val gson = Gson()
     private val apiCache = mutableMapOf<String, OpenAiApi>()
     private val retryPolicy = RetryPolicy()
@@ -117,13 +117,13 @@ class ApiClient @Inject constructor() {
         }
     }
 
-    fun sendMessageStream(
+    override fun sendMessageStream(
         baseUrl: String,
         apiKey: String,
         chat: Chat,
         messages: List<Message>,
-        onRetryAttempt: ((Int) -> Unit)? = null,
-        tools: List<com.aichat.sandbox.data.model.ToolDefinition>? = null
+        onRetryAttempt: ((Int) -> Unit)?,
+        tools: List<com.aichat.sandbox.data.model.ToolDefinition>?
     ): Flow<StreamEvent> = flow {
         try {
             val api = buildApi(baseUrl, apiKey)

@@ -43,8 +43,20 @@ import javax.inject.Singleton
  * writing; cursive may degrade slightly versus capturing real timing. Bumping
  * `StrokeCodec` to embed timestamps is a deliberate `schemaVersion` follow-up.
  */
+/**
+ * Minimal recognizer surface used by callers (currently `NoteAiService` in
+ * sub-phase 2.5) that need to substitute the ML Kit-backed implementation
+ * in unit tests.
+ */
+interface HandwritingRecognizer {
+    suspend fun recognize(
+        strokes: List<NoteItem>,
+        locale: String = HandwritingOcr.DEFAULT_LOCALE,
+    ): OcrResult
+}
+
 @Singleton
-class HandwritingOcr @Inject constructor() {
+class HandwritingOcr @Inject constructor() : HandwritingRecognizer {
 
     sealed interface OcrModelState {
         data object NotDownloaded : OcrModelState
@@ -101,9 +113,9 @@ class HandwritingOcr @Inject constructor() {
      * (text boxes etc.) — those are filtered out. Returns [OcrResult.EMPTY] if
      * there are no strokes, the model isn't available, or recognition throws.
      */
-    suspend fun recognize(
+    override suspend fun recognize(
         strokes: List<NoteItem>,
-        locale: String = DEFAULT_LOCALE,
+        locale: String,
     ): OcrResult {
         if (strokes.none { it.kind == STROKE_KIND }) return OcrResult.EMPTY
         return try {
