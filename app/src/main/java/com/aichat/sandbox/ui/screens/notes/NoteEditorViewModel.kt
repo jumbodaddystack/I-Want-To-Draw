@@ -1,9 +1,12 @@
 package com.aichat.sandbox.ui.screens.notes
 
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aichat.sandbox.data.model.Note
+import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.repository.NoteRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,16 +38,37 @@ class NoteEditorViewModel @Inject constructor(
     private val _note = MutableStateFlow(emptyNote(resolvedNoteId))
     val note: StateFlow<Note> = _note.asStateFlow()
 
+    val items: SnapshotStateList<NoteItem> = mutableStateListOf()
+
+    private var nextZIndex: Int = 0
+
     init {
         if (routeArg != NOTE_ID_NEW) {
             viewModelScope.launch {
                 repository.getNote(routeArg)?.let { loaded -> _note.value = loaded }
+                val loaded = repository.getItems(routeArg)
+                items.clear()
+                items.addAll(loaded)
+                nextZIndex = (loaded.maxOfOrNull { it.zIndex } ?: -1) + 1
             }
         }
     }
 
     fun setTitle(title: String) {
         _note.update { it.copy(title = title) }
+    }
+
+    /**
+     * Append a freshly drawn item to the in-memory list. The DrawingSurface emits items
+     * without a note id or zIndex; this method assigns both before storage.
+     */
+    fun addItem(item: NoteItem) {
+        items.add(
+            item.copy(
+                noteId = resolvedNoteId,
+                zIndex = nextZIndex++,
+            )
+        )
     }
 
     /**
@@ -58,7 +82,7 @@ class NoteEditorViewModel @Inject constructor(
             title = sanitizedTitle,
             updatedAt = System.currentTimeMillis(),
         )
-        repository.saveNote(toPersist, items = emptyList())
+        repository.saveNote(toPersist, items = items.toList())
         _note.value = toPersist
         return toPersist.id
     }

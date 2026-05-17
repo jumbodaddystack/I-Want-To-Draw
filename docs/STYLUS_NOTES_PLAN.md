@@ -5,7 +5,7 @@
 ## Status
 
 - **Current phase:** Phase 1 — in progress
-- **Next sub-phase:** [1.3 — Minimum-viable DrawingSurface](./STYLUS_NOTES_PHASE_1.md#sub-phase-13--minimum-viable-drawingsurface-single-tool-no-front-buffer)
+- **Next sub-phase:** [1.4 — Front-buffer rendering, motion prediction, pressure & tilt](./STYLUS_NOTES_PHASE_1.md#sub-phase-14--front-buffer-rendering-motion-prediction-pressure--tilt)
 - **Last verified device pass:** none yet
 
 ## Phase index
@@ -29,7 +29,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 
 - [x] **1.1** Data layer foundation — entities, DAO, `MIGRATION_3_4`, DI, repository ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-11--data-layer-foundation))
 - [x] **1.2** Navigation + empty Notes screens ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-12--navigation--empty-notes-screens))
-- [ ] **1.3** Minimum-viable `DrawingSurface` (single tool, no front buffer) ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-13--minimum-viable-drawingsurface-single-tool-no-front-buffer))
+- [x] **1.3** Minimum-viable `DrawingSurface` (single tool, no front buffer) ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-13--minimum-viable-drawingsurface-single-tool-no-front-buffer))
 - [ ] **1.4** Front-buffer rendering, motion prediction, pressure & tilt ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-14--front-buffer-rendering-motion-prediction-pressure--tilt))
 - [ ] **1.5** Infinite viewport + background layer ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-15--infinite-viewport-pan-pinch-zoom--background-layer))
 - [ ] **1.6** Tool palette + highlighter + pencil + erasers + side-button mapping ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-16--tool-palette--highlighter--pencil--erasers--side-button-mapping))

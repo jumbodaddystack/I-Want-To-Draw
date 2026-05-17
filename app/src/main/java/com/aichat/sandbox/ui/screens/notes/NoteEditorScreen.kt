@@ -10,11 +10,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.aichat.sandbox.ui.components.notes.DrawingSurfaceView
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,13 +66,12 @@ fun NoteEditorScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(MaterialTheme.colorScheme.background)
-                .padding(16.dp),
-            contentAlignment = Alignment.Center
+                .background(Color.White),
         ) {
-            Text(
-                text = "Canvas coming next sub-phase",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            DrawingSurfaceView(
+                items = viewModel.items,
+                onStrokeCommitted = viewModel::addItem,
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
