@@ -4,8 +4,8 @@
 
 ## Status
 
-- **Current phase:** Phase 3 — 3.1 + 3.2 code landed; Phase 1 + Phase 2 device verification still pending
-- **Next sub-phase:** [3.3 — `ACTION_CREATE_NOTE` activity-alias](./STYLUS_NOTES_PHASE_3.md#sub-phase-33--action_create_note-activity-alias-android-14-default-note-taking-app)
+- **Current phase:** Phase 3 — 3.1 + 3.2 + 3.3 code landed; Phase 1 + Phase 2 device verification still pending
+- **Next sub-phase:** [3.4 — Sketch composer attachment sheet + Phase 3 verification](./STYLUS_NOTES_PHASE_3.md#sub-phase-34--sketch-composer-attachment-sheet--phase-3-verification)
 - **Last verified device pass:** none yet (Phase 1 + Phase 2 matrices to be run on hardware)
 
 ## Phase index
@@ -53,7 +53,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 
 - [x] **3.1** Deep-link plumbing + home-screen static shortcut ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-31--deep-link-plumbing--home-screen-static-shortcut))
 - [x] **3.2** Quick Settings tile ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-32--quick-settings-tile))
-- [ ] **3.3** `ACTION_CREATE_NOTE` activity-alias (Android 14 default note-taking app) ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-33--action_create_note-activity-alias-android-14-default-note-taking-app))
+- [x] **3.3** `ACTION_CREATE_NOTE` activity-alias (Android 14 default note-taking app) ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-33--action_create_note-activity-alias-android-14-default-note-taking-app))
 - [ ] **3.4** Sketch composer attachment sheet + verification ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-34--sketch-composer-attachment-sheet--phase-3-verification))
 
 ### Phase 4 — Export & chat integration · [`details`](./STYLUS_NOTES_PHASE_4.md)

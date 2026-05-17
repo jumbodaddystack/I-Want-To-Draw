@@ -40,6 +40,19 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
+        <activity-alias
+            android:name=".CreateNoteAlias"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            tools:targetApi="27">
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_NOTE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+
         <service
             android:name=".service.NotesQuickTileService"
             android:exported="true"
