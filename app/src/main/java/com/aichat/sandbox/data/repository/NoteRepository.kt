@@ -5,7 +5,9 @@ import android.graphics.Bitmap
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.NoteRasterizer
+import com.aichat.sandbox.data.notes.OcrResult
 import com.aichat.sandbox.data.notes.ThumbnailRenderer
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -13,10 +15,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,12 +33,27 @@ import javax.inject.Singleton
 class NoteRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val noteDao: NoteDao,
+    private val ocr: HandwritingOcr,
 ) {
 
-    // Singleton-scoped background scope for fire-and-forget thumbnail work.
-    // The editor ViewModel is cleared the moment the user navigates back, so a
-    // ViewModel-scoped launch would be canceled before the bitmap lands on disk.
+    // Singleton-scoped background scope for fire-and-forget thumbnail and OCR
+    // work. The editor ViewModel is cleared the moment the user navigates
+    // back, so a ViewModel-scoped launch would be canceled before the bitmap
+    // lands on disk (or the OCR text reaches the DB).
     private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    // Per-note debounce for `runOcrAsync` so a save burst (multi-stroke
+    // session ending in a quick title edit) coalesces into one recognizer
+    // call. Recognition itself is fast; the model-download lifecycle is the
+    // expensive bit and ML Kit already memoizes that internally.
+    private val lastOcrAt = ConcurrentHashMap<String, Long>()
+    private val ocrLocks = ConcurrentHashMap<String, Mutex>()
+
+    private val _ocrJobsInFlight = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Set of note ids currently mid-OCR. The editor watches this to decide
+     *  whether to render its "transcribing…" indicator. */
+    val ocrJobsInFlight: StateFlow<Set<String>> = _ocrJobsInFlight.asStateFlow()
 
     fun observeNotes(): Flow<List<Note>> = noteDao.observeNotes()
 
@@ -124,7 +148,76 @@ class NoteRepository @Inject constructor(
         rendered
     }
 
+    /**
+     * Observable lifecycle for the ML Kit Digital Ink model — wired through so
+     * the editor TopAppBar can show "downloading…" on first launch without
+     * pulling [HandwritingOcr] into the UI layer.
+     */
+    val ocrModelState = ocr.state
+
+    /**
+     * Run handwriting OCR over the persisted strokes of [noteId] and write
+     * the recognized text back to `Note.ocrText`. Returns the [OcrResult] so
+     * callers (e.g. the AI service in 2.5) can use the per-word alternates
+     * without re-querying. Safe to call on `Dispatchers.IO`; the model itself
+     * runs off the main thread regardless.
+     *
+     * Failures are non-fatal: an empty result is written through (or left
+     * untouched if the recognizer flat-out errored) so the note still saves
+     * cleanly. The OCR text is intentionally allowed to be empty for
+     * stroke-less / doodle-only notes — vision models don't need it.
+     */
+    suspend fun runOcr(noteId: String): OcrResult = withContext(Dispatchers.Default) {
+        // Per-note mutex prevents two save-driven OCR jobs from racing on the
+        // same row; a global mutex would needlessly serialize background work
+        // across unrelated notes.
+        val lock = ocrLocks.getOrPut(noteId) { Mutex() }
+        lock.withLock {
+            _ocrJobsInFlight.update { it + noteId }
+            try {
+                val items = noteDao.getItems(noteId).filter { it.kind == STROKE_KIND }
+                if (items.isEmpty()) return@withLock OcrResult.EMPTY
+                val result = ocr.recognize(items)
+                // Only write through if we actually got text — clobbering a
+                // good prior transcription with an empty string on a transient
+                // model failure would silently break the non-vision AI
+                // fallback (sub-phase 2.5).
+                if (result.text.isNotEmpty()) {
+                    noteDao.updateOcrText(noteId, result.text, System.currentTimeMillis())
+                }
+                result
+            } finally {
+                _ocrJobsInFlight.update { it - noteId }
+            }
+        }
+    }
+
+    /**
+     * Fire-and-forget OCR with a 2-second per-note debounce. Repeated calls
+     * inside the window are dropped; the next call after the window opens
+     * runs again. Used by `NoteEditorViewModel.save` so the user isn't held on
+     * the save path while ML Kit grinds.
+     *
+     * Returns `true` if a job was scheduled, `false` if the call was
+     * debounced.
+     */
+    fun runOcrAsync(noteId: String): Boolean {
+        val now = System.currentTimeMillis()
+        val last = lastOcrAt[noteId]
+        if (last != null && now - last < OCR_DEBOUNCE_MS) return false
+        lastOcrAt[noteId] = now
+        backgroundScope.launch { runOcr(noteId) }
+        return true
+    }
+
     private fun thumbnailDir(): File = File(context.filesDir, "note-thumbs")
 
     private fun thumbnailFile(noteId: String): File = File(thumbnailDir(), "$noteId.png")
+
+    companion object {
+        private const val STROKE_KIND: String = "stroke"
+
+        /** Per-note debounce window applied by [runOcrAsync]. */
+        const val OCR_DEBOUNCE_MS: Long = 2_000L
+    }
 }

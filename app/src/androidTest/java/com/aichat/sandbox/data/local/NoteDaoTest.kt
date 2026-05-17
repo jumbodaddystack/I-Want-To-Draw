@@ -84,6 +84,25 @@ class NoteDaoTest {
     }
 
     @Test
+    fun updateOcrText_partialUpdate_preservesOtherFields() = runTest {
+        val note = sampleNote().copy(title = "Hand-typed title", backgroundStyle = "dot")
+        dao.saveNote(note, listOf(sampleItem(note.id, zIndex = 0)))
+
+        dao.updateOcrText(note.id, "hello world", updatedAt = 9_999L)
+
+        val updated = dao.getNote(note.id)
+        assertNotNull(updated)
+        assertEquals("hello world", updated?.ocrText)
+        // Untouched fields must round-trip — the partial UPDATE is the whole
+        // point of this DAO method versus a full upsert.
+        assertEquals("Hand-typed title", updated?.title)
+        assertEquals("dot", updated?.backgroundStyle)
+        assertEquals(9_999L, updated?.updatedAt)
+        // Items are unaffected by an OCR-text update.
+        assertEquals(1, dao.getItems(note.id).size)
+    }
+
+    @Test
     fun saveNote_replacesItemSetAtomically() = runTest {
         val note = sampleNote()
         dao.saveNote(

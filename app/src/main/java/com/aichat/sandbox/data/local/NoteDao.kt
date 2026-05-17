@@ -39,6 +39,14 @@ interface NoteDao {
     @Query("DELETE FROM notes WHERE id = :noteId")
     suspend fun deleteNote(noteId: String)
 
+    /**
+     * Partial update for the OCR pipeline (sub-phase 2.4). Bumps `updatedAt`
+     * to invalidate any cached `Flow<List<Note>>` consumers without touching
+     * the bytes the user actually edits (title, items, background style).
+     */
+    @Query("UPDATE notes SET ocrText = :text, updatedAt = :updatedAt WHERE id = :noteId")
+    suspend fun updateOcrText(noteId: String, text: String, updatedAt: Long)
+
     @Transaction
     suspend fun saveNote(note: Note, items: List<NoteItem>) {
         upsertNote(note)

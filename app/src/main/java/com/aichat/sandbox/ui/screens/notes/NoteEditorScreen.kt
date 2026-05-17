@@ -19,8 +19,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
@@ -41,6 +44,7 @@ fun NoteEditorScreen(
     val note by viewModel.note.collectAsState()
     val canUndo by viewModel.canUndo.collectAsState()
     val canRedo by viewModel.canRedo.collectAsState()
+    val ocrIndicator by viewModel.ocrIndicator.collectAsState()
     val selection by viewModel.selection.collectAsState()
     val selectionWorldBounds by viewModel.selectionWorldBounds.collectAsState()
     val selectionMatrix by viewModel.selectionMatrix.collectAsState()
@@ -95,6 +99,7 @@ fun NoteEditorScreen(
                     )
                 },
                 actions = {
+                    OcrIndicatorBadge(state = ocrIndicator)
                     IconButton(onClick = viewModel::undo, enabled = canUndo) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Undo,
@@ -228,3 +233,33 @@ private val backgroundChoices = listOf(
     BackgroundLayer.STYLE_LINE to "Lines",
     BackgroundLayer.STYLE_GRAPH to "Graph",
 )
+
+/**
+ * TopAppBar indicator for the sub-phase 2.4 OCR pipeline. Renders an
+ * indeterminate spinner while the ML Kit model is downloading or recognition
+ * is running for the active note; otherwise occupies no slot at all so the
+ * undo/redo group sits flush against the title.
+ */
+@Composable
+private fun OcrIndicatorBadge(state: OcrIndicator) {
+    if (state == OcrIndicator.Idle) return
+    val description = when (state) {
+        OcrIndicator.Downloading -> "Downloading handwriting model"
+        OcrIndicator.Running -> "Transcribing handwriting"
+        OcrIndicator.Idle -> return
+    }
+    Box(
+        modifier = Modifier
+            .padding(horizontal = 8.dp)
+            .size(20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier
+                .size(16.dp)
+                .semantics { contentDescription = description },
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}

@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.data.notes.HandwritingOcr.OcrModelState
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
@@ -17,8 +18,11 @@ import com.aichat.sandbox.ui.components.notes.TextItemRenderer
 import com.aichat.sandbox.ui.components.notes.ToolPaletteState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -98,6 +102,27 @@ class NoteEditorViewModel @Inject constructor(
 
     private val _textEditTarget = MutableStateFlow<TextEditTarget?>(null)
     val textEditTarget: StateFlow<TextEditTarget?> = _textEditTarget.asStateFlow()
+
+    // ── OCR indicator (sub-phase 2.4) ────────────────────────────────────
+    //
+    // Combines the ML Kit model-download state (shared across the app) with
+    // the in-flight job tracker filtered to *this* note's id. The TopAppBar
+    // renders a small icon while non-Idle; everything else is invisible.
+
+    val ocrIndicator: StateFlow<OcrIndicator> = combine(
+        repository.ocrModelState,
+        repository.ocrJobsInFlight,
+    ) { modelState, inFlight ->
+        when {
+            resolvedNoteId in inFlight -> OcrIndicator.Running
+            modelState is OcrModelState.Downloading -> OcrIndicator.Downloading
+            else -> OcrIndicator.Idle
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = OcrIndicator.Idle,
+    )
 
     /** Live draft body — Compose `BasicTextField` writes this on every keystroke. */
     private var textEditDraftBody: String = ""
@@ -515,6 +540,10 @@ class NoteEditorViewModel @Inject constructor(
         // so the user isn't held on the editor while we rasterize — and so the
         // job survives this ViewModel being cleared on navigate-back.
         repository.renderThumbnailAsync(toPersist.id)
+        // Same survival guarantee for OCR. Internally debounced to a 2s window
+        // (NoteRepository.OCR_DEBOUNCE_MS) so a save burst — e.g. drag-saves,
+        // background-style toggle, back-press — coalesces into one ML Kit call.
+        repository.runOcrAsync(toPersist.id)
         return toPersist.id
     }
 
@@ -568,6 +597,22 @@ class NoteEditorViewModel @Inject constructor(
          */
         private const val TEXT_DEFAULT_COLOR: Int = 0xFF000000.toInt()
     }
+}
+
+/**
+ * Coarse "is OCR doing something right now?" signal for the editor's TopAppBar
+ * indicator (sub-phase 2.4). Combines model-download and per-note in-flight
+ * state into the three shapes the UI actually cares about.
+ */
+enum class OcrIndicator {
+    /** Nothing to show — model is ready and no job is running for this note. */
+    Idle,
+
+    /** ML Kit is fetching the Digital Ink model from Play Services. */
+    Downloading,
+
+    /** Recognition is in progress for the active note. */
+    Running,
 }
 
 /**

@@ -85,6 +85,9 @@ dependencies {
     // The model itself is fetched at runtime via RemoteModelManager, so no
     // ML Kit DEPENDENCIES meta-data tag is required for digital-ink.
     implementation("com.google.mlkit:digital-ink-recognition:18.1.0")
+    // Lets HandwritingOcr `await()` ML Kit's Play Services Tasks from
+    // coroutines (sub-phase 2.3).
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
     // Room
     implementation("androidx.room:room-runtime:2.6.1")
