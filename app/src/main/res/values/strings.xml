@@ -3,4 +3,5 @@
     <string name="app_name">AI Chat Sandbox</string>
     <string name="shortcut_new_note_short">New note</string>
     <string name="shortcut_new_note_long">Start a new handwritten note</string>
+    <string name="tile_new_note_label">New Note</string>
 </resources>

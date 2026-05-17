@@ -2,6 +2,7 @@ package com.aichat.sandbox
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -62,7 +63,14 @@ class MainActivity : ComponentActivity() {
 
     private fun parseNotesDeepLink(intent: Intent?): NotesDeepLink? {
         if (intent == null) return null
-        if (intent.action != Intent.ACTION_VIEW) return null
+        return when (intent.action) {
+            Intent.ACTION_VIEW -> parseViewDeepLink(intent)
+            ACTION_CREATE_NOTE -> parseCreateNoteIntent(intent)
+            else -> null
+        }
+    }
+
+    private fun parseViewDeepLink(intent: Intent): NotesDeepLink? {
         val data: Uri = intent.data ?: return null
         if (data.scheme != "aichat" || data.host != "notes") return null
         if (data.pathSegments.firstOrNull() != "new") return null
@@ -72,7 +80,21 @@ class MainActivity : ComponentActivity() {
         return NotesDeepLink.NewNote(source = source, stylus = stylus)
     }
 
+    private fun parseCreateNoteIntent(intent: Intent): NotesDeepLink {
+        val useStylus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            intent.getBooleanExtra(EXTRA_USE_STYLUS_MODE, true)
+        } else {
+            true
+        }
+        Log.d(TAG, "deep-link source=create_note_intent stylus=$useStylus")
+        // Consume so a configuration change doesn't re-fire the alias path.
+        intent.action = null
+        return NotesDeepLink.NewNote(source = "create_note_intent", stylus = useStylus)
+    }
+
     companion object {
         private const val TAG = "NotesEntry"
+        private const val ACTION_CREATE_NOTE = "android.intent.action.CREATE_NOTE"
+        private const val EXTRA_USE_STYLUS_MODE = "android.intent.extra.USE_STYLUS_MODE"
     }
 }
