@@ -53,6 +53,16 @@ class ChatRepository @Inject constructor(
         chatDao.deleteChatById(chatId)
     }
 
+    /**
+     * Pin / unpin a note for [chatId] (sub-phase 4.4). `null` clears the pin.
+     * Doesn't bump `updatedAt` because pinning is per-chat metadata, not a
+     * conversation edit — leaving the timestamp alone keeps the chat list
+     * sort stable when the user fiddles with pins.
+     */
+    suspend fun setPinnedNote(chatId: String, noteId: String?) {
+        chatDao.updatePinnedNoteId(chatId, noteId)
+    }
+
     suspend fun insertMessage(message: Message) {
         chatDao.insertMessage(message)
     }
@@ -111,12 +121,26 @@ class ChatRepository @Inject constructor(
         chat: Chat,
         messages: List<Message>,
         onRetryAttempt: ((Int) -> Unit)? = null,
-        tools: List<com.aichat.sandbox.data.model.ToolDefinition>? = null
+        tools: List<com.aichat.sandbox.data.model.ToolDefinition>? = null,
+        // Sub-phase 4.4 pinned-note hooks. Wired through verbatim so the
+        // chat layer's vision-vs-OCR decision (made in `ChatViewModel`) is
+        // the only place that needs to know about pinning.
+        extraImageOnLastUserTurn: ByteArray? = null,
+        extraSystemSuffix: String? = null,
     ): Flow<StreamEvent> {
         return kotlinx.coroutines.flow.flow {
             val apiKey = preferencesManager.apiKey.first()
             val baseUrl = preferencesManager.apiBaseUrl.first()
-            apiClient.sendMessageStream(baseUrl, apiKey, chat, messages, onRetryAttempt, tools).collect { emit(it) }
+            apiClient.sendMessageStream(
+                baseUrl = baseUrl,
+                apiKey = apiKey,
+                chat = chat,
+                messages = messages,
+                onRetryAttempt = onRetryAttempt,
+                tools = tools,
+                extraImageOnLastUserTurn = extraImageOnLastUserTurn,
+                extraSystemSuffix = extraSystemSuffix,
+            ).collect { emit(it) }
         }
     }
 }

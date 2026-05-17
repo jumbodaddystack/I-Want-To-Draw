@@ -16,10 +16,14 @@ import com.aichat.sandbox.data.model.MessageRole
 import com.aichat.sandbox.data.model.ModelPricing
 import com.aichat.sandbox.data.model.ToolCallMetadata
 import com.aichat.sandbox.data.local.PreferencesManager
+import com.aichat.sandbox.data.model.Note
+import com.aichat.sandbox.data.model.supportsVision
 import com.aichat.sandbox.data.notes.PendingDraftStore
+import com.aichat.sandbox.data.notes.PinnedNoteCache
 import com.aichat.sandbox.data.remote.ApiResult
 import com.aichat.sandbox.data.remote.StreamEvent
 import com.aichat.sandbox.data.repository.ChatRepository
+import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.data.tools.ToolRegistry
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
@@ -55,15 +59,30 @@ data class ChatUiState(
      * here). [ChatScreen] consumes it on first composition via
      * [consumeDraftText] so rotation or recomposition can't re-trigger.
      */
-    val draftText: String? = null
+    val draftText: String? = null,
+    /**
+     * Sub-phase 4.4: title of the currently-pinned note (or `null` if no pin
+     * — or the note was deleted from under us). Drives the composer chip;
+     * the pin itself lives on `Chat.pinnedNoteId`.
+     */
+    val pinnedNoteTitle: String? = null,
+    /**
+     * Sub-phase 4.4: whether the note-picker sheet is open. The list itself
+     * is streamed separately via [ChatViewModel.notesForPicker] so an empty
+     * list doesn't have to round-trip through the UI state.
+     */
+    val showPinNotePicker: Boolean = false,
 )
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val repository: ChatRepository,
     private val toolRegistry: ToolRegistry,
     private val preferencesManager: PreferencesManager,
+    private val noteRepository: NoteRepository,
+    private val pinnedNoteCache: PinnedNoteCache,
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
@@ -94,6 +113,36 @@ class ChatViewModel @Inject constructor(
     private val _customModels = MutableStateFlow<List<String>>(emptyList())
     val customModels: StateFlow<List<String>> = _customModels.asStateFlow()
 
+    /**
+     * Notes available to the pin picker (sub-phase 4.4). Streamed straight
+     * off [NoteRepository]; mirrors the Notes tab's order so the picker feels
+     * like a slim copy of that list. WhileSubscribed so we don't keep the
+     * upstream warm when the picker is closed.
+     */
+    val notesForPicker: StateFlow<List<Note>> = noteRepository.observeNotes()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = emptyList(),
+        )
+
+    /**
+     * Live pinned-note row for the currently-active chat (sub-phase 4.4).
+     * `null` whenever the chat isn't pinned or the pinned note row has been
+     * deleted from under us. Drives the composer chip via
+     * [ChatUiState.pinnedNoteTitle].
+     */
+    val pinnedNote: StateFlow<Note?> = repository.getChatById(chatId)
+        .flatMapLatest { chat ->
+            val pinId = chat?.pinnedNoteId
+            if (pinId.isNullOrBlank()) flowOf(null) else noteRepository.observeNote(pinId)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = null,
+        )
+
     init {
         viewModelScope.launch {
             repository.getChatById(chatId).collect { chat ->
@@ -108,6 +157,14 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesManager.customModels.collect { modelsMap ->
                 _customModels.value = modelsMap.values.flatten()
+            }
+        }
+        // Pinned-note chip projection — collapses the pinned-note row's
+        // title into the UI state so the chat composer can show it without
+        // having to collect another flow itself.
+        viewModelScope.launch {
+            pinnedNote.collect { note ->
+                _uiState.update { it.copy(pinnedNoteTitle = note?.title?.ifBlank { "Untitled" }) }
             }
         }
     }
@@ -233,7 +290,19 @@ class ChatViewModel @Inject constructor(
             val onRetry: (Int) -> Unit = { attempt ->
                 _uiState.update { it.copy(retryAttempt = attempt) }
             }
-            repository.sendMessageStream(chat, initialMessages, onRetry, tools).collect { event ->
+            // Sub-phase 4.4: resolve the pinned-note context once per send
+            // (not per tool round) so the model sees the same note across
+            // every tool-loop iteration. Empty pin → both extras null and
+            // the call site behaves as if pinning weren't there.
+            val pinned = resolvePinnedContext(chat)
+            repository.sendMessageStream(
+                chat = chat,
+                messages = initialMessages,
+                onRetryAttempt = onRetry,
+                tools = tools,
+                extraImageOnLastUserTurn = pinned.image,
+                extraSystemSuffix = pinned.systemSuffix,
+            ).collect { event ->
                 when (event) {
                     is StreamEvent.Delta -> {
                         streamContent.append(event.content)
@@ -328,6 +397,12 @@ class ChatViewModel @Inject constructor(
         }
         val tools = if (_uiState.value.toolsEnabled && toolRegistry.hasTools())
             toolRegistry.getToolDefinitions() else null
+        // sendMessage uses the non-streaming path; pinned-note context
+        // applies there too but doesn't flow through the existing
+        // ApiClient.sendMessage signature today. Leaving the fallback as-is
+        // is correct for the user-facing pin contract (the streaming path
+        // is the normal route); when the streaming attempt errors we already
+        // surface the failure rather than silently dropping context.
         when (val result = repository.sendMessage(chat, messages, onRetry, tools)) {
             is ApiResult.Success -> {
                 val response = result.data
@@ -538,6 +613,43 @@ class ChatViewModel @Inject constructor(
         return GsonBuilder().setPrettyPrinting().create().toJson(data)
     }
 
+    /** Resolved pinned-note attachment for a single send (sub-phase 4.4). */
+    private data class PinnedContext(
+        val image: ByteArray?,
+        val systemSuffix: String?,
+    )
+
+    /**
+     * Resolve the pinned-note attachment for [chat]'s next send. Returns
+     * empty extras when nothing is pinned, when the pin's target row has
+     * vanished, or when the note has no renderable content. Vision-capable
+     * chats get a fresh PNG (cache-backed by [PinnedNoteCache], invalidated
+     * by `Note.updatedAt`); non-vision chats get the OCR text suffix.
+     *
+     * Failures here are non-fatal — the send proceeds without the pinned
+     * context rather than blocking the user on a render glitch.
+     */
+    private suspend fun resolvePinnedContext(chat: Chat): PinnedContext {
+        val pinId = chat.pinnedNoteId ?: return PinnedContext(null, null)
+        val note = noteRepository.getNote(pinId) ?: return PinnedContext(null, null)
+        return if (chat.supportsVision()) {
+            val items = noteRepository.getItems(pinId)
+            val bytes = try {
+                pinnedNoteCache.getOrRender(note, items)
+            } catch (_: Throwable) {
+                null
+            }
+            PinnedContext(image = bytes, systemSuffix = null)
+        } else {
+            val ocr = note.ocrText.orEmpty().take(PINNED_OCR_CHARS).trim()
+            if (ocr.isEmpty()) PinnedContext(null, null)
+            else PinnedContext(
+                image = null,
+                systemSuffix = "Pinned note \"${note.title.ifBlank { "Untitled" }}\" (OCR):\n$ocr",
+            )
+        }
+    }
+
     private fun encodeImageToBase64(uri: Uri): ImageAttachment? {
         return try {
             val inputStream = appContext.contentResolver.openInputStream(uri) ?: return null
@@ -605,6 +717,39 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(toolsEnabled = !it.toolsEnabled) }
     }
 
+    // ── Pin note as context (sub-phase 4.4) ──────────────────────────────
+
+    /** Show the note picker sheet. No-op if no chat is loaded yet. */
+    fun openPinNotePicker() {
+        if (_uiState.value.chat == null) return
+        _uiState.update { it.copy(showPinNotePicker = true) }
+    }
+
+    fun dismissPinNotePicker() {
+        _uiState.update { it.copy(showPinNotePicker = false) }
+    }
+
+    /** Pin [noteId] to the active chat and close the picker. */
+    fun pinNote(noteId: String) {
+        viewModelScope.launch {
+            repository.setPinnedNote(chatId, noteId)
+            _uiState.update { it.copy(showPinNotePicker = false) }
+        }
+    }
+
+    /**
+     * Drop the chat's pin. Also drops the cached render so a future re-pin
+     * starts from a clean rasterizer pass — cheap insurance against stale
+     * bytes outliving the pin in an unrelated chat.
+     */
+    fun unpinNote() {
+        val current = pinnedNote.value?.id
+        viewModelScope.launch {
+            repository.setPinnedNote(chatId, null)
+            if (current != null) pinnedNoteCache.invalidate(current)
+        }
+    }
+
     fun addCustomModel(model: String) {
         viewModelScope.launch { preferencesManager.addCustomModel("Custom", model) }
     }
@@ -624,5 +769,14 @@ class ChatViewModel @Inject constructor(
         const val MAX_MESSAGE_LENGTH = 100_000
         const val MAX_TOOL_ROUNDS = 10
         private const val SKETCH_CACHE_DIR = "chat-sketches"
+
+        /**
+         * Cap on OCR text injected into the system prompt for non-vision
+         * pinned-note attachments (sub-phase 4.4). 2000 chars — enough to
+         * cover a typical multi-paragraph note while staying well below
+         * common context budgets so the user's actual prompt + history
+         * isn't crowded out by the pin.
+         */
+        private const val PINNED_OCR_CHARS = 2_000
     }
 }

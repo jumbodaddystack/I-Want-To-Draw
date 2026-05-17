@@ -51,6 +51,7 @@ import com.aichat.sandbox.ui.components.SettingsSlider
 import com.aichat.sandbox.ui.components.chat.SketchAttachmentSheet
 import com.aichat.sandbox.ui.components.chat.SketchAttachmentState
 import com.aichat.sandbox.data.model.MessageRole
+import com.aichat.sandbox.ui.screens.notes.NotePickerSheet
 import com.aichat.sandbox.ui.theme.AssistantBubble
 import com.aichat.sandbox.ui.theme.UserBubble
 import com.google.gson.Gson
@@ -101,9 +102,12 @@ fun ChatScreen(
         // Top bar
         ChatTopBar(
             title = chat?.model ?: "Loading...",
+            pinnedNoteTitle = uiState.pinnedNoteTitle,
             onBack = onNavigateBack,
             onInfoClick = { viewModel.toggleSystemMessageDialog() },
-            onMenuClick = { viewModel.toggleSettingsPanel() }
+            onMenuClick = { viewModel.toggleSettingsPanel() },
+            onPinNoteClick = { viewModel.openPinNotePicker() },
+            onUnpinNoteClick = { viewModel.unpinNote() },
         )
 
         // Plugin notice
@@ -258,6 +262,17 @@ fun ChatScreen(
             }
         }
 
+        // Sub-phase 4.4: pinned-note chip directly above the composer so
+        // the user can see at a glance what context is riding along, and
+        // unpin in one tap. Sits between the message list and the input
+        // bar so it doesn't shift the scroll position when it appears.
+        uiState.pinnedNoteTitle?.let { title ->
+            PinnedNoteChip(
+                title = title,
+                onUnpin = { viewModel.unpinNote() },
+            )
+        }
+
         // Input bar
         ChatInputBar(
             isLoading = uiState.isLoading,
@@ -330,16 +345,79 @@ fun ChatScreen(
         },
         onDismiss = { sketchState.close() },
     )
+
+    // Sub-phase 4.4: pin-a-note picker. Wired to the same notes list the
+    // Notes tab uses; tapping a row pins and dismisses.
+    if (uiState.showPinNotePicker) {
+        val notes by viewModel.notesForPicker.collectAsState()
+        NotePickerSheet(
+            notes = notes,
+            onPick = { noteId -> viewModel.pinNote(noteId) },
+            onDismiss = { viewModel.dismissPinNotePicker() },
+        )
+    }
+}
+
+/**
+ * Sub-phase 4.4 chat-side affordance: shows the pinned note's title with a
+ * close action that unpins. Visually distinct from the photo attachment
+ * strip — this isn't an attachment the user picked, it's context that rides
+ * every send until removed.
+ */
+@Composable
+private fun PinnedNoteChip(title: String, onUnpin: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.PushPin,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Pinned: $title",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+            )
+            IconButton(
+                onClick = onUnpin,
+                modifier = Modifier.size(28.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Unpin",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatTopBar(
     title: String,
+    pinnedNoteTitle: String?,
     onBack: () -> Unit,
     onInfoClick: () -> Unit,
-    onMenuClick: () -> Unit
+    onMenuClick: () -> Unit,
+    onPinNoteClick: () -> Unit,
+    onUnpinNoteClick: () -> Unit,
 ) {
+    var pinMenuExpanded by remember { mutableStateOf(false) }
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onBack) {
@@ -382,6 +460,43 @@ private fun ChatTopBar(
                     contentDescription = "System message",
                     tint = MaterialTheme.colorScheme.onSurface
                 )
+            }
+            // Sub-phase 4.4: pin / unpin a note as ambient context for this
+            // chat. Wrapped in a Box so the DropdownMenu anchors under the
+            // button; tap reveals "Pin a note" when unpinned, or "Unpin
+            // {title}" when something's already pinned.
+            Box {
+                IconButton(onClick = { pinMenuExpanded = true }) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = if (pinnedNoteTitle != null) "Pinned note"
+                            else "Pin a note",
+                        tint = if (pinnedNoteTitle != null) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                DropdownMenu(
+                    expanded = pinMenuExpanded,
+                    onDismissRequest = { pinMenuExpanded = false },
+                ) {
+                    if (pinnedNoteTitle != null) {
+                        DropdownMenuItem(
+                            text = { Text("Unpin “$pinnedNoteTitle”") },
+                            onClick = {
+                                pinMenuExpanded = false
+                                onUnpinNoteClick()
+                            },
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text("Pin a note") },
+                            onClick = {
+                                pinMenuExpanded = false
+                                onPinNoteClick()
+                            },
+                        )
+                    }
+                }
             }
             IconButton(onClick = onMenuClick) {
                 Icon(

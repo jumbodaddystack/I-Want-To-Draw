@@ -28,6 +28,14 @@ interface ChatDao {
     @Query("DELETE FROM chats WHERE id = :chatId")
     suspend fun deleteChatById(chatId: String)
 
+    /**
+     * Pin / unpin a note for [chatId] (sub-phase 4.4). `null` clears the pin.
+     * Touches only `pinnedNoteId` so the rest of the chat row is untouched —
+     * pinning is metadata, not an edit to the conversation itself.
+     */
+    @Query("UPDATE chats SET pinnedNoteId = :noteId WHERE id = :chatId")
+    suspend fun updatePinnedNoteId(chatId: String, noteId: String?)
+
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY createdAt ASC")
     fun getMessagesForChat(chatId: String): Flow<List<Message>>
 

@@ -4,9 +4,9 @@
 
 ## Status
 
-- **Current phase:** Phase 4 — 4.1 + 4.2 + 4.3 code landed; Phase 1 + Phase 2 + Phase 3 device verification still pending
-- **Next sub-phase:** [4.4 — Pin note as context + verification](./STYLUS_NOTES_PHASE_4.md#sub-phase-44--chat-side-pin-note-as-context-affordance--phase-4-verification)
-- **Last verified device pass:** none yet (Phase 1 + Phase 2 + Phase 3 matrices to be run on hardware)
+- **Current phase:** Phase 4 — 4.1 + 4.2 + 4.3 + 4.4 code landed; Phase 1 + Phase 2 + Phase 3 + Phase 4 device verification still pending
+- **Next sub-phase:** none — code complete pending hardware verification matrices for Phases 1–4
+- **Last verified device pass:** none yet (Phase 1 + Phase 2 + Phase 3 + Phase 4 matrices to be run on hardware)
 
 ## Phase index
 
@@ -61,7 +61,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 - [x] **4.1** `NoteExporter` + PNG share + `FileProvider` bootstrap ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-41--noteexporter-core--png-share-target))
 - [x] **4.2** PDF export with fit-page / tile dialog ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-42--pdf-export-with-fit-page--tile-to-pages-dialog))
 - [x] **4.3** "Send to chat" picker ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-43--send-to-chat-picker))
-- [ ] **4.4** Pin note as context + verification ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-44--chat-side-pin-note-as-context-affordance--phase-4-verification))
+- [~] **4.4** Pin note as context + verification ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-44--chat-side-pin-note-as-context-affordance--phase-4-verification)) — code landed (`Chat.pinnedNoteId` + `MIGRATION_4_5`, `PinnedNoteCache`, `NotePickerSheet`, chat-side pin/unpin overflow + composer chip, vision/OCR-branched per-send injection through `ApiClient.sendMessageStream`'s new `extraImageOnLastUserTurn` / `extraSystemSuffix` hooks); 12-item Phase 4 device matrix still pending on real S25 Ultra hardware
 
 ---
 

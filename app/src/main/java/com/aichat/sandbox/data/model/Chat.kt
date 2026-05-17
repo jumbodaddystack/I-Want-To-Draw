@@ -18,5 +18,10 @@ data class Chat(
     val totalTokens: Int = 0,
     val totalCost: Double = 0.0,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    // Sub-phase 4.4: a single note can be pinned to a chat as context. On every
+    // send, the chat layer re-renders the pinned note's current state and
+    // attaches it transparently to the API call (image for vision models, OCR
+    // text otherwise). `null` means no pin.
+    val pinnedNoteId: String? = null,
 )
