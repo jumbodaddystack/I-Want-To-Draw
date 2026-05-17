@@ -1,5 +1,6 @@
 package com.aichat.sandbox.ui.screens.notes
 
+import android.net.Uri
 import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -15,6 +16,7 @@ import com.aichat.sandbox.data.notes.AskRequest
 import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.HandwritingOcr.OcrModelState
 import com.aichat.sandbox.data.notes.NoteAiService
+import com.aichat.sandbox.data.notes.NoteExporter
 import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.ui.components.notes.HitTest
@@ -54,6 +56,7 @@ class NoteEditorViewModel @Inject constructor(
     private val handwritingOcr: HandwritingOcr,
     private val preferencesManager: PreferencesManager,
     private val chatRepository: ChatRepository,
+    private val noteExporter: NoteExporter,
 ) : ViewModel() {
 
     private val routeArg: String = savedStateHandle["noteId"] ?: NOTE_ID_NEW
@@ -1021,6 +1024,21 @@ class NoteEditorViewModel @Inject constructor(
      * Persist the current in-memory note. Returns the resolved note id so callers on
      * the `note/new` route can navigate to the canonical `note/<id>` route if needed.
      */
+    /**
+     * Persist the current note and export it as a PNG (sub-phase 4.1).
+     *
+     * Save runs first so the receiving app sees the user's most recent
+     * strokes — re-rendering a stale in-memory snapshot would surprise the
+     * user who just clicked Share. The returned URI is granted via
+     * [androidx.core.content.FileProvider] and must be paired with
+     * `Intent.FLAG_GRANT_READ_URI_PERMISSION` by the caller.
+     */
+    suspend fun sharePng(): Uri {
+        commitTextEdit()
+        save()
+        return noteExporter.exportPng(note = _note.value, items = items.toList())
+    }
+
     suspend fun save(): String {
         val current = _note.value
         val sanitizedTitle = current.title.ifBlank { DEFAULT_TITLE }

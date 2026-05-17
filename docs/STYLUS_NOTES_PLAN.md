@@ -4,8 +4,8 @@
 
 ## Status
 
-- **Current phase:** Phase 3 — 3.1 + 3.2 + 3.3 + 3.4 code landed; Phase 1 + Phase 2 + Phase 3 device verification still pending
-- **Next sub-phase:** [4.1 — `NoteExporter` + PNG share + `FileProvider` bootstrap](./STYLUS_NOTES_PHASE_4.md#sub-phase-41--noteexporter-core--png-share-target)
+- **Current phase:** Phase 4 — 4.1 code landed; Phase 1 + Phase 2 + Phase 3 device verification still pending
+- **Next sub-phase:** [4.2 — PDF export with fit-page / tile dialog](./STYLUS_NOTES_PHASE_4.md#sub-phase-42--pdf-export-with-fit-page--tile-to-pages-dialog)
 - **Last verified device pass:** none yet (Phase 1 + Phase 2 + Phase 3 matrices to be run on hardware)
 
 ## Phase index
@@ -58,7 +58,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 
 ### Phase 4 — Export & chat integration · [`details`](./STYLUS_NOTES_PHASE_4.md)
 
-- [ ] **4.1** `NoteExporter` + PNG share + `FileProvider` bootstrap ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-41--noteexporter-core--png-share-target))
+- [x] **4.1** `NoteExporter` + PNG share + `FileProvider` bootstrap ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-41--noteexporter-core--png-share-target))
 - [ ] **4.2** PDF export with fit-page / tile dialog ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-42--pdf-export-with-fit-page--tile-to-pages-dialog))
 - [ ] **4.3** "Send to chat" picker ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-43--send-to-chat-picker))
 - [ ] **4.4** Pin note as context + verification ([details](./STYLUS_NOTES_PHASE_4.md#sub-phase-44--chat-side-pin-note-as-context-affordance--phase-4-verification))
