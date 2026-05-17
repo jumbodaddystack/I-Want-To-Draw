@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
@@ -97,6 +99,24 @@ class DrawingSurface(context: Context) : View(context) {
     /** Strokes hit by the current eraser swipe; filtered out of the scene rasterization. */
     private val pendingErase: HashSet<String> = HashSet()
 
+    /** Selected item ids (driven by the editor's selection state). Excluded from the scene bitmap. */
+    private var selectedIds: Set<String> = emptySet()
+
+    /**
+     * Live-transform matrix applied to selected items at render time (sub-phase 1.8).
+     * Identity = "selection sits at its baked-in position"; non-identity = a
+     * Compose-side handle drag is in progress. Buffer layout matches
+     * [StrokeTransform.SIZE].
+     */
+    private var selectionMatrix: FloatArray = StrokeTransform.IDENTITY
+    private val selectionAndroidMatrix: Matrix = Matrix()
+
+    /** Lasso loop points (`[x0, y0, x1, y1, …]` world coords) — only when [strokeTool] == LASSO. */
+    private var lassoPoints: FloatArray =
+        FloatArray(INITIAL_SAMPLE_CAPACITY * LassoController.FLOATS_PER_VERTEX)
+    private var lassoCount: Int = 0
+    private val lassoPath: Path = Path()
+
     /** Decoded sample cache keyed by item id — re-decoding every sample during an erase is wasteful. */
     private val decodedCache: HashMap<String, DecodedStroke> = HashMap()
 
@@ -120,6 +140,14 @@ class DrawingSurface(context: Context) : View(context) {
         strokeWidth = 1.5f
         isAntiAlias = true
     }
+    private val lassoPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        color = LASSO_COLOR
+        strokeWidth = LASSO_STROKE_WIDTH_PX
+        isAntiAlias = true
+        // Dash on screen-space — drawn outside the viewport transform.
+        pathEffect = DashPathEffect(floatArrayOf(LASSO_DASH_PX, LASSO_GAP_PX), 0f)
+    }
     private val scratchPath = Path()
 
     private var motionPredictor: MotionEventPredictor? = null
@@ -129,6 +157,21 @@ class DrawingSurface(context: Context) : View(context) {
 
     /** Invoked at the end of an eraser swipe with all matched item ids. */
     var eraseListener: ((List<String>) -> Unit)? = null
+
+    /**
+     * Invoked when the lasso loop closes (ACTION_UP). The buffer is freshly
+     * allocated, sized to `vertexCount * 2`, and in world coordinates. The
+     * receiver (editor VM) runs hit-test and sets the selection.
+     */
+    var lassoListener: ((polygonWorld: FloatArray) -> Unit)? = null
+
+    /**
+     * Fired on stylus ACTION_DOWN that is *not* on a Compose-side selection
+     * handle (which would intercept the event before us). The receiver clears
+     * any active selection; lasso strokes re-establish a fresh selection on
+     * commit.
+     */
+    var selectionShouldClearListener: (() -> Unit)? = null
 
     // Viewport gesture state — only used for finger input (stylus has its own branch).
     private enum class GestureMode { NONE, PAN, PINCH }
@@ -184,6 +227,22 @@ class DrawingSurface(context: Context) : View(context) {
         invalidate()
     }
 
+    /**
+     * Update the active selection (sub-phase 1.8). Selected items are
+     * excluded from the scene bitmap and re-rendered each frame with
+     * [matrix] applied so a Compose-side transform gesture is reflected
+     * live. Pass [StrokeTransform.IDENTITY] when no transform is in flight.
+     */
+    fun setSelection(ids: Set<String>, matrix: FloatArray) {
+        val changedIds = ids != selectedIds
+        val changedMatrix = !matrix.contentEquals(selectionMatrix)
+        if (!changedIds && !changedMatrix) return
+        selectedIds = ids
+        selectionMatrix = matrix.copyOf()
+        if (changedIds) sceneDirty = true
+        invalidate()
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         if (w <= 0 || h <= 0) return
         val previous = sceneBitmap
@@ -207,6 +266,12 @@ class DrawingSurface(context: Context) : View(context) {
             sceneDirty = false
         }
         sceneBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+
+        drawSelectedItems(canvas)
+
+        if (strokeTool.isLasso && lassoCount > 0) {
+            drawLassoLoop(canvas)
+        }
 
         if (strokeTool.isInk && (liveSampleCount > 0 || predictedSampleCount > 0)) {
             canvas.save()
@@ -297,16 +362,37 @@ class DrawingSurface(context: Context) : View(context) {
                 strokeColor = inkColor
                 strokeWidthPx = baseWidthPx
                 liveSampleCount = 0
+                lassoCount = 0
                 clearPredicted()
                 hoverVisible = false
                 pendingErase.clear()
-                appendStylusSample(event, idx)
-                motionPredictor?.record(event)
-                if (strokeTool.isEraser) eraseAtLastSample()
+                // Any stylus stroke that lands here (Compose overlay didn't
+                // intercept it) means the user is starting fresh; clear any
+                // active selection so a stray ink stroke doesn't get baked
+                // into a stale transform.
+                if (selectedIds.isNotEmpty()) selectionShouldClearListener?.invoke()
+                if (strokeTool.isLasso) {
+                    appendLassoVertex(event, idx)
+                } else {
+                    appendStylusSample(event, idx)
+                    motionPredictor?.record(event)
+                    if (strokeTool.isEraser) eraseAtLastSample()
+                }
                 invalidate()
                 true
             }
             MotionEvent.ACTION_MOVE -> {
+                if (strokeTool.isLasso) {
+                    for (h in 0 until event.historySize) {
+                        appendLassoWorldPoint(
+                            viewport.screenToWorldX(event.getHistoricalX(idx, h)),
+                            viewport.screenToWorldY(event.getHistoricalY(idx, h)),
+                        )
+                    }
+                    appendLassoVertex(event, idx)
+                    invalidate()
+                    return true
+                }
                 motionPredictor?.record(event)
                 // S-Pen samples faster than the frame rate; iterating history
                 // avoids dropped samples and jagged segments.
@@ -327,11 +413,16 @@ class DrawingSurface(context: Context) : View(context) {
             }
             MotionEvent.ACTION_UP -> {
                 clearPredicted()
-                if (strokeTool.isEraser) commitEraseStroke() else commitLiveStroke()
+                when {
+                    strokeTool.isLasso -> commitLassoLoop()
+                    strokeTool.isEraser -> commitEraseStroke()
+                    else -> commitLiveStroke()
+                }
                 true
             }
             MotionEvent.ACTION_CANCEL -> {
                 liveSampleCount = 0
+                lassoCount = 0
                 clearPredicted()
                 if (strokeTool.isEraser && pendingErase.isNotEmpty()) {
                     // Undo the visual erase — items return to the scene.
@@ -343,6 +434,44 @@ class DrawingSurface(context: Context) : View(context) {
             }
             else -> false
         }
+    }
+
+    private fun appendLassoVertex(event: MotionEvent, idx: Int) {
+        appendLassoWorldPoint(
+            viewport.screenToWorldX(event.getX(idx)),
+            viewport.screenToWorldY(event.getY(idx)),
+        )
+    }
+
+    private fun appendLassoWorldPoint(x: Float, y: Float) {
+        ensureLassoCapacity(lassoCount + 1)
+        val base = lassoCount * LassoController.FLOATS_PER_VERTEX
+        lassoPoints[base] = x
+        lassoPoints[base + 1] = y
+        lassoCount++
+    }
+
+    private fun ensureLassoCapacity(vertices: Int) {
+        val needed = vertices * LassoController.FLOATS_PER_VERTEX
+        if (needed <= lassoPoints.size) return
+        var newSize = lassoPoints.size
+        while (newSize < needed) newSize *= 2
+        lassoPoints = lassoPoints.copyOf(newSize)
+    }
+
+    private fun commitLassoLoop() {
+        val count = lassoCount
+        if (count < MIN_LASSO_VERTICES) {
+            lassoCount = 0
+            invalidate()
+            return
+        }
+        // Copy out exactly the populated range; the receiver retains the buffer.
+        val polygon = FloatArray(count * LassoController.FLOATS_PER_VERTEX)
+        System.arraycopy(lassoPoints, 0, polygon, 0, polygon.size)
+        lassoCount = 0
+        invalidate()
+        lassoListener?.invoke(polygon)
     }
 
     /**
@@ -597,6 +726,9 @@ class DrawingSurface(context: Context) : View(context) {
         for (item in committedItems) {
             if (item.kind != STROKE_KIND) continue
             if (item.id in pendingErase) continue
+            // Selected items are drawn live in onDraw so a Compose-side
+            // transform gesture renders without re-rasterizing every frame.
+            if (item.id in selectedIds) continue
             val decoded = decode(item) ?: continue
             StrokeRenderer.configureToolPaint(replayPaint, item.tool, item.colorArgb)
             StrokeRenderer.drawStrokePath(
@@ -605,6 +737,57 @@ class DrawingSurface(context: Context) : View(context) {
             )
         }
         canvas.restore()
+    }
+
+    /**
+     * Draw selected items on top of the scene bitmap with the live selection
+     * matrix applied (world-space). When no transform is active the matrix is
+     * identity and the items appear at their committed positions, just
+     * routed through the live render path so the selection dashed overlay
+     * (rendered separately by Compose) lines up.
+     */
+    private fun drawSelectedItems(canvas: Canvas) {
+        if (selectedIds.isEmpty()) return
+        canvas.save()
+        canvas.translate(viewport.offsetX, viewport.offsetY)
+        canvas.scale(viewport.scale, viewport.scale)
+        val applyMatrix = !StrokeTransform.isIdentity(selectionMatrix)
+        if (applyMatrix) {
+            selectionAndroidMatrix.setValues(selectionMatrix)
+            canvas.concat(selectionAndroidMatrix)
+        }
+        for (item in committedItems) {
+            if (item.kind != STROKE_KIND) continue
+            if (item.id !in selectedIds) continue
+            if (item.id in pendingErase) continue
+            val decoded = decode(item) ?: continue
+            StrokeRenderer.configureToolPaint(replayPaint, item.tool, item.colorArgb)
+            StrokeRenderer.drawStrokePath(
+                canvas, replayPaint, decoded.samples, decoded.count,
+                item.baseWidthPx, item.tool, scratchPath,
+            )
+        }
+        canvas.restore()
+    }
+
+    /** Draws the live lasso loop as a dashed line in screen space. */
+    private fun drawLassoLoop(canvas: Canvas) {
+        if (lassoCount < 2) return
+        lassoPath.reset()
+        val scale = viewport.scale
+        val ox = viewport.offsetX
+        val oy = viewport.offsetY
+        lassoPath.moveTo(
+            lassoPoints[0] * scale + ox,
+            lassoPoints[1] * scale + oy,
+        )
+        for (i in 1 until lassoCount) {
+            lassoPath.lineTo(
+                lassoPoints[i * LassoController.FLOATS_PER_VERTEX] * scale + ox,
+                lassoPoints[i * LassoController.FLOATS_PER_VERTEX + 1] * scale + oy,
+            )
+        }
+        canvas.drawPath(lassoPath, lassoPaint)
     }
 
     private data class DecodedStroke(
@@ -629,6 +812,12 @@ class DrawingSurface(context: Context) : View(context) {
         // Outlined-circle preview for the eraser; matches the hit radius.
         private const val ERASER_CURSOR_COLOR = 0x88FF3030.toInt()
         private const val MIN_DIV_SCALE = 0.01f
+        // A lasso under three vertices can't enclose anything — drop the gesture silently.
+        private const val MIN_LASSO_VERTICES = 3
+        private const val LASSO_STROKE_WIDTH_PX = 2f
+        private const val LASSO_DASH_PX = 12f
+        private const val LASSO_GAP_PX = 8f
+        private const val LASSO_COLOR = 0xCC1E88E5.toInt()
     }
 }
 
@@ -637,12 +826,20 @@ fun DrawingSurfaceView(
     items: List<NoteItem>,
     backgroundStyle: String,
     paletteState: ToolPaletteState,
+    selectedIds: Set<String>,
+    selectionMatrix: FloatArray,
     onStrokeCommitted: (NoteItem) -> Unit,
     onItemsErased: (List<String>) -> Unit,
+    onLassoCompleted: (FloatArray) -> Unit,
+    onSelectionShouldClear: () -> Unit,
     modifier: Modifier = Modifier,
+    onViewportReady: (ViewportController) -> Unit = {},
 ) {
     val currentOnCommit by rememberUpdatedState(onStrokeCommitted)
     val currentOnErase by rememberUpdatedState(onItemsErased)
+    val currentOnLasso by rememberUpdatedState(onLassoCompleted)
+    val currentOnSelectionClear by rememberUpdatedState(onSelectionShouldClear)
+    val currentOnViewportReady by rememberUpdatedState(onViewportReady)
     // Reading items.size during composition makes this composable observe the
     // SnapshotStateList: erases + future undo/redo refresh the surface
     // without us having to thread a dedicated "version" signal through.
@@ -654,11 +851,16 @@ fun DrawingSurfaceView(
             DrawingSurface(ctx).apply {
                 strokeListener = { item -> currentOnCommit(item) }
                 eraseListener = { ids -> currentOnErase(ids) }
+                lassoListener = { polygon -> currentOnLasso(polygon) }
+                selectionShouldClearListener = { currentOnSelectionClear() }
+                currentOnViewportReady(viewport)
             }
         },
         update = { view ->
             view.strokeListener = { item -> currentOnCommit(item) }
             view.eraseListener = { ids -> currentOnErase(ids) }
+            view.lassoListener = { polygon -> currentOnLasso(polygon) }
+            view.selectionShouldClearListener = { currentOnSelectionClear() }
             view.backgroundStyle = backgroundStyle
             view.setToolConfig(
                 tool = paletteState.selected,
@@ -666,6 +868,7 @@ fun DrawingSurfaceView(
                 widthPx = paletteState.activeInkWidth(),
                 areaEraserRadiusPx = paletteState.areaEraserRadiusPx,
             )
+            view.setSelection(selectedIds, selectionMatrix)
             // Re-rasterize whenever the authoritative item list changes
             // (initial load, commit, erase). [itemsSignature] is read here so
             // Compose treats the lambda as dependent on it.

@@ -1,6 +1,10 @@
 package com.aichat.sandbox.ui.screens.notes
 
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.ui.components.notes.StrokeCodec
+import com.aichat.sandbox.ui.components.notes.StrokeTransform
+
+private const val STROKE_KIND = "stroke"
 
 /**
  * Reversible canvas mutations recorded in the editor's undo / redo stack
@@ -9,8 +13,9 @@ import com.aichat.sandbox.data.model.NoteItem
  * Each variant carries the full data needed to invert itself — for example
  * [RemoveItems] holds the complete [NoteItem]s rather than their ids so an
  * undo can re-insert them byte-identical, preserving stroke payload, color,
- * width, and z-index. Later sub-phases append `TransformItems` (1.8) and
- * `UpdateText` (1.9) without changing this interface.
+ * width, and z-index. [TransformItems] (1.8) holds the affine that was baked
+ * so inversion just multiplies in the inverse. `UpdateText` follows in 1.9
+ * without changing this interface.
  *
  * Actions operate on a plain [MutableList] so the logic is testable on the
  * JVM; the editor's `SnapshotStateList<NoteItem>` satisfies that contract.
@@ -37,5 +42,48 @@ sealed interface EditorAction {
         }
 
         override fun invert(): EditorAction = AddItems(items)
+    }
+
+    /**
+     * Bakes an affine [matrix] into every item in [ids] by transforming its
+     * decoded stroke samples and re-encoding the payload. Inversion uses
+     * the matrix inverse — round-trip is exact for any non-singular affine.
+     *
+     * Text items are passed through unchanged in this sub-phase; sub-phase
+     * 1.9 will revisit when text items participate in transforms.
+     */
+    data class TransformItems(val ids: List<String>, val matrix: FloatArray) : EditorAction {
+
+        override fun applyTo(items: MutableList<NoteItem>) {
+            if (ids.isEmpty() || StrokeTransform.isIdentity(matrix)) return
+            val target = ids.toHashSet()
+            for (i in items.indices) {
+                val item = items[i]
+                if (item.id !in target) continue
+                items[i] = transformItem(item, matrix)
+            }
+        }
+
+        override fun invert(): EditorAction = TransformItems(ids, StrokeTransform.invert(matrix))
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is TransformItems) return false
+            return ids == other.ids && matrix.contentEquals(other.matrix)
+        }
+
+        override fun hashCode(): Int {
+            var result = ids.hashCode()
+            result = 31 * result + matrix.contentHashCode()
+            return result
+        }
+
+        private fun transformItem(item: NoteItem, m: FloatArray): NoteItem {
+            if (item.kind != STROKE_KIND) return item
+            val samples = StrokeCodec.decode(item.payload)
+            if (samples.isEmpty()) return item
+            val transformed = StrokeTransform.applyToSamples(m, samples)
+            return item.copy(payload = StrokeCodec.encode(transformed))
+        }
     }
 }

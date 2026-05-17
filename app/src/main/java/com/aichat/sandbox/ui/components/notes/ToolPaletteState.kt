@@ -10,9 +10,9 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 /**
  * Tool roster for the notes editor (sub-phase 1.6).
  *
- * [LASSO] and [TEXT] are reserved values — they appear in the palette only
- * once their respective sub-phases (1.8, 1.9) land. Today they are flagged
- * `enabledInPalette = false` so the UI greys them out.
+ * [TEXT] is a reserved value — it appears in the palette only once
+ * sub-phase 1.9 lands. Today it is flagged `enabledInPalette = false` so
+ * the UI greys it out.
  */
 enum class Tool(
     val id: String,
@@ -24,12 +24,13 @@ enum class Tool(
     PENCIL("pencil", "Pencil"),
     ERASER_STROKE("eraser_stroke", "Eraser"),
     ERASER_AREA("eraser_area", "Area eraser"),
-    LASSO("lasso", "Lasso", enabledInPalette = false),
+    LASSO("lasso", "Lasso"),
     TEXT("text", "Text", enabledInPalette = false),
     ;
 
     val isInk: Boolean get() = this == PEN || this == HIGHLIGHTER || this == PENCIL
     val isEraser: Boolean get() = this == ERASER_STROKE || this == ERASER_AREA
+    val isLasso: Boolean get() = this == LASSO
 }
 
 /**

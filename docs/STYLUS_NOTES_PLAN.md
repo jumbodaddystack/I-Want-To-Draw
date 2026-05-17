@@ -5,7 +5,7 @@
 ## Status
 
 - **Current phase:** Phase 1 — in progress
-- **Next sub-phase:** [1.8 — Lasso + selection + transforms + cross-note clipboard](./STYLUS_NOTES_PHASE_1.md#sub-phase-18--lasso-selection-transforms-cross-note-clipboard)
+- **Next sub-phase:** [1.9 — Text-box tool](./STYLUS_NOTES_PHASE_1.md#sub-phase-19--text-box-tool)
 - **Last verified device pass:** none yet
 
 ## Phase index
@@ -34,7 +34,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 - [x] **1.5** Infinite viewport + background layer ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-15--infinite-viewport-pan-pinch-zoom--background-layer))
 - [x] **1.6** Tool palette + highlighter + pencil + erasers + side-button mapping ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-16--tool-palette--highlighter--pencil--erasers--side-button-mapping))
 - [x] **1.7** Undo / redo (event log) ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-17--undo--redo-event-log))
-- [ ] **1.8** Lasso + selection + transforms + cross-note clipboard ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-18--lasso-selection-transforms-cross-note-clipboard))
+- [x] **1.8** Lasso + selection + transforms + cross-note clipboard ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-18--lasso-selection-transforms-cross-note-clipboard))
 - [ ] **1.9** Text-box tool ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-19--text-box-tool))
 - [ ] **1.10** Thumbnails + list polish + S25 verification ([details](./STYLUS_NOTES_PHASE_1.md#sub-phase-110--thumbnails-list-polish-delete-confirmation-manual-verification-pass))
 

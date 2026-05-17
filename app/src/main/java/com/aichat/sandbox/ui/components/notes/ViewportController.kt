@@ -1,5 +1,9 @@
 package com.aichat.sandbox.ui.components.notes
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+
 /**
  * Pan / zoom state for the infinite notes canvas (sub-phase 1.5).
  *
@@ -8,7 +12,10 @@ package com.aichat.sandbox.ui.components.notes
  * `screenToWorld` inverts this mapping; both directions are needed because
  * input arrives in screen coords while strokes are persisted in world coords.
  *
- * Kept Android-free so [ViewportControllerTest] can run on the JVM.
+ * Fields are backed by [mutableStateOf] so Compose-side observers (notably
+ * the selection overlay in 1.8) recompose when the user pans or zooms.
+ * The class itself is still Android-free, so [ViewportControllerTest] keeps
+ * running on the JVM.
  */
 class ViewportController(
     offsetX: Float = 0f,
@@ -16,11 +23,11 @@ class ViewportController(
     scale: Float = 1f,
 ) {
 
-    var offsetX: Float = offsetX
+    var offsetX: Float by mutableStateOf(offsetX)
         private set
-    var offsetY: Float = offsetY
+    var offsetY: Float by mutableStateOf(offsetY)
         private set
-    var scale: Float = scale.coerceIn(MIN_SCALE, MAX_SCALE)
+    var scale: Float by mutableStateOf(scale.coerceIn(MIN_SCALE, MAX_SCALE))
         private set
 
     /** Fired whenever offset or scale changes. Used by the surface to invalidate. */

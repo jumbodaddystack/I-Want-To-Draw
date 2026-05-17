@@ -24,6 +24,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import com.aichat.sandbox.ui.components.notes.DrawingSurfaceView
 import com.aichat.sandbox.ui.components.notes.ToolPalette
+import com.aichat.sandbox.ui.components.notes.ViewportController
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,8 +36,12 @@ fun NoteEditorScreen(
     val note by viewModel.note.collectAsState()
     val canUndo by viewModel.canUndo.collectAsState()
     val canRedo by viewModel.canRedo.collectAsState()
+    val selection by viewModel.selection.collectAsState()
+    val selectionWorldBounds by viewModel.selectionWorldBounds.collectAsState()
+    val selectionMatrix by viewModel.selectionMatrix.collectAsState()
     val scope = rememberCoroutineScope()
     var menuExpanded by remember { mutableStateOf(false) }
+    var viewportController by remember { mutableStateOf<ViewportController?>(null) }
 
     fun saveAndExit() {
         scope.launch {
@@ -121,9 +126,28 @@ fun NoteEditorScreen(
                     items = viewModel.items,
                     backgroundStyle = note.backgroundStyle,
                     paletteState = viewModel.palette,
+                    selectedIds = selection,
+                    selectionMatrix = selectionMatrix,
                     onStrokeCommitted = viewModel::addItem,
                     onItemsErased = viewModel::removeItems,
+                    onLassoCompleted = viewModel::onLassoCompleted,
+                    onSelectionShouldClear = viewModel::clearSelection,
                     modifier = Modifier.fillMaxSize(),
+                    onViewportReady = { viewportController = it },
+                )
+                SelectionOverlay(
+                    selection = selection,
+                    worldBounds = selectionWorldBounds,
+                    viewport = viewportController,
+                    liveMatrix = selectionMatrix,
+                    onTransformChanged = viewModel::updateSelectionTransform,
+                    onTransformCommitted = viewModel::bakeSelectionTransform,
+                    onDuplicate = viewModel::duplicateSelection,
+                    onDelete = viewModel::deleteSelection,
+                    onCut = viewModel::cutSelection,
+                    onCopy = viewModel::copySelection,
+                    onPaste = viewModel::pasteFromClipboard,
+                    canPaste = viewModel.hasClipboardContent(),
                 )
             }
             ToolPalette(state = viewModel.palette)

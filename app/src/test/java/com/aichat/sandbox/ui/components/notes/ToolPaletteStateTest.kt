@@ -17,8 +17,9 @@ class ToolPaletteStateTest {
         assertTrue(Tool.ERASER_STROKE.isEraser)
         assertTrue(Tool.ERASER_AREA.isEraser)
         assertFalse(Tool.PEN.isEraser)
-        // Reserved values are present but stay out of the palette UI until their sub-phases land.
-        assertFalse(Tool.LASSO.enabledInPalette)
+        // Lasso landed in sub-phase 1.8; text is still gated behind 1.9.
+        assertTrue(Tool.LASSO.enabledInPalette)
+        assertTrue(Tool.LASSO.isLasso)
         assertFalse(Tool.TEXT.enabledInPalette)
     }
 
