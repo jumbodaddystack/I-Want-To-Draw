@@ -28,8 +28,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.AssistChip
@@ -55,8 +57,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.aichat.sandbox.ui.components.ModelSelector
 
 /**
  * Right-edge slide-in sheet that hosts the AI ask/reply loop for the note
@@ -68,9 +73,10 @@ import androidx.compose.ui.unit.dp
  * appended to the active turn's bubble; the lazy list auto-scrolls to the
  * latest turn as it grows.
  *
- * Canned prompt chips and the scope chip landed in sub-phase 2.7. The full
- * reply-action row (Copy / Insert / Send to chat for every Done turn) and
- * the in-sheet model picker arrive in sub-phase 2.8.
+ * Canned prompt chips and the scope chip landed in sub-phase 2.7. Sub-phase
+ * 2.8 adds the per-reply action row (Copy / Insert / Send to chat) for every
+ * Done turn and a `ModelSelector` in the header so the model can be swapped
+ * mid-conversation (subsequent turns only — existing replies are immutable).
  */
 @Composable
 fun AiSideSheet(
@@ -82,6 +88,11 @@ fun AiSideSheet(
     onCannedPrompt: (CannedPrompt) -> Unit,
     onClearScope: () -> Unit,
     onInsertConvertResult: (turnId: String) -> Unit,
+    onInsertReply: (turnId: String) -> Unit,
+    onSendReplyToChat: (turnId: String) -> Unit,
+    onModelSelected: (String) -> Unit,
+    availableModels: List<String>,
+    customModels: List<String>,
     modifier: Modifier = Modifier,
 ) {
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
@@ -149,6 +160,11 @@ fun AiSideSheet(
                     onCannedPrompt = onCannedPrompt,
                     onClearScope = onClearScope,
                     onInsertConvertResult = onInsertConvertResult,
+                    onInsertReply = onInsertReply,
+                    onSendReplyToChat = onSendReplyToChat,
+                    onModelSelected = onModelSelected,
+                    availableModels = availableModels,
+                    customModels = customModels,
                 )
             }
         }
@@ -165,16 +181,26 @@ private fun SheetContent(
     onCannedPrompt: (CannedPrompt) -> Unit,
     onClearScope: () -> Unit,
     onInsertConvertResult: (turnId: String) -> Unit,
+    onInsertReply: (turnId: String) -> Unit,
+    onSendReplyToChat: (turnId: String) -> Unit,
+    onModelSelected: (String) -> Unit,
+    availableModels: List<String>,
+    customModels: List<String>,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         SheetHeader(
             modelId = state.activeModelId,
+            availableModels = availableModels,
+            customModels = customModels,
+            onModelSelected = onModelSelected,
             onClose = onClose,
         )
         HorizontalDivider()
         ConversationList(
             turns = state.turns,
             onInsertConvertResult = onInsertConvertResult,
+            onInsertReply = onInsertReply,
+            onSendReplyToChat = onSendReplyToChat,
             modifier = Modifier.weight(1f),
         )
         HorizontalDivider()
@@ -199,31 +225,37 @@ private fun SheetContent(
 @Composable
 private fun SheetHeader(
     modelId: String,
+    availableModels: List<String>,
+    customModels: List<String>,
+    onModelSelected: (String) -> Unit,
     onClose: () -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "Ask about this note",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
             )
-            if (modelId.isNotEmpty()) {
-                Text(
-                    text = modelId,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, contentDescription = "Close AI panel")
             }
         }
-        IconButton(onClick = onClose) {
-            Icon(Icons.Filled.Close, contentDescription = "Close AI panel")
-        }
+        // Inline model picker (sub-phase 2.8). Switching mid-conversation
+        // only affects subsequent turns — replies already on screen keep
+        // showing whatever model produced them.
+        ModelSelector(
+            label = "Model",
+            selectedModel = modelId,
+            models = availableModels,
+            onModelSelected = onModelSelected,
+            customModels = customModels,
+        )
     }
 }
 
@@ -231,6 +263,8 @@ private fun SheetHeader(
 private fun ConversationList(
     turns: List<AskTurn>,
     onInsertConvertResult: (turnId: String) -> Unit,
+    onInsertReply: (turnId: String) -> Unit,
+    onSendReplyToChat: (turnId: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -266,7 +300,12 @@ private fun ConversationList(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(turns, key = { it.id }) { turn ->
-            TurnBubble(turn = turn, onInsertConvertResult = onInsertConvertResult)
+            TurnBubble(
+                turn = turn,
+                onInsertConvertResult = onInsertConvertResult,
+                onInsertReply = onInsertReply,
+                onSendReplyToChat = onSendReplyToChat,
+            )
         }
     }
 }
@@ -275,32 +314,92 @@ private fun ConversationList(
 private fun TurnBubble(
     turn: AskTurn,
     onInsertConvertResult: (turnId: String) -> Unit,
+    onInsertReply: (turnId: String) -> Unit,
+    onSendReplyToChat: (turnId: String) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         PromptBubble(prompt = turn.prompt, selectionSummary = turn.selectionSummary)
         Spacer(modifier = Modifier.height(4.dp))
         ReplyBubble(turn = turn)
-        // Sub-phase 2.7 preview: only Convert-to-text replies get an inline
-        // action right now. The general reply-action row (Copy / Insert /
-        // Send to chat for every Done turn) lands in 2.8.
-        if (turn.isConvertResult &&
-            turn.state is TurnState.Done &&
-            turn.replyBuffer.isNotEmpty()
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
-            ) {
-                TextButton(onClick = { onInsertConvertResult(turn.id) }) {
-                    Icon(
-                        imageVector = Icons.Filled.TextFields,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Insert as text box")
+        // Reply-action row — visible once the turn is Done and produced
+        // text. Convert-to-text replies keep the slimmer single-action row
+        // because Copy / Send-to-chat don't add much value for raw OCR
+        // output (Phase 4 may revisit). The general AI replies get the
+        // full Copy / Insert / Send-to-chat row that sub-phase 2.8
+        // promises.
+        if (turn.state is TurnState.Done && turn.replyBuffer.isNotEmpty()) {
+            if (turn.isConvertResult) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start,
+                ) {
+                    TextButton(onClick = { onInsertConvertResult(turn.id) }) {
+                        Icon(
+                            imageVector = Icons.Filled.TextFields,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Insert as text box")
+                    }
                 }
+            } else {
+                ReplyActionRow(
+                    text = turn.replyBuffer,
+                    onInsert = { onInsertReply(turn.id) },
+                    onSendToChat = { onSendReplyToChat(turn.id) },
+                )
             }
+        }
+    }
+}
+
+/**
+ * Per-reply action buttons for AI replies (sub-phase 2.8). Copy lives in
+ * the composable rather than the VM so it has a `LocalClipboardManager`
+ * handle without bouncing through an `ApplicationContext` injection.
+ *
+ * Buttons stay text-only (no surface chip) to keep the bubble visually
+ * close to a chat message — the actions are the affordance, not a separate
+ * surface fighting the reply for attention.
+ */
+@Composable
+private fun ReplyActionRow(
+    text: String,
+    onInsert: () -> Unit,
+    onSendToChat: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        TextButton(onClick = { clipboard.setText(AnnotatedString(text)) }) {
+            Icon(
+                imageVector = Icons.Filled.ContentCopy,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Copy")
+        }
+        TextButton(onClick = onInsert) {
+            Icon(
+                imageVector = Icons.Filled.TextFields,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Insert")
+        }
+        TextButton(onClick = onSendToChat) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Send to chat")
         }
     }
 }

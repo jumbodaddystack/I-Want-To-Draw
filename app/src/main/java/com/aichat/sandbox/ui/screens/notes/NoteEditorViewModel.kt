@@ -6,6 +6,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aichat.sandbox.data.local.PreferencesManager
+import com.aichat.sandbox.data.model.ApiProvider
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.notes.AiChunk
@@ -13,6 +14,7 @@ import com.aichat.sandbox.data.notes.AskRequest
 import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.HandwritingOcr.OcrModelState
 import com.aichat.sandbox.data.notes.NoteAiService
+import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
@@ -29,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -48,6 +51,7 @@ class NoteEditorViewModel @Inject constructor(
     private val aiService: NoteAiService,
     private val handwritingOcr: HandwritingOcr,
     private val preferencesManager: PreferencesManager,
+    private val chatRepository: ChatRepository,
 ) : ViewModel() {
 
     private val routeArg: String = savedStateHandle["noteId"] ?: NOTE_ID_NEW
@@ -149,6 +153,24 @@ class NoteEditorViewModel @Inject constructor(
     val aiSheetState: StateFlow<AiSideSheetState> = _aiSheetState.asStateFlow()
 
     private val streamingJobs: MutableMap<String, Job> = mutableMapOf()
+
+    /**
+     * Models offered by the in-sheet model picker (sub-phase 2.8). Mirrors
+     * the chat-side `ModelSelector` source: built-in provider catalogue
+     * plus user-added customs from preferences. De-duplicated so a custom
+     * id colliding with a built-in only appears once.
+     */
+    val availableModels: StateFlow<List<String>> = preferencesManager.customModels
+        .map { byProvider ->
+            val builtIns = ApiProvider.defaults.flatMap { it.models }
+            val customs = byProvider.values.flatten()
+            (builtIns + customs.filter { it !in builtIns })
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = ApiProvider.defaults.flatMap { it.models },
+        )
 
     init {
         // Seed the sheet's active model from the user's chat preferences so
@@ -716,6 +738,90 @@ class NoteEditorViewModel @Inject constructor(
         closeAiSheet()
     }
 
+    /**
+     * In-sheet model picker callback (sub-phase 2.8). Switching mid-
+     * conversation affects subsequent turns only — existing turn replies
+     * are immutable, which keeps the conversation log honest about which
+     * model produced what.
+     */
+    fun setAiModelId(modelId: String) {
+        if (modelId.isBlank()) return
+        _aiSheetState.update { it.copy(activeModelId = modelId) }
+    }
+
+    /**
+     * "Insert as text box" reply action (sub-phase 2.8). Drops the reply
+     * onto the canvas as a new text item via [EditorAction.AddItems] so
+     * undo / redo round-trips, then closes the sheet.
+     *
+     * Anchor preference: when the sheet was opened with a selection scope,
+     * anchor at that selection's centre so the reply lands near the
+     * strokes it was about. Otherwise anchor at the supplied viewport
+     * centre (world coords) so the new text appears on-screen. Callers
+     * pass viewport centre because the editor screen owns the viewport
+     * controller — the VM has no direct access to pan/zoom state.
+     *
+     * Streaming turns are rejected (the action row is gated on Done in the
+     * UI, but the guard keeps the VM honest); empty replies are dropped.
+     */
+    fun insertReplyAsTextBox(
+        turnId: String,
+        fallbackWorldX: Float,
+        fallbackWorldY: Float,
+    ) {
+        val state = _aiSheetState.value
+        val turn = state.turns.firstOrNull { it.id == turnId } ?: return
+        if (turn.state !is TurnState.Done) return
+        val body = turn.replyBuffer
+        if (body.isEmpty()) return
+        val (worldX, worldY) = state.pendingSelection
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { anchorPointForInsert(it) }
+            ?: (fallbackWorldX to fallbackWorldY)
+        val payload = TextItemCodec.newAt(
+            worldX = worldX,
+            worldY = worldY,
+            body = body,
+            fontSize = TextItemCodec.DEFAULT_FONT_SIZE_PX,
+            alignment = TextItemCodec.ALIGN_LEFT,
+        )
+        val item = NoteItem(
+            noteId = resolvedNoteId,
+            zIndex = nextInkZIndex++,
+            kind = TextItemCodec.KIND,
+            tool = null,
+            colorArgb = TEXT_DEFAULT_COLOR,
+            baseWidthPx = 0f,
+            payload = TextItemCodec.encode(payload),
+        )
+        apply(EditorAction.AddItems(listOf(item)))
+        closeAiSheet()
+    }
+
+    /**
+     * "Send to chat" reply action (sub-phase 2.8). Creates a brand-new
+     * chat via [ChatRepository.createChat] using the user's current
+     * default model + base URL (re-read from preferences inside
+     * `createChat`), then returns the new chat id so the editor screen can
+     * navigate with the reply text as a `?draftText=` arg.
+     *
+     * **Decision** (per the phase doc): we do NOT auto-send. The reply
+     * lands in the composer so the user reviews and confirms what's
+     * actually sent. The Phase 4 "Send to chat" picker will replace this
+     * with an existing-chat sheet.
+     *
+     * Returns null for streaming, missing, or empty turns so the caller
+     * can no-op safely.
+     */
+    suspend fun prepareSendReplyToChat(turnId: String): SendReplyResult? {
+        val turn = _aiSheetState.value.turns.firstOrNull { it.id == turnId } ?: return null
+        if (turn.state !is TurnState.Done) return null
+        val body = turn.replyBuffer
+        if (body.isEmpty()) return null
+        val chat = chatRepository.createChat()
+        return SendReplyResult(chatId = chat.id, draftText = body)
+    }
+
     private fun anchorPointForInsert(scope: List<NoteItem>?): Pair<Float, Float> {
         if (scope.isNullOrEmpty()) return 0f to 0f
         val rects = ArrayList<FloatArray>(scope.size)
@@ -973,6 +1079,14 @@ class NoteEditorViewModel @Inject constructor(
         private const val NO_HANDWRITING_MESSAGE: String = "Couldn't recognize handwriting."
     }
 }
+
+/**
+ * Result of [NoteEditorViewModel.prepareSendReplyToChat] (sub-phase 2.8).
+ * Bundles the freshly-created chat id with the reply text so the editor
+ * screen can issue a single `chat/{id}?draftText=…` navigation without
+ * re-reading the turn from the side-sheet state.
+ */
+data class SendReplyResult(val chatId: String, val draftText: String)
 
 /**
  * Coarse "is OCR doing something right now?" signal for the editor's TopAppBar

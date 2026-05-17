@@ -45,7 +45,14 @@ data class ChatUiState(
     val editingContent: String? = null,
     val attachedImages: List<Uri> = emptyList(),
     val toolsEnabled: Boolean = true,
-    val executingTool: String? = null // name of tool currently being executed
+    val executingTool: String? = null, // name of tool currently being executed
+    /**
+     * One-shot composer prefill supplied via the `?draftText=` nav arg
+     * (sub-phase 2.8 — the AI side sheet's "Send to chat" reply action lands
+     * here). [ChatScreen] consumes it on first composition via
+     * [consumeDraftText] so rotation or recomposition can't re-trigger.
+     */
+    val draftText: String? = null
 )
 
 @HiltViewModel
@@ -61,7 +68,15 @@ class ChatViewModel @Inject constructor(
 
     private val chatId: String = savedStateHandle.get<String>("chatId") ?: ""
 
-    private val _uiState = MutableStateFlow(ChatUiState())
+    private val _uiState = MutableStateFlow(
+        ChatUiState(
+            // Nav arg is always present (defaults to "") via the route's
+            // navArgument; treat blank as "no draft" so we don't open a Chat
+            // with a pre-focused empty composer when no draft was passed.
+            draftText = savedStateHandle.get<String>("draftText")
+                ?.takeIf { it.isNotBlank() },
+        )
+    )
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     private var streamJob: Job? = null
@@ -85,6 +100,18 @@ class ChatViewModel @Inject constructor(
                 _customModels.value = modelsMap.values.flatten()
             }
         }
+    }
+
+    /**
+     * Read and clear the one-shot composer prefill. Idempotent — subsequent
+     * calls return null. The screen calls this from a `LaunchedEffect` on
+     * first composition so a rotation or recomposition can't re-prefill the
+     * text field after the user has already started typing.
+     */
+    fun consumeDraftText(): String? {
+        val current = _uiState.value.draftText ?: return null
+        _uiState.update { it.copy(draftText = null) }
+        return current
     }
 
     fun addImage(uri: Uri) {

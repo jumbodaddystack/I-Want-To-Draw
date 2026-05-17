@@ -102,8 +102,19 @@ fun AppNavigation() {
                 )
             }
             composable(
-                route = "chat/{chatId}",
-                arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+                // Optional `draftText` query arg lets callers (notably the AI
+                // side sheet's "Send to chat" reply action — sub-phase 2.8)
+                // prefill the composer without auto-sending. URL-encode on
+                // the navigate side; `ChatScreen` strips the arg from the
+                // back stack after first read so rotation doesn't re-prefill.
+                route = "chat/{chatId}?draftText={draftText}",
+                arguments = listOf(
+                    navArgument("chatId") { type = NavType.StringType },
+                    navArgument("draftText") {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    },
+                )
             ) { backStackEntry ->
                 val chatId = backStackEntry.arguments?.getString("chatId") ?: return@composable
                 ChatScreen(
@@ -126,7 +137,15 @@ fun AppNavigation() {
                 arguments = listOf(navArgument("noteId") { type = NavType.StringType })
             ) {
                 NoteEditorScreen(
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToChat = { chatId, draftText ->
+                        // URL-encode so reply text containing & or ? doesn't
+                        // shred the query string. The chat-side composable
+                        // consumes the arg once and clears it via the VM
+                        // so rotation can't re-prefill.
+                        val encoded = java.net.URLEncoder.encode(draftText, "UTF-8")
+                        navController.navigate("chat/$chatId?draftText=$encoded")
+                    },
                 )
             }
             composable(Screen.Templates.route) {

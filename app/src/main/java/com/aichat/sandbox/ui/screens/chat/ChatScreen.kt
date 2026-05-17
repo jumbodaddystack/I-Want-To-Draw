@@ -267,7 +267,11 @@ fun ChatScreen(
             onCancelEdit = { viewModel.cancelEditing() },
             attachedImages = uiState.attachedImages,
             onAddImage = { uri -> viewModel.addImage(uri) },
-            onRemoveImage = { uri -> viewModel.removeImage(uri) }
+            onRemoveImage = { uri -> viewModel.removeImage(uri) },
+            // One-shot prefill from the `?draftText=` nav arg
+            // (sub-phase 2.8). Consumed on first composition so it can't
+            // re-trigger after rotation.
+            consumeDraftText = viewModel::consumeDraftText,
         )
     }
 
@@ -707,7 +711,8 @@ private fun ChatInputBar(
     onCancelEdit: () -> Unit = {},
     attachedImages: List<Uri> = emptyList(),
     onAddImage: (Uri) -> Unit = {},
-    onRemoveImage: (Uri) -> Unit = {}
+    onRemoveImage: (Uri) -> Unit = {},
+    consumeDraftText: () -> String? = { null },
 ) {
     var text by remember { mutableStateOf("") }
 
@@ -716,6 +721,16 @@ private fun ChatInputBar(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 4)
     ) { uris ->
         uris.forEach { uri -> onAddImage(uri) }
+    }
+
+    // One-shot composer prefill from the `?draftText=` nav arg
+    // (sub-phase 2.8 — "Send to chat" reply action). Read once on first
+    // composition and clear in the VM so rotation can't re-trigger.
+    LaunchedEffect(Unit) {
+        val draft = consumeDraftText()
+        if (!draft.isNullOrEmpty() && text.isEmpty()) {
+            text = draft
+        }
     }
 
     // When editing starts, populate the text field

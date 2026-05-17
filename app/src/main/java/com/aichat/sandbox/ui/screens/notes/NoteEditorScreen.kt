@@ -23,8 +23,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
@@ -40,6 +42,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun NoteEditorScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToChat: (chatId: String, draftText: String) -> Unit = { _, _ -> },
     viewModel: NoteEditorViewModel = hiltViewModel(),
 ) {
     val note by viewModel.note.collectAsState()
@@ -51,9 +54,11 @@ fun NoteEditorScreen(
     val selectionMatrix by viewModel.selectionMatrix.collectAsState()
     val textEditTarget by viewModel.textEditTarget.collectAsState()
     val aiSheetState by viewModel.aiSheetState.collectAsState()
+    val availableModels by viewModel.availableModels.collectAsState()
     val scope = rememberCoroutineScope()
     var menuExpanded by remember { mutableStateOf(false) }
     var viewportController by remember { mutableStateOf<ViewportController?>(null) }
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
     fun saveAndExit() {
         scope.launch {
@@ -154,7 +159,15 @@ fun NoteEditorScreen(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    // Track the canvas size so "Insert as text box"
+                    // (sub-phase 2.8) can anchor the new item at the
+                    // current viewport centre when no selection is in
+                    // scope. World coords are recovered via
+                    // `ViewportController.screenToWorld(size/2)` at insert
+                    // time, so panning between the reply landing and the
+                    // tap is reflected correctly.
+                    .onSizeChanged { canvasSize = it },
             ) {
                 DrawingSurfaceView(
                     items = viewModel.items,
@@ -217,6 +230,37 @@ fun NoteEditorScreen(
             onCannedPrompt = viewModel::submitCannedPrompt,
             onClearScope = viewModel::clearAiSheetScope,
             onInsertConvertResult = viewModel::insertConvertResultAsTextBox,
+            onInsertReply = { turnId ->
+                // Compute the viewport-centre fallback in world coords at
+                // tap time so panning between reply landing and the tap is
+                // honoured. When the sheet has a selection scope the VM
+                // ignores this and anchors at the selection bounds.
+                val vp = viewportController
+                val cx: Float
+                val cy: Float
+                if (vp != null && canvasSize != IntSize.Zero) {
+                    cx = vp.screenToWorldX(canvasSize.width / 2f)
+                    cy = vp.screenToWorldY(canvasSize.height / 2f)
+                } else {
+                    cx = 0f
+                    cy = 0f
+                }
+                viewModel.insertReplyAsTextBox(turnId, cx, cy)
+            },
+            onSendReplyToChat = { turnId ->
+                scope.launch {
+                    // Persist current edits first so a chat title generated
+                    // off the new note has accurate context if the user
+                    // navigates back later.
+                    viewModel.commitTextEdit()
+                    viewModel.save()
+                    val result = viewModel.prepareSendReplyToChat(turnId) ?: return@launch
+                    onNavigateToChat(result.chatId, result.draftText)
+                }
+            },
+            onModelSelected = viewModel::setAiModelId,
+            availableModels = availableModels,
+            customModels = emptyList(),
         )
       }
     }
