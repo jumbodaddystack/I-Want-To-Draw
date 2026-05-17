@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
@@ -49,6 +50,7 @@ fun NoteEditorScreen(
     val selectionWorldBounds by viewModel.selectionWorldBounds.collectAsState()
     val selectionMatrix by viewModel.selectionMatrix.collectAsState()
     val textEditTarget by viewModel.textEditTarget.collectAsState()
+    val aiSheetState by viewModel.aiSheetState.collectAsState()
     val scope = rememberCoroutineScope()
     var menuExpanded by remember { mutableStateOf(false) }
     var viewportController by remember { mutableStateOf<ViewportController?>(null) }
@@ -100,6 +102,12 @@ fun NoteEditorScreen(
                 },
                 actions = {
                     OcrIndicatorBadge(state = ocrIndicator)
+                    IconButton(onClick = { viewModel.openAiSheet(selection = null) }) {
+                        Icon(
+                            imageVector = Icons.Filled.AutoAwesome,
+                            contentDescription = "Ask about this note",
+                        )
+                    }
                     IconButton(onClick = viewModel::undo, enabled = canUndo) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Undo,
@@ -133,10 +141,14 @@ fun NoteEditorScreen(
             )
         }
     ) { padding ->
+      Box(
+          modifier = Modifier
+              .fillMaxSize()
+              .padding(padding),
+      ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .background(Color.White),
         ) {
             Box(
@@ -194,6 +206,14 @@ fun NoteEditorScreen(
             }
             ToolPalette(state = viewModel.palette)
         }
+        AiSideSheet(
+            state = aiSheetState,
+            onInputChanged = viewModel::onAiInputChanged,
+            onSubmit = viewModel::submitAiPrompt,
+            onCancel = viewModel::cancelAiStreaming,
+            onClose = viewModel::closeAiSheet,
+        )
+      }
     }
 }
 

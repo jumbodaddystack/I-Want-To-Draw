@@ -4,8 +4,8 @@
 
 ## Status
 
-- **Current phase:** Phase 2 — 2.1–2.5 landed; Phase 1 device verification still pending
-- **Next sub-phase:** [2.6 — `AiSideSheet` UI shell + streaming](./STYLUS_NOTES_PHASE_2.md#sub-phase-26--aisidesheet-ui-shell--streaming-render)
+- **Current phase:** Phase 2 — 2.1–2.6 landed; Phase 1 device verification still pending
+- **Next sub-phase:** [2.7 — Entry points: toolbar Ask + lasso Ask + canned prompts + Convert-to-text](./STYLUS_NOTES_PHASE_2.md#sub-phase-27--entry-points-toolbar-ask--lasso-ask--canned-prompts--convert-to-text-fast-path)
 - **Last verified device pass:** none yet (Phase 1 matrix to be run on hardware)
 
 ## Phase index
@@ -45,7 +45,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 - [x] **2.3** `HandwritingOcr` (ML Kit Digital Ink) ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-23--handwriting-ocr-ml-kit-digital-ink))
 - [x] **2.4** OCR on save (lazy pipeline) ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-24--ocr-on-save-lazy-pipeline))
 - [x] **2.5** `NoteAiService` core (no UI) ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-25--noteaiservice-core-no-ui))
-- [ ] **2.6** `AiSideSheet` UI shell + streaming ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-26--aisidesheet-ui-shell--streaming-render))
+- [x] **2.6** `AiSideSheet` UI shell + streaming ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-26--aisidesheet-ui-shell--streaming-render))
 - [ ] **2.7** Entry points: toolbar Ask + lasso Ask + canned prompts + Convert-to-text ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-27--entry-points-toolbar-ask--lasso-ask--canned-prompts--convert-to-text-fast-path))
 - [ ] **2.8** Reply actions: Copy / Insert as text box / Send to chat + verification ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-28--reply-actions-copy-insert-as-text-box-send-to-chat--polish--verification))
 

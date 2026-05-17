@@ -5,9 +5,13 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aichat.sandbox.data.local.PreferencesManager
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.data.notes.AiChunk
+import com.aichat.sandbox.data.notes.AskRequest
 import com.aichat.sandbox.data.notes.HandwritingOcr.OcrModelState
+import com.aichat.sandbox.data.notes.NoteAiService
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
@@ -17,11 +21,13 @@ import com.aichat.sandbox.ui.components.notes.TextItemCodec
 import com.aichat.sandbox.ui.components.notes.TextItemRenderer
 import com.aichat.sandbox.ui.components.notes.ToolPaletteState
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -38,6 +44,8 @@ private const val UNDO_STACK_CAP = 200
 class NoteEditorViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val repository: NoteRepository,
+    private val aiService: NoteAiService,
+    private val preferencesManager: PreferencesManager,
 ) : ViewModel() {
 
     private val routeArg: String = savedStateHandle["noteId"] ?: NOTE_ID_NEW
@@ -127,7 +135,30 @@ class NoteEditorViewModel @Inject constructor(
     /** Live draft body — Compose `BasicTextField` writes this on every keystroke. */
     private var textEditDraftBody: String = ""
 
+    // ── AI side sheet (sub-phase 2.6) ────────────────────────────────────
+    //
+    // The sheet hosts a list of one-shot ask/reply turns. State is held here
+    // (rather than in a dedicated VM) because submitting a prompt needs the
+    // live `note` + `items`, the user's selected model from preferences, and
+    // shares lifetime with the editor. Streaming jobs are tracked separately
+    // so cancellation can stop the upstream flow within a frame or two.
+
+    private val _aiSheetState = MutableStateFlow(AiSideSheetState())
+    val aiSheetState: StateFlow<AiSideSheetState> = _aiSheetState.asStateFlow()
+
+    private val streamingJobs: MutableMap<String, Job> = mutableMapOf()
+
     init {
+        // Seed the sheet's active model from the user's chat preferences so
+        // the first ask hits whatever the user last selected for chat. The
+        // header is read-only in 2.6 — the in-sheet model picker lands in 2.8.
+        viewModelScope.launch {
+            val model = preferencesManager.defaultModel.first()
+            _aiSheetState.update { current ->
+                if (current.activeModelId.isEmpty()) current.copy(activeModelId = model)
+                else current
+            }
+        }
         if (routeArg != NOTE_ID_NEW) {
             viewModelScope.launch {
                 repository.getNote(routeArg)?.let { loaded -> _note.value = loaded }
@@ -464,6 +495,160 @@ class NoteEditorViewModel @Inject constructor(
         textEditDraftBody = ""
     }
 
+    // ── AI side sheet (sub-phase 2.6) ────────────────────────────────────
+
+    /**
+     * Open the sheet. [selection] is captured by reference here so the scope
+     * chip stays accurate even if the user clears the canvas selection while
+     * the sheet is open. `null` selection means "ask about the whole note".
+     */
+    fun openAiSheet(selection: List<NoteItem>? = null) {
+        _aiSheetState.update { current ->
+            current.copy(
+                isOpen = true,
+                pendingSelection = selection?.toList(),
+            )
+        }
+    }
+
+    /**
+     * Hide the sheet without losing the conversation. Reopening restores the
+     * turn list so the user can resume reading. Streaming jobs keep running
+     * — closing the sheet is not the same as cancelling.
+     */
+    fun closeAiSheet() {
+        _aiSheetState.update { it.copy(isOpen = false) }
+    }
+
+    /** Compose `OutlinedTextField` callback. */
+    fun onAiInputChanged(text: String) {
+        _aiSheetState.update { it.copy(inputText = text) }
+    }
+
+    /**
+     * Fire a new ask using the current input text and captured selection. The
+     * input field clears immediately so the user can queue the next prompt
+     * while the reply streams in — though Send is disabled while any turn is
+     * still in flight (see [AiSideSheetState.isStreaming]).
+     */
+    fun submitAiPrompt() {
+        val snapshot = _aiSheetState.value
+        val prompt = snapshot.inputText.trim()
+        if (prompt.isEmpty()) return
+        if (snapshot.isStreaming) return
+        val turnId = UUID.randomUUID().toString()
+        val selection = snapshot.pendingSelection
+        val summary = selection?.let { summarizeSelection(it) }
+        val turn = AskTurn(
+            id = turnId,
+            prompt = prompt,
+            selectionSummary = summary,
+            replyBuffer = "",
+            state = TurnState.Streaming,
+        )
+        _aiSheetState.update { current ->
+            current.copy(
+                turns = current.turns + turn,
+                inputText = "",
+            )
+        }
+        streamingJobs[turnId] = viewModelScope.launch {
+            runStream(turnId = turnId, prompt = prompt, selection = selection)
+        }
+    }
+
+    /**
+     * Cancel every in-flight turn (in practice, at most one — Send is
+     * disabled while streaming). Each cancelled turn flips to
+     * [TurnState.Error] with a "Cancelled" message so the user sees what
+     * happened rather than a silently-frozen stream.
+     */
+    fun cancelAiStreaming() {
+        val jobs = streamingJobs.toMap()
+        streamingJobs.clear()
+        jobs.values.forEach { it.cancel() }
+        _aiSheetState.update { current ->
+            current.copy(
+                turns = current.turns.map { turn ->
+                    if (turn.state is TurnState.Streaming) {
+                        turn.copy(state = TurnState.Error(CANCEL_MESSAGE))
+                    } else turn
+                }
+            )
+        }
+    }
+
+    private suspend fun runStream(
+        turnId: String,
+        prompt: String,
+        selection: List<NoteItem>?,
+    ) {
+        val baseUrl = preferencesManager.apiBaseUrl.first()
+        val apiKey = preferencesManager.apiKey.first()
+        val modelId = _aiSheetState.value.activeModelId
+            .ifEmpty { preferencesManager.defaultModel.first() }
+        val request = AskRequest(
+            note = _note.value,
+            allItems = items.toList(),
+            selection = selection,
+            userPrompt = prompt,
+            modelId = modelId,
+            baseUrl = baseUrl,
+            apiKey = apiKey,
+        )
+        try {
+            aiService.ask(request).collect { chunk ->
+                mutateTurn(turnId) { turn ->
+                    when (chunk) {
+                        is AiChunk.Delta -> turn.copy(replyBuffer = turn.replyBuffer + chunk.text)
+                        is AiChunk.Complete -> turn.copy(state = TurnState.Done)
+                        is AiChunk.Error -> turn.copy(state = TurnState.Error(chunk.message))
+                    }
+                }
+            }
+            // Some upstreams complete the flow without an explicit Complete
+            // event (e.g. early termination); promote any still-Streaming
+            // turn to Done so the action row eventually appears.
+            mutateTurn(turnId) { turn ->
+                if (turn.state is TurnState.Streaming) turn.copy(state = TurnState.Done)
+                else turn
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            // Caller (cancelAiStreaming) already flipped the turn state; just
+            // let cancellation bubble so the parent scope is informed.
+            throw cancelled
+        } catch (t: Throwable) {
+            mutateTurn(turnId) { turn ->
+                turn.copy(state = TurnState.Error(t.message ?: "Unexpected error"))
+            }
+        } finally {
+            streamingJobs.remove(turnId)
+        }
+    }
+
+    private fun mutateTurn(turnId: String, block: (AskTurn) -> AskTurn) {
+        _aiSheetState.update { current ->
+            val idx = current.turns.indexOfFirst { it.id == turnId }
+            if (idx < 0) current
+            else current.copy(
+                turns = current.turns.toMutableList().also {
+                    it[idx] = block(it[idx])
+                }
+            )
+        }
+    }
+
+    private fun summarizeSelection(selection: List<NoteItem>): String {
+        val strokes = selection.count { it.kind == STROKE_KIND }
+        val texts = selection.count { it.kind == TextItemCodec.KIND }
+        return when {
+            strokes > 0 && texts > 0 -> "$strokes strokes, $texts text selected"
+            strokes > 0 -> if (strokes == 1) "1 stroke selected" else "$strokes strokes selected"
+            texts > 0 -> if (texts == 1) "1 text selected" else "$texts text items selected"
+            else -> "${selection.size} items selected"
+        }
+    }
+
     private fun findTopmostTextItemAt(worldX: Float, worldY: Float): NoteItem? {
         var best: NoteItem? = null
         var bestZ = Int.MIN_VALUE
@@ -596,6 +781,9 @@ class NoteEditorViewModel @Inject constructor(
          * everything goes black.
          */
         private const val TEXT_DEFAULT_COLOR: Int = 0xFF000000.toInt()
+
+        /** Shown on a turn that was cancelled by the user mid-stream. */
+        private const val CANCEL_MESSAGE: String = "Cancelled."
     }
 }
 
