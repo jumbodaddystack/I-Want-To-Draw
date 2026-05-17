@@ -1,5 +1,6 @@
 package com.aichat.sandbox.ui.screens.notes
 
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -9,7 +10,9 @@ import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntSize
@@ -56,6 +60,7 @@ fun NoteEditorScreen(
     val aiSheetState by viewModel.aiSheetState.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
     var viewportController by remember { mutableStateOf<ViewportController?>(null) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
@@ -132,13 +137,27 @@ fun NoteEditorScreen(
                                 contentDescription = "More",
                             )
                         }
-                        BackgroundStyleMenu(
+                        EditorOverflowMenu(
                             expanded = menuExpanded,
                             current = note.backgroundStyle,
                             onDismiss = { menuExpanded = false },
-                            onSelect = { style ->
+                            onBackgroundSelect = { style ->
                                 viewModel.setBackgroundStyle(style)
                                 menuExpanded = false
+                            },
+                            onSharePng = {
+                                menuExpanded = false
+                                scope.launch {
+                                    val uri = viewModel.sharePng()
+                                    val send = Intent(Intent.ACTION_SEND).apply {
+                                        type = "image/png"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(
+                                        Intent.createChooser(send, "Share note as PNG")
+                                    )
+                                }
                             },
                         )
                     }
@@ -266,14 +285,55 @@ fun NoteEditorScreen(
     }
 }
 
+/**
+ * Editor TopAppBar overflow menu (sub-phase 4.1).
+ *
+ * Combines the sub-phase 1.6 background-style picker with the new Share
+ * section. PDF lands in 4.2 — it's rendered as a disabled menu item now so
+ * the user has visible signalling that the path exists before it's wired.
+ */
 @Composable
-private fun BackgroundStyleMenu(
+private fun EditorOverflowMenu(
     expanded: Boolean,
     current: String,
     onDismiss: () -> Unit,
-    onSelect: (String) -> Unit,
+    onBackgroundSelect: (String) -> Unit,
+    onSharePng: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        Text(
+            text = "Share",
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        DropdownMenuItem(
+            text = { Text("Share as PNG") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Filled.Image,
+                    contentDescription = null,
+                )
+            },
+            onClick = onSharePng,
+        )
+        DropdownMenuItem(
+            text = { Text("Share as PDF") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Filled.PictureAsPdf,
+                    contentDescription = null,
+                )
+            },
+            trailingIcon = {
+                Text(
+                    text = "Coming next",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            },
+            enabled = false,
+            onClick = {},
+        )
+        HorizontalDivider()
         Text(
             text = "Background",
             style = MaterialTheme.typography.labelMedium,
@@ -282,7 +342,7 @@ private fun BackgroundStyleMenu(
         backgroundChoices.forEach { (style, label) ->
             DropdownMenuItem(
                 text = { Text(label) },
-                onClick = { onSelect(style) },
+                onClick = { onBackgroundSelect(style) },
                 trailingIcon = {
                     if (style == current) {
                         Icon(
