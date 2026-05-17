@@ -1,5 +1,6 @@
 package com.aichat.sandbox.ui.screens.notes
 
+import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.SavedStateHandle
@@ -22,6 +23,7 @@ import com.aichat.sandbox.ui.components.notes.StrokeRenderer
 import com.aichat.sandbox.ui.components.notes.StrokeTransform
 import com.aichat.sandbox.ui.components.notes.TextItemCodec
 import com.aichat.sandbox.ui.components.notes.TextItemRenderer
+import com.aichat.sandbox.ui.components.notes.Tool
 import com.aichat.sandbox.ui.components.notes.ToolPaletteState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -60,6 +62,14 @@ class NoteEditorViewModel @Inject constructor(
     // back-presses don't create duplicate notes.
     private val resolvedNoteId: String =
         if (routeArg == NOTE_ID_NEW) UUID.randomUUID().toString() else routeArg
+
+    // Phase 3.1 deep-link args. Only populated on the `note/new?source=…&stylus=…`
+    // route; bare `note/{noteId}` opens leave them null/false. `stylus=true`
+    // forces the PEN tool — today this is already the default, but pinning it
+    // explicitly insulates future palette-default changes from breaking the
+    // quick-capture flows that rely on landing inked-up and ready.
+    private val entrySource: String? = savedStateHandle["source"]
+    private val entryStylus: Boolean = savedStateHandle["stylus"] ?: false
 
     private val _note = MutableStateFlow(emptyNote(resolvedNoteId))
     val note: StateFlow<Note> = _note.asStateFlow()
@@ -173,6 +183,15 @@ class NoteEditorViewModel @Inject constructor(
         )
 
     init {
+        if (entrySource != null || entryStylus) {
+            Log.d("NotesEntry", "source=$entrySource stylus=$entryStylus")
+        }
+        if (entryStylus) {
+            // Already the default today (sub-phase 1.6), but pinning it here
+            // keeps quick-capture entry points anchored to ink even if the
+            // palette default ever changes.
+            palette.select(Tool.PEN)
+        }
         // Seed the sheet's active model from the user's chat preferences so
         // the first ask hits whatever the user last selected for chat. The
         // header is read-only in 2.6 — the in-sheet model picker lands in 2.8.

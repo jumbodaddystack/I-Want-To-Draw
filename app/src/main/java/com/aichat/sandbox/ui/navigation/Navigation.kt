@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -45,13 +46,48 @@ val bottomNavItems = listOf(
     Screen.Settings
 )
 
+/**
+ * Deep-link request handed to [AppNavigation] from `MainActivity`. Phase 3.1
+ * introduces a single `aichat://notes/new` URI for every quick-capture entry
+ * point (home-screen shortcut today, Quick Settings tile in 3.2,
+ * `ACTION_CREATE_NOTE` in 3.3, sketch composer in 3.4).
+ */
+sealed interface NotesDeepLink {
+    data class NewNote(val source: String?, val stylus: Boolean) : NotesDeepLink
+}
+
 @Composable
-fun AppNavigation() {
+fun AppNavigation(
+    pendingDeepLink: NotesDeepLink? = null,
+    onDeepLinkHandled: () -> Unit = {},
+) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
     val showBottomBar = currentDestination?.route in bottomNavItems.map { it.route }
+
+    // Consume any pending deep link exactly once. The MainActivity owns the
+    // backing state and clears it via [onDeepLinkHandled] so a rotation or
+    // recomposition can't double-navigate.
+    LaunchedEffect(pendingDeepLink) {
+        val link = pendingDeepLink ?: return@LaunchedEffect
+        when (link) {
+            is NotesDeepLink.NewNote -> {
+                val source = link.source?.let { java.net.URLEncoder.encode(it, "UTF-8") }
+                val query = buildString {
+                    if (source != null) append("source=").append(source)
+                    if (link.stylus) {
+                        if (isNotEmpty()) append('&')
+                        append("stylus=true")
+                    }
+                }
+                val route = if (query.isEmpty()) "note/new" else "note/new?$query"
+                navController.navigate(route) { launchSingleTop = true }
+            }
+        }
+        onDeepLinkHandled()
+    }
 
     Scaffold(
         bottomBar = {
@@ -130,6 +166,33 @@ fun AppNavigation() {
                     onNewNote = {
                         navController.navigate("note/$NOTE_ID_NEW")
                     }
+                )
+            }
+            // Quick-capture deep link (Phase 3.1). Lives as its own route so
+            // `note/{noteId}` doesn't have to grow optional args that only
+            // ever apply to fresh notes. Both `source` and `stylus` are
+            // optional, so a bare `note/new` (used by the in-app FAB before
+            // it grew query args, plus shortcuts.xml fallbacks) still matches.
+            composable(
+                route = "note/new?source={source}&stylus={stylus}",
+                arguments = listOf(
+                    navArgument("source") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                    navArgument("stylus") {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    },
+                ),
+            ) {
+                NoteEditorScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToChat = { chatId, draftText ->
+                        val encoded = java.net.URLEncoder.encode(draftText, "UTF-8")
+                        navController.navigate("chat/$chatId?draftText=$encoded")
+                    },
                 )
             }
             composable(

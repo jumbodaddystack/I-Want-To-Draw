@@ -4,8 +4,8 @@
 
 ## Status
 
-- **Current phase:** Phase 2 — 2.1–2.8 code landed; Phase 1 + Phase 2 device verification still pending
-- **Next sub-phase:** [3.1 — Deep-link plumbing + home-screen static shortcut](./STYLUS_NOTES_PHASE_3.md#sub-phase-31--deep-link-plumbing--home-screen-static-shortcut)
+- **Current phase:** Phase 3 — 3.1 code landed; Phase 1 + Phase 2 device verification still pending
+- **Next sub-phase:** [3.2 — Quick Settings tile](./STYLUS_NOTES_PHASE_3.md#sub-phase-32--quick-settings-tile)
 - **Last verified device pass:** none yet (Phase 1 + Phase 2 matrices to be run on hardware)
 
 ## Phase index
@@ -51,7 +51,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 
 ### Phase 3 — Quick capture · [`details`](./STYLUS_NOTES_PHASE_3.md)
 
-- [ ] **3.1** Deep-link plumbing + home-screen static shortcut ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-31--deep-link-plumbing--home-screen-static-shortcut))
+- [x] **3.1** Deep-link plumbing + home-screen static shortcut ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-31--deep-link-plumbing--home-screen-static-shortcut))
 - [ ] **3.2** Quick Settings tile ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-32--quick-settings-tile))
 - [ ] **3.3** `ACTION_CREATE_NOTE` activity-alias (Android 14 default note-taking app) ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-33--action_create_note-activity-alias-android-14-default-note-taking-app))
 - [ ] **3.4** Sketch composer attachment sheet + verification ([details](./STYLUS_NOTES_PHASE_3.md#sub-phase-34--sketch-composer-attachment-sheet--phase-3-verification))
