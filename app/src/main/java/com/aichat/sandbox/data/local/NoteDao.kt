@@ -17,6 +17,14 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE id = :noteId")
     suspend fun getNote(noteId: String): Note?
 
+    /**
+     * Reactive variant used by the chat-side pinned-note chip (sub-phase 4.4)
+     * — the chip's title updates as the user renames the pinned note without
+     * needing a chat-level refresh.
+     */
+    @Query("SELECT * FROM notes WHERE id = :noteId")
+    fun observeNote(noteId: String): Flow<Note?>
+
     /** Notes that have never been thumbnailed yet — used for the backfill pass. */
     @Query("SELECT * FROM notes WHERE thumbnailPath IS NULL")
     suspend fun getNotesMissingThumbnail(): List<Note>

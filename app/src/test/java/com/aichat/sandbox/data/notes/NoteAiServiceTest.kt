@@ -255,6 +255,8 @@ class NoteAiServiceTest {
             messages: List<Message>,
             onRetryAttempt: ((Int) -> Unit)?,
             tools: List<ToolDefinition>?,
+            extraImageOnLastUserTurn: ByteArray?,
+            extraSystemSuffix: String?,
         ): Flow<StreamEvent> {
             lastChat = chat
             lastMessages = messages

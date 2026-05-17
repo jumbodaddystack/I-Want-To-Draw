@@ -123,11 +123,18 @@ class ApiClient @Inject constructor() : ChatStreamer {
         chat: Chat,
         messages: List<Message>,
         onRetryAttempt: ((Int) -> Unit)?,
-        tools: List<com.aichat.sandbox.data.model.ToolDefinition>?
+        tools: List<com.aichat.sandbox.data.model.ToolDefinition>?,
+        extraImageOnLastUserTurn: ByteArray?,
+        extraSystemSuffix: String?,
     ): Flow<StreamEvent> = flow {
         try {
             val api = buildApi(baseUrl, apiKey)
-            val apiMessages = buildApiMessages(chat, messages)
+            val apiMessages = buildApiMessages(
+                chat = chat,
+                messages = messages,
+                extraImageOnLastUserTurn = extraImageOnLastUserTurn,
+                extraSystemSuffix = extraSystemSuffix,
+            )
             val request = ChatCompletionRequest(
                 model = chat.model,
                 messages = apiMessages,
@@ -287,12 +294,43 @@ class ApiClient @Inject constructor() : ChatStreamer {
         }
     }
 
-    private fun buildApiMessages(chat: Chat, messages: List<Message>): List<ApiMessage> {
+    private fun buildApiMessages(
+        chat: Chat,
+        messages: List<Message>,
+        extraImageOnLastUserTurn: ByteArray? = null,
+        extraSystemSuffix: String? = null,
+    ): List<ApiMessage> {
         val apiMessages = mutableListOf<ApiMessage>()
-        if (chat.systemMessage.isNotBlank()) {
-            apiMessages.add(ApiMessage(role = "system", content = chat.systemMessage))
+        // Sub-phase 4.4 non-vision branch: the pinned note's OCR text rides
+        // in the system stream so the model treats it as ambient context
+        // rather than something the user just typed. Kept in the same system
+        // turn (not merged onto `chat.systemMessage`) so the user's persisted
+        // system prompt is never mutated.
+        val systemBase = chat.systemMessage.takeIf { it.isNotBlank() }
+        val systemSuffix = extraSystemSuffix?.takeIf { it.isNotBlank() }
+        if (systemBase != null || systemSuffix != null) {
+            val combined = when {
+                systemBase != null && systemSuffix != null -> "$systemBase\n\n$systemSuffix"
+                systemBase != null -> systemBase
+                else -> systemSuffix!!
+            }
+            apiMessages.add(ApiMessage(role = "system", content = combined))
         }
-        messages.forEach { msg ->
+        // Identify the last user-role index in the source list so we can
+        // append the pinned-context image to *that* turn's content parts as
+        // we walk through. Tool / assistant turns intermixed afterwards
+        // don't see the injected image, which matches the spec: the image
+        // is part of the user's most recent question, not the conversation
+        // history.
+        val lastUserIndex = if (extraImageOnLastUserTurn != null) {
+            messages.indexOfLast { it.role == "user" }
+        } else -1
+        val extraImageDataUri: String? = if (lastUserIndex >= 0 && extraImageOnLastUserTurn != null) {
+            "data:image/png;base64," +
+                android.util.Base64.encodeToString(extraImageOnLastUserTurn, android.util.Base64.NO_WRAP)
+        } else null
+        messages.forEachIndexed { index, msg ->
+            val attachExtraImage = index == lastUserIndex && extraImageDataUri != null
             when {
                 // Tool result message
                 msg.role == "tool" && msg.metadata != null -> {
@@ -339,9 +377,27 @@ class ApiClient @Inject constructor() : ChatStreamer {
                     } catch (e: Exception) {
                         Log.w("ApiClient", "Failed to parse image metadata", e)
                     }
+                    if (attachExtraImage && extraImageDataUri != null) {
+                        contentParts.add(
+                            ImageContentPart(imageUrl = ImageUrl(url = extraImageDataUri))
+                        )
+                    }
                     apiMessages.add(ApiMessage(role = msg.role, content = contentParts))
                 }
-                // Standard text message
+                // Standard text message — promotes to multimodal content
+                // parts only when we need to inject the pinned-note image,
+                // so the existing text path stays a plain string for the
+                // overwhelming majority of turns.
+                attachExtraImage && extraImageDataUri != null -> {
+                    val contentParts = mutableListOf<Any>()
+                    if (msg.content.isNotBlank()) {
+                        contentParts.add(TextContentPart(text = msg.content))
+                    }
+                    contentParts.add(
+                        ImageContentPart(imageUrl = ImageUrl(url = extraImageDataUri))
+                    )
+                    apiMessages.add(ApiMessage(role = msg.role, content = contentParts))
+                }
                 else -> {
                     apiMessages.add(ApiMessage(role = msg.role, content = msg.content))
                 }

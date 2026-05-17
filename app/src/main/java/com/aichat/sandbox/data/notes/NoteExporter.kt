@@ -202,7 +202,7 @@ class NoteExporter @Inject constructor(
                 )
                 NoteRasterizer.drawBackgroundInWorld(
                     canvas = page.canvas,
-                    style = backgroundStyle,
+                    backgroundStyle = backgroundStyle,
                     worldBounds = tile.worldBounds,
                     effectiveScale = 1f,
                 )

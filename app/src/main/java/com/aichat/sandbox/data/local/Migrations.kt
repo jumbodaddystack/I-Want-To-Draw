@@ -84,3 +84,16 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         )
     }
 }
+
+/**
+ * Migration from version 4 to 5:
+ * Sub-phase 4.4 — pin a note to a chat as transparent per-turn context. Adds
+ * the nullable `pinnedNoteId` column on `chats`; existing rows preserve all
+ * data and default to `null` (no pin). Renders are not persisted alongside —
+ * see `PinnedNoteCache` for the in-memory caching layer used at send time.
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE chats ADD COLUMN pinnedNoteId TEXT")
+    }
+}

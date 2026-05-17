@@ -20,5 +20,15 @@ interface ChatStreamer {
         messages: List<Message>,
         onRetryAttempt: ((Int) -> Unit)? = null,
         tools: List<ToolDefinition>? = null,
+        // Sub-phase 4.4 pinned-note hooks. Both default to `null` so existing
+        // callers (NoteAiService, the chat send path before pinning lands)
+        // don't need to know about them. Wiring contract: the caller decides
+        // which side of the vision branch to populate — vision models get
+        // [extraImageOnLastUserTurn] appended to the trailing user message's
+        // content parts; non-vision models get [extraSystemSuffix] appended
+        // to the system message so the OCR text rides as context, not as a
+        // user turn.
+        extraImageOnLastUserTurn: ByteArray? = null,
+        extraSystemSuffix: String? = null,
     ): Flow<StreamEvent>
 }
