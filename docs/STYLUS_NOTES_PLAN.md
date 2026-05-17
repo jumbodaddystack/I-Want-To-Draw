@@ -4,8 +4,8 @@
 
 ## Status
 
-- **Current phase:** Phase 1 — code complete; awaiting S25 device verification
-- **Next sub-phase:** [2.1 — Vision-capability registry + ML Kit dep + manifest](./STYLUS_NOTES_PHASE_2.md#sub-phase-21--vision-capability-registry--dependencies--manifest)
+- **Current phase:** Phase 2 — 2.1 landed; Phase 1 device verification still pending
+- **Next sub-phase:** [2.2 — Note rasterizer (selection + whole note → PNG bytes)](./STYLUS_NOTES_PHASE_2.md#sub-phase-22--note-rasterizer-selection--whole-note--png-bytes)
 - **Last verified device pass:** none yet (Phase 1 matrix to be run on hardware)
 
 ## Phase index
@@ -40,7 +40,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 
 ### Phase 2 — AI on canvas · [`details`](./STYLUS_NOTES_PHASE_2.md)
 
-- [ ] **2.1** Vision-capability registry + ML Kit dep + manifest ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-21--vision-capability-registry--dependencies--manifest))
+- [x] **2.1** Vision-capability registry + ML Kit dep + manifest ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-21--vision-capability-registry--dependencies--manifest))
 - [ ] **2.2** `NoteRasterizer` (selection + whole note → PNG bytes) ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-22--note-rasterizer-selection--whole-note--png-bytes))
 - [ ] **2.3** `HandwritingOcr` (ML Kit Digital Ink) ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-23--handwriting-ocr-ml-kit-digital-ink))
 - [ ] **2.4** OCR on save (lazy pipeline) ([details](./STYLUS_NOTES_PHASE_2.md#sub-phase-24--ocr-on-save-lazy-pipeline))
