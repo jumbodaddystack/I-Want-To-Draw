@@ -17,10 +17,11 @@ class ToolPaletteStateTest {
         assertTrue(Tool.ERASER_STROKE.isEraser)
         assertTrue(Tool.ERASER_AREA.isEraser)
         assertFalse(Tool.PEN.isEraser)
-        // Lasso landed in sub-phase 1.8; text is still gated behind 1.9.
+        // Lasso landed in sub-phase 1.8, text in sub-phase 1.9.
         assertTrue(Tool.LASSO.enabledInPalette)
         assertTrue(Tool.LASSO.isLasso)
-        assertFalse(Tool.TEXT.enabledInPalette)
+        assertTrue(Tool.TEXT.enabledInPalette)
+        assertTrue(Tool.TEXT.isText)
     }
 
     @Test

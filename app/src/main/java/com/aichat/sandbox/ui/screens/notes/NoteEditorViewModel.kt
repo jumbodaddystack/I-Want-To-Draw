@@ -511,6 +511,10 @@ class NoteEditorViewModel @Inject constructor(
         )
         repository.saveNote(toPersist, items = items.toList())
         _note.value = toPersist
+        // Fire-and-forget on the repository's singleton-scoped background scope
+        // so the user isn't held on the editor while we rasterize — and so the
+        // job survives this ViewModel being cleared on navigate-back.
+        repository.renderThumbnailAsync(toPersist.id)
         return toPersist.id
     }
 
