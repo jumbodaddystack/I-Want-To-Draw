@@ -189,9 +189,12 @@ fun AppNavigation(
             ) {
                 NoteEditorScreen(
                     onNavigateBack = { navController.popBackStack() },
-                    onNavigateToChat = { chatId, draftText ->
-                        val encoded = java.net.URLEncoder.encode(draftText, "UTF-8")
-                        navController.navigate("chat/$chatId?draftText=$encoded")
+                    onNavigateToChat = { chatId ->
+                        // Sub-phase 4.3: PNG + draft text live in
+                        // [PendingDraftStore], keyed by chatId. The chat
+                        // screen reads + clears the entry once, so
+                        // navigation is a plain `chat/{id}` push.
+                        navController.navigate("chat/$chatId")
                     },
                 )
             }
@@ -201,13 +204,8 @@ fun AppNavigation(
             ) {
                 NoteEditorScreen(
                     onNavigateBack = { navController.popBackStack() },
-                    onNavigateToChat = { chatId, draftText ->
-                        // URL-encode so reply text containing & or ? doesn't
-                        // shred the query string. The chat-side composable
-                        // consumes the arg once and clears it via the VM
-                        // so rotation can't re-prefill.
-                        val encoded = java.net.URLEncoder.encode(draftText, "UTF-8")
-                        navController.navigate("chat/$chatId?draftText=$encoded")
+                    onNavigateToChat = { chatId ->
+                        navController.navigate("chat/$chatId")
                     },
                 )
             }

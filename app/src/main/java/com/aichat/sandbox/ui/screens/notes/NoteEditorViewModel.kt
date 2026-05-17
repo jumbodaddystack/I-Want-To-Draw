@@ -9,6 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aichat.sandbox.data.local.PreferencesManager
 import com.aichat.sandbox.data.model.ApiProvider
+import com.aichat.sandbox.data.model.Chat
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.notes.AiChunk
@@ -18,6 +19,7 @@ import com.aichat.sandbox.data.notes.HandwritingOcr.OcrModelState
 import com.aichat.sandbox.data.notes.NoteAiService
 import com.aichat.sandbox.data.notes.NoteExporter
 import com.aichat.sandbox.data.notes.PdfLayout
+import com.aichat.sandbox.data.notes.PendingDraftStore
 import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.ui.components.notes.HitTest
@@ -185,6 +187,28 @@ class NoteEditorViewModel @Inject constructor(
             started = SharingStarted.Eagerly,
             initialValue = ApiProvider.defaults.flatMap { it.models },
         )
+
+    /**
+     * Existing chats, newest first — feeds the sub-phase 4.3
+     * [SendToChatSheet] picker. Sourced from the same DAO query that backs
+     * the chat-list tab so ordering stays consistent.
+     */
+    val chats: StateFlow<List<Chat>> = chatRepository.getAllChats()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = emptyList(),
+        )
+
+    /**
+     * Sub-phase 4.3 send-to-chat sheet state. `null` means hidden; non-null
+     * captures whether the picker was opened from the editor's share menu
+     * (whole-note PNG + OCR snippet) or from an AI reply (selection PNG +
+     * reply text), so the chat-pick callback knows how to build the
+     * payload.
+     */
+    private val _sendToChatMode = MutableStateFlow<SendToChatMode?>(null)
+    val sendToChatMode: StateFlow<SendToChatMode?> = _sendToChatMode.asStateFlow()
 
     init {
         if (entrySource != null || entryStylus) {
@@ -822,27 +846,79 @@ class NoteEditorViewModel @Inject constructor(
     }
 
     /**
-     * "Send to chat" reply action (sub-phase 2.8). Creates a brand-new
-     * chat via [ChatRepository.createChat] using the user's current
-     * default model + base URL (re-read from preferences inside
-     * `createChat`), then returns the new chat id so the editor screen can
-     * navigate with the reply text as a `?draftText=` arg.
-     *
-     * **Decision** (per the phase doc): we do NOT auto-send. The reply
-     * lands in the composer so the user reviews and confirms what's
-     * actually sent. The Phase 4 "Send to chat" picker will replace this
-     * with an existing-chat sheet.
-     *
-     * Returns null for streaming, missing, or empty turns so the caller
-     * can no-op safely.
+     * Open the sub-phase 4.3 chat picker for the editor's share menu. The
+     * picker calls back with the chosen chat id (existing or fresh-via
+     * "+ New chat"); see [finalizeSendToChat].
      */
-    suspend fun prepareSendReplyToChat(turnId: String): SendReplyResult? {
-        val turn = _aiSheetState.value.turns.firstOrNull { it.id == turnId } ?: return null
-        if (turn.state !is TurnState.Done) return null
-        val body = turn.replyBuffer
-        if (body.isEmpty()) return null
-        val chat = chatRepository.createChat()
-        return SendReplyResult(chatId = chat.id, draftText = body)
+    fun openSendNoteToChatPicker() {
+        _sendToChatMode.value = SendToChatMode.ShareNote
+    }
+
+    /**
+     * Open the sub-phase 4.3 chat picker for an AI side-sheet reply. Only
+     * a Done, non-empty turn qualifies — Streaming/Error turns silently
+     * no-op so the action row in the side sheet doesn't need defensive
+     * gating beyond what it already does.
+     */
+    fun openSendReplyToChatPicker(turnId: String) {
+        val turn = _aiSheetState.value.turns.firstOrNull { it.id == turnId } ?: return
+        if (turn.state !is TurnState.Done) return
+        if (turn.replyBuffer.isEmpty()) return
+        _sendToChatMode.value = SendToChatMode.AiReply(turnId)
+    }
+
+    /** Dismiss the picker without sending. Safe to call when already hidden. */
+    fun dismissSendToChatPicker() {
+        _sendToChatMode.value = null
+    }
+
+    /**
+     * Resolve the picker selection into a navigation target (sub-phase 4.3).
+     *
+     * [chatIdOrNull] is the picked chat's id, or `null` to mint a fresh
+     * one via [ChatRepository.createChat]. Renders the appropriate PNG
+     * (whole-note for share-menu mode, selection-or-whole-note for AI-reply
+     * mode), stashes it on [PendingDraftStore] keyed by the resolved chat
+     * id, and returns that id so the screen can issue a single navigation.
+     *
+     * Closes the picker before doing any work so the sheet animates out
+     * while the rasterizer runs on the IO dispatcher — the user perceives
+     * the chat opening rather than a stalled sheet.
+     *
+     * Returns null when the picker isn't open (callers shouldn't hit this,
+     * but the guard keeps the VM honest under racey UI events).
+     */
+    suspend fun finalizeSendToChat(chatIdOrNull: String?): String? {
+        val mode = _sendToChatMode.value ?: return null
+        _sendToChatMode.value = null
+        // Save first so the rasterized PNG reflects the user's most-recent
+        // strokes — same contract as [sharePng] / [sharePdf].
+        commitTextEdit()
+        save()
+        val targetChatId = chatIdOrNull ?: chatRepository.createChat().id
+        val (renderItems, draftText) = when (mode) {
+            is SendToChatMode.ShareNote -> {
+                val snippet = _note.value.ocrText
+                    ?.take(OCR_SNIPPET_MAX_LEN)
+                    ?.takeIf { it.isNotBlank() }
+                items.toList() to snippet
+            }
+            is SendToChatMode.AiReply -> {
+                val turn = _aiSheetState.value.turns.firstOrNull { it.id == mode.turnId }
+                    ?: return null
+                if (turn.state !is TurnState.Done) return null
+                val body = turn.replyBuffer
+                if (body.isEmpty()) return null
+                val scope = _aiSheetState.value.pendingSelection
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: items.toList()
+                scope to body
+            }
+        }
+        val uri = noteExporter.exportPng(note = _note.value, items = renderItems)
+        PendingDraftStore.put(targetChatId, imageUri = uri, draftText = draftText)
+        if (mode is SendToChatMode.AiReply) closeAiSheet()
+        return targetChatId
     }
 
     private fun anchorPointForInsert(scope: List<NoteItem>?): Pair<Float, Float> {
@@ -1148,16 +1224,35 @@ class NoteEditorViewModel @Inject constructor(
 
         /** Shown when Convert-to-text can't recover any words. */
         private const val NO_HANDWRITING_MESSAGE: String = "Couldn't recognize handwriting."
+
+        /**
+         * Cap on the OCR snippet pre-filled into the chat composer when the
+         * editor's share menu sends a whole note (sub-phase 4.3). 200 chars
+         * — long enough to identify the note, short enough to stay below the
+         * "tap and type your prompt" threshold so the user still feels they
+         * own the message.
+         */
+        private const val OCR_SNIPPET_MAX_LEN: Int = 200
     }
 }
 
 /**
- * Result of [NoteEditorViewModel.prepareSendReplyToChat] (sub-phase 2.8).
- * Bundles the freshly-created chat id with the reply text so the editor
- * screen can issue a single `chat/{id}?draftText=…` navigation without
- * re-reading the turn from the side-sheet state.
+ * Sub-phase 4.3 picker mode for the [SendToChatSheet]. Drives both how the
+ * outgoing payload is rendered (whole-note PNG vs selection-or-whole-note
+ * PNG) and what text lands in the destination composer (OCR snippet vs AI
+ * reply body).
  */
-data class SendReplyResult(val chatId: String, val draftText: String)
+sealed interface SendToChatMode {
+    /** Editor TopAppBar share-menu entry: whole-note PNG + OCR snippet. */
+    data object ShareNote : SendToChatMode
+
+    /**
+     * AI side-sheet per-reply action. The PNG follows the turn's scope
+     * (selection if present, else whole note); the draft text is the reply
+     * body.
+     */
+    data class AiReply(val turnId: String) : SendToChatMode
+}
 
 /**
  * Coarse "is OCR doing something right now?" signal for the editor's TopAppBar

@@ -16,6 +16,7 @@ import com.aichat.sandbox.data.model.MessageRole
 import com.aichat.sandbox.data.model.ModelPricing
 import com.aichat.sandbox.data.model.ToolCallMetadata
 import com.aichat.sandbox.data.local.PreferencesManager
+import com.aichat.sandbox.data.notes.PendingDraftStore
 import com.aichat.sandbox.data.remote.ApiResult
 import com.aichat.sandbox.data.remote.StreamEvent
 import com.aichat.sandbox.data.repository.ChatRepository
@@ -70,13 +71,20 @@ class ChatViewModel @Inject constructor(
 
     private val chatId: String = savedStateHandle.get<String>("chatId") ?: ""
 
+    // Composer prefill: collapse the sub-phase 2.8 nav-arg path and the
+    // sub-phase 4.3 [PendingDraftStore] handover into the same initial
+    // state. The store wins when present (the 4.3 picker always writes
+    // there); the URL arg is the legacy fallback for any caller still
+    // navigating with `?draftText=`. Both are consumed exactly once on
+    // VM construction so rotation can't re-prefill.
+    private val initialDraft: PendingDraftStore.Entry? = PendingDraftStore.consume(chatId)
+
     private val _uiState = MutableStateFlow(
         ChatUiState(
-            // Nav arg is always present (defaults to "") via the route's
-            // navArgument; treat blank as "no draft" so we don't open a Chat
-            // with a pre-focused empty composer when no draft was passed.
-            draftText = savedStateHandle.get<String>("draftText")
-                ?.takeIf { it.isNotBlank() },
+            draftText = initialDraft?.draftText
+                ?: savedStateHandle.get<String>("draftText")
+                    ?.takeIf { it.isNotBlank() },
+            attachedImages = listOfNotNull(initialDraft?.imageUri),
         )
     )
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()

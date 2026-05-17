@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Image
@@ -46,7 +47,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun NoteEditorScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToChat: (chatId: String, draftText: String) -> Unit = { _, _ -> },
+    onNavigateToChat: (chatId: String) -> Unit = { },
     viewModel: NoteEditorViewModel = hiltViewModel(),
 ) {
     val note by viewModel.note.collectAsState()
@@ -59,6 +60,8 @@ fun NoteEditorScreen(
     val textEditTarget by viewModel.textEditTarget.collectAsState()
     val aiSheetState by viewModel.aiSheetState.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
+    val chats by viewModel.chats.collectAsState()
+    val sendToChatMode by viewModel.sendToChatMode.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
@@ -164,6 +167,10 @@ fun NoteEditorScreen(
                                 menuExpanded = false
                                 pdfDialogVisible = true
                             },
+                            onSendToChat = {
+                                menuExpanded = false
+                                viewModel.openSendNoteToChatPicker()
+                            },
                         )
                     }
                 },
@@ -265,6 +272,24 @@ fun NoteEditorScreen(
                 },
             )
         }
+        if (sendToChatMode != null) {
+            SendToChatSheet(
+                chats = chats,
+                onPickExisting = { chatId ->
+                    scope.launch {
+                        val resolved = viewModel.finalizeSendToChat(chatId) ?: return@launch
+                        onNavigateToChat(resolved)
+                    }
+                },
+                onPickNewChat = {
+                    scope.launch {
+                        val resolved = viewModel.finalizeSendToChat(null) ?: return@launch
+                        onNavigateToChat(resolved)
+                    }
+                },
+                onDismiss = viewModel::dismissSendToChatPicker,
+            )
+        }
         AiSideSheet(
             state = aiSheetState,
             onInputChanged = viewModel::onAiInputChanged,
@@ -292,15 +317,10 @@ fun NoteEditorScreen(
                 viewModel.insertReplyAsTextBox(turnId, cx, cy)
             },
             onSendReplyToChat = { turnId ->
-                scope.launch {
-                    // Persist current edits first so a chat title generated
-                    // off the new note has accurate context if the user
-                    // navigates back later.
-                    viewModel.commitTextEdit()
-                    viewModel.save()
-                    val result = viewModel.prepareSendReplyToChat(turnId) ?: return@launch
-                    onNavigateToChat(result.chatId, result.draftText)
-                }
+                // Open the sub-phase 4.3 picker; navigation happens once the
+                // user picks an existing chat or "+ New chat". The VM
+                // already gates on Done / non-empty turns.
+                viewModel.openSendReplyToChatPicker(turnId)
             },
             onModelSelected = viewModel::setAiModelId,
             availableModels = availableModels,
@@ -326,6 +346,7 @@ private fun EditorOverflowMenu(
     onBackgroundSelect: (String) -> Unit,
     onSharePng: () -> Unit,
     onSharePdf: () -> Unit,
+    onSendToChat: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         Text(
@@ -352,6 +373,20 @@ private fun EditorOverflowMenu(
                 )
             },
             onClick = onSharePdf,
+        )
+        // Sub-phase 4.3: in-app picker over existing chats. PNG render +
+        // OCR snippet handover is done via [PendingDraftStore]; the user
+        // lands in the chosen chat with the attachment already in the
+        // composer strip.
+        DropdownMenuItem(
+            text = { Text("Send to chat") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                    contentDescription = null,
+                )
+            },
+            onClick = onSendToChat,
         )
         HorizontalDivider()
         Text(
