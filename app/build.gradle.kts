@@ -81,6 +81,11 @@ dependencies {
     // Stylus input: one-frame look-ahead for ink (sub-phase 1.4).
     implementation("androidx.input:input-motionprediction:1.0.0-beta05")
 
+    // On-device handwriting OCR for the notes AI pipeline (sub-phase 2.1+).
+    // The model itself is fetched at runtime via RemoteModelManager, so no
+    // ML Kit DEPENDENCIES meta-data tag is required for digital-ink.
+    implementation("com.google.mlkit:digital-ink-recognition:18.1.0")
+
     // Room
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

@@ -5,7 +5,9 @@ import android.graphics.Bitmap
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.data.notes.NoteRasterizer
 import com.aichat.sandbox.data.notes.ThumbnailRenderer
+import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,7 +72,15 @@ class NoteRepository @Inject constructor(
     suspend fun renderThumbnail(noteId: String): String? = withContext(Dispatchers.Default) {
         val note = noteDao.getNote(noteId) ?: return@withContext null
         val items = noteDao.getItems(noteId)
-        val bitmap = ThumbnailRenderer.render(note, items)
+        // Thumbnails use a plain paper background — grid styling reads as noise
+        // at 512px and would change every list cell's appearance subtly. Empty
+        // notes drop through to ThumbnailRenderer's titled stub.
+        val bitmap = NoteRasterizer.renderNote(
+            note = note,
+            items = items,
+            maxEdgePx = ThumbnailRenderer.MAX_DIM_PX,
+            backgroundStyle = BackgroundLayer.STYLE_PLAIN,
+        ) ?: ThumbnailRenderer.renderStub(note)
         val dir = thumbnailDir().apply { if (!exists()) mkdirs() }
         val finalFile = File(dir, "$noteId.png")
         val tmpFile = File(dir, "$noteId.png.tmp")
