@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.text.Spanned
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -26,11 +27,20 @@ fun MarkdownText(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = Color.Unspecified,
+    // While streaming we render with a Markwon instance that omits the
+    // JLatexMath plugin, which throws on unbalanced `$…$` fragments that
+    // appear naturally as tokens arrive. Once the stream finalizes, the
+    // call site flips this back to false and the full renderer (with
+    // LaTeX) takes over.
+    isStreaming: Boolean = false,
     markwonProvider: MarkwonProvider = remember { MarkwonProvider() }
 ) {
     val context = LocalContext.current
     val isDarkTheme = isSystemInDarkTheme()
-    val markwon = remember(isDarkTheme) { markwonProvider.provide(context, isDarkTheme) }
+    val markwon = remember(isDarkTheme, isStreaming) {
+        if (isStreaming) markwonProvider.provideStreaming(context, isDarkTheme)
+        else markwonProvider.provide(context, isDarkTheme)
+    }
     val linkColor = MaterialTheme.colorScheme.primary.toArgb()
     val textColorArgb = if (color != Color.Unspecified) color.toArgb() else null
     val codeBlocks = remember(text) { extractCodeBlocks(text) }
@@ -53,7 +63,7 @@ fun MarkdownText(
                 // No code blocks - render as single TextView
                 val textView = createStyledTextView(container.context, textColorArgb, linkColor)
                 container.addView(textView)
-                markwon.setMarkdown(textView, text)
+                renderMarkdownSafe(markwon, textView, text)
             } else {
                 // Split content around code blocks and render each section
                 var lastEnd = 0
@@ -64,7 +74,7 @@ fun MarkdownText(
                         if (before.isNotEmpty()) {
                             val tv = createStyledTextView(container.context, textColorArgb, linkColor)
                             container.addView(tv)
-                            markwon.setMarkdown(tv, before)
+                            renderMarkdownSafe(markwon, tv, before)
                         }
                     }
 
@@ -89,12 +99,24 @@ fun MarkdownText(
                     if (after.isNotEmpty()) {
                         val tv = createStyledTextView(container.context, textColorArgb, linkColor)
                         container.addView(tv)
-                        markwon.setMarkdown(tv, after)
+                        renderMarkdownSafe(markwon, tv, after)
                     }
                 }
             }
         }
     )
+}
+
+// Markwon (especially the LaTeX plugin) can throw on malformed input.
+// Falling back to the raw text keeps the message readable instead of
+// taking down the whole composition.
+private fun renderMarkdownSafe(markwon: Markwon, textView: TextView, text: String) {
+    try {
+        markwon.setMarkdown(textView, text)
+    } catch (t: Throwable) {
+        Log.w("MarkdownText", "markwon.setMarkdown failed; falling back to plain text", t)
+        textView.text = text
+    }
 }
 
 private fun createStyledTextView(
@@ -143,7 +165,7 @@ private fun createCodeBlockWithCopyButton(
             setLinkTextColor(linkColor)
         }
         addView(codeTextView)
-        markwon.setMarkdown(codeTextView, fullMarkdown)
+        renderMarkdownSafe(markwon, codeTextView, fullMarkdown)
 
         // Copy button overlay
         val copyButton = TextView(context).apply {

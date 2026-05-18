@@ -4,6 +4,7 @@ import android.util.Log
 import com.aichat.sandbox.BuildConfig
 import com.aichat.sandbox.data.model.*
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.google.gson.JsonSyntaxException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -25,6 +26,12 @@ sealed class ApiResult<out T> {
     data class Error(val message: String) : ApiResult<Nothing>()
     data object Loading : ApiResult<Nothing>()
 }
+
+private fun JsonObject.intOrNull(key: String): Int? =
+    get(key)?.takeIf { !it.isJsonNull }?.runCatching { asInt }?.getOrNull()
+
+private fun JsonObject.stringOrNull(key: String): String? =
+    get(key)?.takeIf { !it.isJsonNull }?.runCatching { asString }?.getOrNull()
 
 sealed class StreamEvent {
     data class Delta(val content: String) : StreamEvent()
@@ -193,7 +200,8 @@ class ApiClient @Inject constructor() : ChatStreamer {
                     try {
                         val jsonObj = com.google.gson.JsonParser.parseString(data).asJsonObject
                         val choices = jsonObj.getAsJsonArray("choices")
-                        val delta = choices?.get(0)?.asJsonObject?.getAsJsonObject("delta")
+                        val delta = choices?.takeIf { it.size() > 0 }
+                            ?.get(0)?.asJsonObject?.getAsJsonObject("delta")
 
                         // Handle text content delta
                         val content = delta?.get("content")?.takeIf { !it.isJsonNull }?.asString
@@ -205,15 +213,20 @@ class ApiClient @Inject constructor() : ChatStreamer {
                         val toolCallsArr = delta?.getAsJsonArray("tool_calls")
                         if (toolCallsArr != null) {
                             for (tc in toolCallsArr) {
-                                val tcObj = tc.asJsonObject
-                                val index = tcObj.get("index").asInt
+                                val tcObj = tc?.asJsonObject ?: continue
+                                // `index` should always be present per the OpenAI
+                                // streaming contract, but some compat backends
+                                // omit it on the first delta — fall back to the
+                                // next slot rather than NPE'ing the whole stream.
+                                val index = tcObj.intOrNull("index")
+                                    ?: toolCallAccumulator.size
                                 val acc = toolCallAccumulator.getOrPut(index) { ToolCallAccumulator() }
-                                tcObj.get("id")?.takeIf { !it.isJsonNull }?.asString?.let { acc.id = it }
-                                tcObj.get("type")?.takeIf { !it.isJsonNull }?.asString?.let { acc.type = it }
+                                tcObj.stringOrNull("id")?.let { acc.id = it }
+                                tcObj.stringOrNull("type")?.let { acc.type = it }
                                 val funcObj = tcObj.getAsJsonObject("function")
                                 if (funcObj != null) {
-                                    funcObj.get("name")?.takeIf { !it.isJsonNull }?.asString?.let { acc.functionName = it }
-                                    funcObj.get("arguments")?.takeIf { !it.isJsonNull }?.asString?.let { acc.arguments.append(it) }
+                                    funcObj.stringOrNull("name")?.let { acc.functionName = it }
+                                    funcObj.stringOrNull("arguments")?.let { acc.arguments.append(it) }
                                 }
                             }
                         }
@@ -225,8 +238,13 @@ class ApiClient @Inject constructor() : ChatStreamer {
                             val toolCalls = buildAccumulatedToolCalls(toolCallAccumulator)
                             collector.emit(StreamEvent.Complete(parsedUsage, toolCalls))
                         }
-                    } catch (e: JsonSyntaxException) {
-                        Log.w("ApiClient", "Skipping malformed stream chunk: ${data.take(100)}", e)
+                    } catch (t: Throwable) {
+                        // One bad chunk shouldn't poison the whole stream.
+                        // CancellationException needs to propagate so the
+                        // job can actually cancel; everything else is logged
+                        // and skipped.
+                        if (t is kotlinx.coroutines.CancellationException) throw t
+                        Log.w("ApiClient", "Skipping malformed stream chunk: ${data.take(100)}", t)
                     }
                 }
             }

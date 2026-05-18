@@ -68,11 +68,11 @@ data class Choice(
 
 data class Usage(
     @SerializedName("prompt_tokens")
-    val promptTokens: Int,
+    val promptTokens: Int = 0,
     @SerializedName("completion_tokens")
-    val completionTokens: Int,
+    val completionTokens: Int = 0,
     @SerializedName("total_tokens")
-    val totalTokens: Int
+    val totalTokens: Int = 0
 )
 
 data class ApiError(

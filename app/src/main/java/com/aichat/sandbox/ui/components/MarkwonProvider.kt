@@ -24,4 +24,17 @@ class MarkwonProvider @Inject constructor() {
             })
             .build()
     }
+
+    // Streaming variant: omits JLatexMathPlugin because it throws on
+    // unbalanced `$…$` fragments that appear mid-stream while the
+    // assistant is still emitting tokens. The full renderer (with LaTeX)
+    // takes over once the message bubble is terminal.
+    fun provideStreaming(context: Context, isDarkTheme: Boolean): Markwon {
+        return Markwon.builder(context)
+            .usePlugin(StrikethroughPlugin.create())
+            .usePlugin(TablePlugin.create(context))
+            .usePlugin(TaskListPlugin.create(context))
+            .usePlugin(HtmlPlugin.create())
+            .build()
+    }
 }

@@ -8,6 +8,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import com.aichat.sandbox.data.model.ApiProvider
 import com.aichat.sandbox.data.model.ChatSettings
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -58,7 +59,16 @@ class PreferencesManager @Inject constructor(
 
     val apiKey: Flow<String> = dataStore.data.map { it[API_KEY] ?: "" }
     val apiBaseUrl: Flow<String> = dataStore.data.map { it[API_BASE_URL] ?: ChatSettings.Defaults.API_BASE_URL }
-    val defaultModel: Flow<String> = dataStore.data.map { it[DEFAULT_MODEL] ?: ChatSettings.Defaults.MODEL }
+    val defaultModel: Flow<String> = dataStore.data.map { prefs ->
+        // Coerce stale persisted defaults (e.g. "gpt-4.1") onto a model
+        // that still exists in the registry, plus any user-added custom
+        // models. Avoids the selector showing a retired ID after a
+        // model-list refresh and avoids hitting a removed model on send.
+        val persisted = prefs[DEFAULT_MODEL] ?: return@map ChatSettings.Defaults.MODEL
+        val customs = readCustomModelsFlat(prefs)
+        if (persisted in ApiProvider.allKnownModels || persisted in customs) persisted
+        else ChatSettings.Defaults.MODEL
+    }
     val defaultTemperature: Flow<Float> = dataStore.data.map { it[DEFAULT_TEMPERATURE] ?: ChatSettings.Defaults.TEMPERATURE }
     val defaultTopP: Flow<Float> = dataStore.data.map { it[DEFAULT_TOP_P] ?: ChatSettings.Defaults.TOP_P }
     val defaultMaxTokens: Flow<Int> = dataStore.data.map { it[DEFAULT_MAX_TOKENS] ?: ChatSettings.Defaults.MAX_TOKENS }
@@ -74,6 +84,17 @@ class PreferencesManager @Inject constructor(
             gson.fromJson<Map<String, List<String>>>(json, type) ?: emptyMap()
         } catch (e: Exception) {
             emptyMap()
+        }
+    }
+
+    private fun readCustomModelsFlat(prefs: Preferences): Set<String> {
+        val json = prefs[CUSTOM_MODELS] ?: return emptySet()
+        return try {
+            val type = object : TypeToken<Map<String, List<String>>>() {}.type
+            gson.fromJson<Map<String, List<String>>>(json, type)
+                ?.values?.flatten()?.toSet() ?: emptySet()
+        } catch (e: Exception) {
+            emptySet()
         }
     }
 
