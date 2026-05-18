@@ -16,10 +16,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.HorizontalRule
+import androidx.compose.material.icons.filled.Pentagon
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.outlined.Highlight
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.FilterChip
@@ -50,6 +55,8 @@ fun ToolPalette(
     state: ToolPaletteState,
     modifier: Modifier = Modifier,
     onPickCustomColor: () -> Unit = {},
+    snapMask: Int = Snap.MASK_ANGLE or Snap.MASK_ENDPOINT,
+    onToggleSnap: (Int) -> Unit = { },
 ) {
     val selected = state.selected
     Surface(
@@ -75,6 +82,10 @@ fun ToolPalette(
                 LassoHintRow()
             } else if (selected.isText) {
                 TextHintRow()
+            } else if (selected.isShape) {
+                // Phase 6.2 — shape tools reuse the active ink color + width.
+                InkConfigRow(state = state, onPickCustomColor = onPickCustomColor)
+                SnapChipRow(snapMask = snapMask, onToggle = onToggleSnap)
             }
         }
     }
@@ -130,6 +141,11 @@ private fun Tool.icon(): ImageVector = when (this) {
     Tool.ERASER_AREA -> Icons.Outlined.RadioButtonUnchecked
     Tool.LASSO -> Icons.Outlined.Highlight
     Tool.TEXT -> Icons.Filled.TextFields
+    Tool.LINE -> Icons.Filled.HorizontalRule
+    Tool.RECT -> Icons.Filled.CheckBoxOutlineBlank
+    Tool.ELLIPSE -> Icons.Outlined.Circle
+    Tool.ARROW -> Icons.AutoMirrored.Filled.TrendingFlat
+    Tool.POLYGON -> Icons.Filled.Pentagon
 }
 
 @Composable
@@ -248,6 +264,36 @@ private fun TextHintRow() {
             style = MaterialTheme.typography.labelMedium,
         )
     }
+}
+
+/**
+ * Phase 6.3 — three-chip snap toggle row. Each chip lights up when its
+ * mask bit is set; tap flips that single bit.
+ */
+@Composable
+private fun SnapChipRow(snapMask: Int, onToggle: (Int) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "Snap",
+            style = MaterialTheme.typography.labelMedium,
+        )
+        SnapToggleChip("15°", snapMask and Snap.MASK_ANGLE != 0) { onToggle(Snap.MASK_ANGLE) }
+        SnapToggleChip("Grid", snapMask and Snap.MASK_GRID != 0) { onToggle(Snap.MASK_GRID) }
+        SnapToggleChip("Ends", snapMask and Snap.MASK_ENDPOINT != 0) { onToggle(Snap.MASK_ENDPOINT) }
+    }
+}
+
+@Composable
+private fun SnapToggleChip(label: String, on: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = on,
+        onClick = onClick,
+        label = { Text(label) },
+    )
 }
 
 @Composable

@@ -6,6 +6,31 @@ Parent plan: [`ARTIST_CANVAS_PLAN.md`](./ARTIST_CANVAS_PLAN.md).
 
 Sequencing inside the phase is deliberate — 6.4 (layers) touches every render path, so we land 6.1–6.3 first to establish the selection + shape primitives the layer panel will reference. 6.5 / 6.6 ride on top of the existing tool palette. 6.7 / 6.8 are largely independent.
 
+## Progress (foundation slice)
+
+6.1 + 6.2 + 6.3 + 6.8 shipped on `claude/implement-phase-6-OPwbx` as a single
+PR. They were chosen as a contained, no-schema-change, no-new-permission
+slice that delivers immediate user-visible wins.
+
+Still open in this phase (intentionally deferred):
+
+- **6.4 Layers panel** — touches every render path; needs a one-time
+  migration over every existing note. Highest-risk sub-phase in the doc.
+- **6.5 Brush customization + presets** — new `brush_presets` table,
+  schema version bump (7 → 8), 18 seeded app-scope rows.
+- **6.6 Brush textures** — needs four seamless WebP tiles
+  (smooth / charcoal / watercolour / marker). Shader plumbing is
+  straightforward; the asset commission is the bottleneck.
+- **6.7 Image insert** — schema version bump (8 → 9), new
+  `READ_MEDIA_IMAGES` permission, `filesDir/note-images/` lifecycle,
+  LRU bitmap cache. Mostly independent of layers / presets; could be
+  taken next without 6.4–6.6.
+
+Build order if picking up: **6.4 → 6.5 → 6.6 → 6.7**. 6.4 lands the
+layers schema that 6.5 (brush presets) and the SVG export will eventually
+want to surface; 6.5 introduces the schema 6.6 augments with `textureId`
+references; 6.7 is independent and could land in parallel.
+
 ## Sub-phase 6.1 — Selection handles overlay
 
 ### Scope
@@ -40,6 +65,13 @@ Modified:
 - One undo entry per gesture.
 - Selection survives viewport pan/zoom (handles re-anchor).
 - Hit-targets work with both finger and S-Pen.
+
+### Status (foundation slice)
+
+The overlay shipped with four corner scale handles + rotate in sub-phase
+1.8. This phase added the four edge handles (top / right / bottom / left)
+for single-axis scaling — eight scale handles total. Live preview + undo
+contract carry over from 1.8 unchanged.
 
 ### Non-goals
 
@@ -97,6 +129,33 @@ Modified:
 - A polygon hit-tests correctly inside / outside / on-edge.
 - Existing notes (strokes only) unchanged.
 
+### Status (foundation slice)
+
+Implemented as a single PR alongside 6.1 / 6.3 / 6.8. Files landed:
+
+- `Shape.kt` — sealed interface with five variants.
+- `ShapeCodec.kt` — little-endian binary wire format + JVM-testable
+  `transform(shape, matrix)` helpers used by `EditorAction.TransformItems`.
+- `ShapeRenderer.kt` — Android `Canvas` rasterizer for each variant.
+- Hit-test extensions on `HitTest` (`shapeContainsPoint`,
+  `shapeIntersectsPolygon`) — JVM-only math, no Android deps.
+- `Tool` enum gains `LINE / RECT / ELLIPSE / ARROW / POLYGON`; palette
+  shows them with material icons.
+- `DrawingSurface` routes shape tools through a new
+  `handleShapeToolEvent` with rubber-band preview, polygon polyline
+  capture, and eraser support.
+- `NoteRasterizer` + `DrawingSurface` dispatchers cover `kind=shape`
+  for PNG / PDF / on-canvas render.
+- `NoteEditorViewModel.onLassoCompleted` hit-tests shapes through
+  `HitTest.shapeIntersectsPolygon`; `duplicate` + `recomputeSelectionBounds`
+  understand `kind=shape`.
+
+**Deviation:** Polygon tool ships as freehand polyline (drag-to-trace, auto-close
+within snap radius of the first vertex) rather than tap-to-add-vertex with
+double-tap-to-finish as the spec calls for. Tap-vertex polygon is a follow-up;
+freehand polygon is functionally equivalent for ad-hoc shapes and uses the
+same wire format, so on-disk geometry is forward-compatible.
+
 ### Non-goals
 
 - Bezier curves with control points (Concepts has this; we're deferring).
@@ -139,6 +198,21 @@ Modified:
 - With a dot-grid background, endpoint snaps land on grid intersections within 8 px.
 - Endpoint-to-endpoint snap visibly latches with the magenta dot.
 - Toggling snap off restores raw input.
+
+### Status (foundation slice)
+
+`Snap.kt` ships with `snapAngleTo`, `snapToGrid`, `snapToEndpoints` as
+JVM-pure helpers covered by `SnapTest`. `DrawingSurface` wires the three
+into the shape-tool rubber-band path (angle snap applies only to line /
+arrow; grid and endpoint snap apply to every shape endpoint and the
+final polygon vertex). Snap toggles live as a per-editor bitmask on
+`NoteEditorViewModel.snapMask`; the bottom palette renders a three-chip
+row (`15° / Grid / Ends`) when a shape tool is selected.
+
+**Deviation:** The per-note `snapMask` decision was reversed back to a
+per-VM in-memory flag (matches existing palette state). Persisting as a
+global pref is deferred — the user re-enables snap by default each
+session, which is also what Concepts does.
 
 ### Non-goals
 
@@ -387,6 +461,23 @@ Modified:
 - Export of a 50-item note opens in Inkscape and Figma with paths, shapes, images intact and visually close to the in-app render.
 - Layers are SVG groups with the right ordering.
 - Images embed inline (no broken `href`).
+
+### Status (foundation slice)
+
+`NoteSvgExporter` ships with full coverage for strokes (mid-point
+quadratic-bezier paths matching the renderer), the five shape variants
+(native SVG primitives), and text items (`<text>` with `<tspan>` per
+line). Golden-string tests in `NoteSvgExporterTest` pin the wire shape.
+The editor's overflow menu gains a third "Share as SVG" entry that goes
+through the existing `FileProvider` from sub-phase 4.1.
+
+**Deviation:** Layers stay implicit (single `<g id="items">` wrapper)
+because 6.4 is deferred — once layers ship the exporter will emit one
+`<g layer="…" opacity="…">` per layer, and the existing `<g>` becomes
+the wrapper. Image embed (Phase 6.7 follow-up) will land alongside that
+sub-phase. Stroke width remains lossy: SVG `path` is single-stroke-width
+and we emit the mean of per-segment pressure-modulated widths. This is
+documented at the top of the exporter.
 
 ### Verification matrix (Samsung S25 Ultra, S-Pen)
 

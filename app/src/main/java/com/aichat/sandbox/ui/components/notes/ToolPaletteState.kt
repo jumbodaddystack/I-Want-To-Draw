@@ -25,12 +25,23 @@ enum class Tool(
     ERASER_AREA("eraser_area", "Area eraser"),
     LASSO("lasso", "Lasso"),
     TEXT("text", "Text"),
+
+    // Phase 6.2 — shape tools. Each emits a `NoteItem(kind="shape")` on
+    // commit; the rubber-band preview lives on [DrawingSurface].
+    LINE("shape_line", "Line"),
+    RECT("shape_rect", "Rectangle"),
+    ELLIPSE("shape_ellipse", "Ellipse"),
+    ARROW("shape_arrow", "Arrow"),
+    POLYGON("shape_polygon", "Polygon"),
     ;
 
     val isInk: Boolean get() = this == PEN || this == HIGHLIGHTER || this == PENCIL
     val isEraser: Boolean get() = this == ERASER_STROKE || this == ERASER_AREA
     val isLasso: Boolean get() = this == LASSO
     val isText: Boolean get() = this == TEXT
+    val isShape: Boolean
+        get() = this == LINE || this == RECT || this == ELLIPSE ||
+            this == ARROW || this == POLYGON
 }
 
 /**

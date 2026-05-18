@@ -1,12 +1,15 @@
 package com.aichat.sandbox.ui.screens.notes
 
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.ui.components.notes.Shape
+import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
 import com.aichat.sandbox.ui.components.notes.StrokeTransform
 import com.aichat.sandbox.ui.components.notes.TextItemCodec
 
 private const val STROKE_KIND = "stroke"
 private const val TEXT_KIND = TextItemCodec.KIND
+private const val SHAPE_KIND = Shape.KIND
 
 /**
  * Reversible canvas mutations recorded in the editor's undo / redo stack
@@ -83,7 +86,14 @@ sealed interface EditorAction {
         private fun transformItem(item: NoteItem, m: FloatArray): NoteItem = when (item.kind) {
             STROKE_KIND -> transformStroke(item, m)
             TEXT_KIND -> transformText(item, m)
+            SHAPE_KIND -> transformShape(item, m)
             else -> item
+        }
+
+        private fun transformShape(item: NoteItem, m: FloatArray): NoteItem {
+            val decoded = ShapeCodec.decode(item.payload)
+            val transformed = ShapeCodec.transform(decoded.shape, m)
+            return item.copy(payload = ShapeCodec.encode(transformed, decoded.fillArgb))
         }
 
         private fun transformStroke(item: NoteItem, m: FloatArray): NoteItem {

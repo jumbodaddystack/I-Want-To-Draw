@@ -10,6 +10,9 @@ import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import com.aichat.sandbox.ui.components.notes.HitTest
+import com.aichat.sandbox.ui.components.notes.Shape
+import com.aichat.sandbox.ui.components.notes.ShapeCodec
+import com.aichat.sandbox.ui.components.notes.ShapeRenderer
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
 import com.aichat.sandbox.ui.components.notes.StrokeRenderer
 import com.aichat.sandbox.ui.components.notes.TextItemCodec
@@ -250,6 +253,7 @@ object NoteRasterizer {
             HitTest.boundsOf(samples, samples.size / StrokeCodec.FLOATS_PER_SAMPLE)
         }
         TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
+        Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
         else -> null
     }
 
@@ -283,6 +287,7 @@ object NoteRasterizer {
                     )
                 }
                 TextItemCodec.KIND -> TextItemRenderer.draw(canvas, item, matrix)
+                Shape.KIND -> ShapeRenderer.draw(canvas, item, paint)
             }
         }
     }

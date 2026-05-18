@@ -18,12 +18,16 @@ import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.HandwritingOcr.OcrModelState
 import com.aichat.sandbox.data.notes.NoteAiService
 import com.aichat.sandbox.data.notes.NoteExporter
+import com.aichat.sandbox.data.notes.NoteSvgExporter
 import com.aichat.sandbox.data.notes.PdfLayout
 import com.aichat.sandbox.data.notes.PendingDraftStore
 import com.aichat.sandbox.data.notes.RecentColorsStore
 import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.ui.components.notes.HitTest
+import com.aichat.sandbox.ui.components.notes.Shape
+import com.aichat.sandbox.ui.components.notes.ShapeCodec
+import com.aichat.sandbox.ui.components.notes.Snap
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
 import com.aichat.sandbox.ui.components.notes.StrokeRenderer
 import com.aichat.sandbox.ui.components.notes.StrokeTransform
@@ -61,6 +65,7 @@ class NoteEditorViewModel @Inject constructor(
     private val preferencesManager: PreferencesManager,
     private val chatRepository: ChatRepository,
     private val noteExporter: NoteExporter,
+    private val noteSvgExporter: NoteSvgExporter,
     private val recentColorsStore: RecentColorsStore,
 ) : ViewModel() {
 
@@ -211,6 +216,18 @@ class NoteEditorViewModel @Inject constructor(
      */
     private val _colorPickerOpen = MutableStateFlow(false)
     val colorPickerOpen: StateFlow<Boolean> = _colorPickerOpen.asStateFlow()
+
+    /**
+     * Phase 6.3 — snap toggle bitmask. Bit 0 = angle (15°), bit 1 = grid,
+     * bit 2 = endpoint. Editor surfaces this through a chip; default is
+     * angle + endpoint on, grid off (matches Concepts).
+     */
+    private val _snapMask = MutableStateFlow(Snap.MASK_ANGLE or Snap.MASK_ENDPOINT)
+    val snapMask: StateFlow<Int> = _snapMask.asStateFlow()
+
+    fun toggleSnap(mask: Int) {
+        _snapMask.value = _snapMask.value xor mask
+    }
 
     /**
      * Existing chats, newest first — feeds the sub-phase 4.3
@@ -414,6 +431,14 @@ class NoteEditorViewModel @Inject constructor(
                     itemBounds = b
                     hit = TextItemRenderer.intersectsPolygon(
                         item, polygon, vertexCount, polyBounds,
+                    )
+                }
+                Shape.KIND -> {
+                    val decoded = ShapeCodec.decode(item.payload)
+                    val b = ShapeCodec.boundsOf(decoded.shape) ?: continue
+                    itemBounds = b
+                    hit = HitTest.shapeIntersectsPolygon(
+                        decoded.shape, polygon, vertexCount, polyBounds,
                     )
                 }
                 else -> continue
@@ -997,6 +1022,7 @@ class NoteEditorViewModel @Inject constructor(
                     HitTest.boundsOf(samples, count)
                 }
                 TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
+                Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
                 else -> null
             }
             rect?.let { rects.add(it) }
@@ -1132,6 +1158,11 @@ class NoteEditorViewModel @Inject constructor(
                 val newMatrix = StrokeTransform.multiply(shifted, decoded.matrix)
                 TextItemCodec.encode(TextItemCodec.withMatrix(decoded, newMatrix))
             }
+            Shape.KIND -> {
+                val decoded = ShapeCodec.decode(source.payload)
+                val transformed = ShapeCodec.transform(decoded.shape, shifted)
+                ShapeCodec.encode(transformed, decoded.fillArgb)
+            }
             else -> source.payload.copyOf()
         }
         return source.copy(
@@ -1155,6 +1186,7 @@ class NoteEditorViewModel @Inject constructor(
                     HitTest.boundsOf(samples, count)
                 }
                 TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
+                Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
                 else -> null
             }
             rect?.let { rects.add(it) }
@@ -1179,6 +1211,17 @@ class NoteEditorViewModel @Inject constructor(
         commitTextEdit()
         save()
         return noteExporter.exportPng(note = _note.value, items = items.toList())
+    }
+
+    /**
+     * Phase 6.8 — vector-fidelity export. Same save-first contract as
+     * [sharePng] / [sharePdf] so the resulting SVG reflects the user's most
+     * recent geometry.
+     */
+    suspend fun shareSvg(): Uri {
+        commitTextEdit()
+        save()
+        return noteSvgExporter.exportSvg(note = _note.value, items = items.toList())
     }
 
     /**

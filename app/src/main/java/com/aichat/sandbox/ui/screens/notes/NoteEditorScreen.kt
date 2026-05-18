@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Polyline
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -66,6 +67,7 @@ fun NoteEditorScreen(
     val sendToChatMode by viewModel.sendToChatMode.collectAsState()
     val colorPickerOpen by viewModel.colorPickerOpen.collectAsState()
     val recentColors by viewModel.recentColors.collectAsState()
+    val snapMask by viewModel.snapMask.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
@@ -187,6 +189,20 @@ fun NoteEditorScreen(
                                 menuExpanded = false
                                 pdfDialogVisible = true
                             },
+                            onShareSvg = {
+                                menuExpanded = false
+                                scope.launch {
+                                    val uri = viewModel.shareSvg()
+                                    val send = Intent(Intent.ACTION_SEND).apply {
+                                        type = "image/svg+xml"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(
+                                        Intent.createChooser(send, "Share note as SVG")
+                                    )
+                                }
+                            },
                             onSendToChat = {
                                 menuExpanded = false
                                 viewModel.openSendNoteToChatPicker()
@@ -233,6 +249,7 @@ fun NoteEditorScreen(
                     onSelectionShouldClear = viewModel::clearSelection,
                     onTextTap = viewModel::onTextToolTap,
                     modifier = Modifier.fillMaxSize(),
+                    snapMask = snapMask,
                     onViewportReady = { viewportController = it },
                 )
                 SelectionOverlay(
@@ -273,6 +290,8 @@ fun NoteEditorScreen(
             ToolPalette(
                 state = viewModel.palette,
                 onPickCustomColor = viewModel::openColorPicker,
+                snapMask = snapMask,
+                onToggleSnap = viewModel::toggleSnap,
             )
         }
         if (pdfDialogVisible) {
@@ -377,6 +396,7 @@ private fun EditorOverflowMenu(
     onBackgroundSelect: (String) -> Unit,
     onSharePng: () -> Unit,
     onSharePdf: () -> Unit,
+    onShareSvg: () -> Unit,
     onSendToChat: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
@@ -404,6 +424,18 @@ private fun EditorOverflowMenu(
                 )
             },
             onClick = onSharePdf,
+        )
+        // Phase 6.8 — vector-fidelity export. Opens in Inkscape / Figma /
+        // browsers as a scalable document with paths and shapes preserved.
+        DropdownMenuItem(
+            text = { Text("Share as SVG") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Filled.Polyline,
+                    contentDescription = null,
+                )
+            },
+            onClick = onShareSvg,
         )
         // Sub-phase 4.3: in-app picker over existing chats. PNG render +
         // OCR snippet handover is done via [PendingDraftStore]; the user

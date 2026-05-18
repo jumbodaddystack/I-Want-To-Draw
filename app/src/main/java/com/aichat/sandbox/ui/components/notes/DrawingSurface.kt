@@ -137,6 +137,28 @@ class DrawingSurface(context: Context) : View(context) {
     private var lassoCount: Int = 0
     private val lassoPath: Path = Path()
 
+    // ── Shape tool state (Phase 6.2) ─────────────────────────────────────
+    // Active rubber-band in world coordinates. Non-null while the user is
+    // dragging out a line / rect / ellipse / arrow / polygon-via-drag.
+    private var shapeStartX: Float = 0f
+    private var shapeStartY: Float = 0f
+    private var shapeEndX: Float = 0f
+    private var shapeEndY: Float = 0f
+    private var shapeInProgress: Boolean = false
+    // Polyline buffer for the polygon tool — captured at every ACTION_MOVE
+    // and the final committed shape.
+    private var polygonPoints: FloatArray = FloatArray(INITIAL_SAMPLE_CAPACITY * 2)
+    private var polygonCount: Int = 0
+    private val shapePaint: Paint = Paint().apply { isAntiAlias = true }
+
+    // ── Snap visual feedback (Phase 6.3) ─────────────────────────────────
+    // World-space marker that we paint on top of the canvas as a small
+    // magenta dot to confirm an engaged snap. Decays via [snapAnchorTimestamp]
+    // — non-zero while the most recent snap is still within fade window.
+    private var snapAnchorX: Float = 0f
+    private var snapAnchorY: Float = 0f
+    private var snapAnchorTimestamp: Long = 0L
+
     /** Decoded sample cache keyed by item id — re-decoding every sample during an erase is wasteful. */
     private val decodedCache: HashMap<String, DecodedStroke> = HashMap()
 
@@ -172,7 +194,7 @@ class DrawingSurface(context: Context) : View(context) {
 
     private var motionPredictor: MotionEventPredictor? = null
 
-    /** Invoked once per committed stroke. Caller assigns noteId / zIndex. */
+    /** Invoked once per committed stroke (or shape). Caller assigns noteId / zIndex. */
     var strokeListener: ((NoteItem) -> Unit)? = null
 
     /** Invoked at the end of an eraser swipe with all matched item ids. */
@@ -325,6 +347,12 @@ class DrawingSurface(context: Context) : View(context) {
             drawLassoLoop(canvas)
         }
 
+        if (shapeInProgress) {
+            drawShapePreview(canvas)
+        }
+
+        drawSnapMarker(canvas)
+
         if (strokeTool.isInk && (liveSampleCount > 0 || predictedSampleCount > 0)) {
             canvas.save()
             canvas.translate(viewport.offsetX, viewport.offsetY)
@@ -400,6 +428,11 @@ class DrawingSurface(context: Context) : View(context) {
             // text mode; pan is disabled because every move-with-one-finger
             // would otherwise either pan or commit a stray tap.
             return handleTextToolEvent(event)
+        }
+        if (paletteTool.isShape) {
+            // Phase 6.2 — shape tools accept any pointer (stylus or finger)
+            // and emit a rubber-band preview between ACTION_DOWN / UP.
+            return handleShapeToolEvent(event)
         }
         val stylusIdx = stylusPointerIndex(event)
         if (stylusIdx >= 0) {
@@ -807,11 +840,22 @@ class DrawingSurface(context: Context) : View(context) {
         val radius = currentEraserRadiusWorld()
         var changed = false
         for (item in committedItems) {
-            if (item.kind != STROKE_KIND) continue
             if (item.id in pendingErase) continue
-            val decoded = decode(item) ?: continue
-            if (!HitTest.bboxContainsPoint(decoded.bounds, px, py, radius)) continue
-            if (HitTest.pointWithinStroke(decoded.samples, decoded.count, px, py, radius)) {
+            val hit = when (item.kind) {
+                STROKE_KIND -> {
+                    val decoded = decode(item) ?: continue
+                    if (!HitTest.bboxContainsPoint(decoded.bounds, px, py, radius)) false
+                    else HitTest.pointWithinStroke(decoded.samples, decoded.count, px, py, radius)
+                }
+                Shape.KIND -> {
+                    val shape = ShapeCodec.decode(item.payload).shape
+                    val sb = ShapeCodec.boundsOf(shape) ?: continue
+                    if (!HitTest.bboxContainsPoint(sb, px, py, radius)) false
+                    else HitTest.shapeContainsPoint(shape, px, py, radius)
+                }
+                else -> false
+            }
+            if (hit) {
                 pendingErase.add(item.id)
                 changed = true
             }
@@ -868,6 +912,9 @@ class DrawingSurface(context: Context) : View(context) {
                 TextItemCodec.KIND -> {
                     TextItemRenderer.draw(canvas, item, textScratchMatrix)
                 }
+                Shape.KIND -> {
+                    ShapeRenderer.draw(canvas, item, replayPaint)
+                }
             }
         }
         canvas.restore()
@@ -906,6 +953,9 @@ class DrawingSurface(context: Context) : View(context) {
                 TextItemCodec.KIND -> {
                     TextItemRenderer.draw(canvas, item, textScratchMatrix)
                 }
+                Shape.KIND -> {
+                    ShapeRenderer.draw(canvas, item, replayPaint)
+                }
             }
         }
         canvas.restore()
@@ -930,6 +980,279 @@ class DrawingSurface(context: Context) : View(context) {
         }
         canvas.drawPath(lassoPath, lassoPaint)
     }
+
+    // ── Shape tool routing (Phase 6.2) ───────────────────────────────────
+
+    private fun handleShapeToolEvent(event: MotionEvent): Boolean {
+        return when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                strokeTool = paletteTool
+                strokeColor = inkColor
+                strokeWidthPx = baseWidthPx
+                if (selectedIds.isNotEmpty()) selectionShouldClearListener?.invoke()
+                val wx = viewport.screenToWorldX(event.x)
+                val wy = viewport.screenToWorldY(event.y)
+                shapeStartX = wx
+                shapeStartY = wy
+                shapeEndX = wx
+                shapeEndY = wy
+                shapeInProgress = true
+                polygonCount = 0
+                if (strokeTool == Tool.POLYGON) {
+                    appendPolygonVertex(wx, wy)
+                }
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!shapeInProgress) return true
+                val rawX = viewport.screenToWorldX(event.x)
+                val rawY = viewport.screenToWorldY(event.y)
+                val snapped = snapShapeEndpoint(rawX, rawY)
+                shapeEndX = snapped[0]
+                shapeEndY = snapped[1]
+                if (strokeTool == Tool.POLYGON) {
+                    for (h in 0 until event.historySize) {
+                        appendPolygonVertex(
+                            viewport.screenToWorldX(event.getHistoricalX(h)),
+                            viewport.screenToWorldY(event.getHistoricalY(h)),
+                        )
+                    }
+                    appendPolygonVertex(shapeEndX, shapeEndY)
+                }
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (shapeInProgress) commitShape()
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                shapeInProgress = false
+                polygonCount = 0
+                invalidate()
+                true
+            }
+            else -> false
+        }
+    }
+
+    private fun appendPolygonVertex(x: Float, y: Float) {
+        val needed = (polygonCount + 1) * 2
+        if (needed > polygonPoints.size) {
+            var newSize = polygonPoints.size
+            while (newSize < needed) newSize *= 2
+            polygonPoints = polygonPoints.copyOf(newSize)
+        }
+        polygonPoints[polygonCount * 2] = x
+        polygonPoints[polygonCount * 2 + 1] = y
+        polygonCount++
+    }
+
+    /**
+     * Phase 6.3 — run a candidate world-space endpoint through the snap
+     * pipeline if the user has snap enabled. Records the engaged snap target
+     * for the magenta dot decay and returns the (snapped or raw) `(x, y)`.
+     */
+    private fun snapShapeEndpoint(rawX: Float, rawY: Float): FloatArray {
+        if (snapMask == 0) return floatArrayOf(rawX, rawY)
+        var x = rawX
+        var y = rawY
+        var snapped = false
+        // Angle snap (line-like tools only)
+        if ((snapMask and Snap.MASK_ANGLE) != 0 &&
+            (strokeTool == Tool.LINE || strokeTool == Tool.ARROW)
+        ) {
+            val (sx, sy, ok) = Snap.snapAngleTo(
+                shapeStartX, shapeStartY, x, y, Snap.DEFAULT_ANGLE_STEP_RAD,
+                Snap.DEFAULT_ANGLE_TOLERANCE_RAD,
+            )
+            if (ok) { x = sx; y = sy; snapped = true }
+        }
+        // Grid snap
+        if ((snapMask and Snap.MASK_GRID) != 0) {
+            val (sx, sy, ok) = Snap.snapToGrid(x, y, Snap.DEFAULT_GRID_SPACING_WORLD,
+                Snap.DEFAULT_GRID_TOLERANCE_WORLD)
+            if (ok) { x = sx; y = sy; snapped = true }
+        }
+        // Endpoint snap — to existing stroke ends + shape vertices
+        if ((snapMask and Snap.MASK_ENDPOINT) != 0) {
+            val radius = Snap.DEFAULT_ENDPOINT_RADIUS_PX / viewport.scale.coerceAtLeast(MIN_DIV_SCALE)
+            val (sx, sy, ok) = Snap.snapToEndpoints(x, y, endpointCandidates(), radius)
+            if (ok) { x = sx; y = sy; snapped = true }
+        }
+        if (snapped) {
+            snapAnchorX = x; snapAnchorY = y
+            snapAnchorTimestamp = System.currentTimeMillis()
+            postInvalidateOnAnimation()
+        }
+        return floatArrayOf(x, y)
+    }
+
+    private fun endpointCandidates(): FloatArray {
+        // Collect stroke endpoints + shape endpoints + line midpoints lazily.
+        // Cheap enough to recompute per-move for sub-100-stroke notes; we'd
+        // build a kd-tree if profiling shows this dominating.
+        val out = ArrayList<Float>(committedItems.size * 4)
+        for (item in committedItems) {
+            when (item.kind) {
+                STROKE_KIND -> {
+                    val decoded = decode(item) ?: continue
+                    if (decoded.count < 1) continue
+                    out.add(decoded.samples[0])
+                    out.add(decoded.samples[1])
+                    val last = (decoded.count - 1) * StrokeCodec.FLOATS_PER_SAMPLE
+                    out.add(decoded.samples[last])
+                    out.add(decoded.samples[last + 1])
+                }
+                Shape.KIND -> {
+                    val shape = ShapeCodec.decode(item.payload).shape
+                    when (shape) {
+                        is Shape.Line -> {
+                            out.add(shape.x0); out.add(shape.y0)
+                            out.add(shape.x1); out.add(shape.y1)
+                        }
+                        is Shape.Arrow -> {
+                            out.add(shape.x0); out.add(shape.y0)
+                            out.add(shape.x1); out.add(shape.y1)
+                        }
+                        is Shape.Rect -> {
+                            out.add(shape.minX); out.add(shape.minY)
+                            out.add(shape.maxX); out.add(shape.minY)
+                            out.add(shape.maxX); out.add(shape.maxY)
+                            out.add(shape.minX); out.add(shape.maxY)
+                        }
+                        is Shape.Ellipse -> {
+                            out.add(shape.cx - shape.rx); out.add(shape.cy)
+                            out.add(shape.cx + shape.rx); out.add(shape.cy)
+                            out.add(shape.cx); out.add(shape.cy - shape.ry)
+                            out.add(shape.cx); out.add(shape.cy + shape.ry)
+                        }
+                        is Shape.Polygon -> {
+                            for (i in shape.points.indices) out.add(shape.points[i])
+                        }
+                    }
+                }
+            }
+        }
+        return out.toFloatArray()
+    }
+
+    private fun commitShape(): Boolean {
+        val tool = strokeTool
+        val color = strokeColor
+        val width = strokeWidthPx
+        val shape: Shape? = when (tool) {
+            Tool.LINE -> {
+                val dx = shapeEndX - shapeStartX
+                val dy = shapeEndY - shapeStartY
+                if (kotlin.math.hypot(dx, dy) < MIN_SHAPE_LENGTH_WORLD) null
+                else Shape.Line(shapeStartX, shapeStartY, shapeEndX, shapeEndY)
+            }
+            Tool.ARROW -> {
+                val dx = shapeEndX - shapeStartX
+                val dy = shapeEndY - shapeStartY
+                if (kotlin.math.hypot(dx, dy) < MIN_SHAPE_LENGTH_WORLD) null
+                else Shape.Arrow(shapeStartX, shapeStartY, shapeEndX, shapeEndY, width * 6f)
+            }
+            Tool.RECT -> {
+                val w = kotlin.math.abs(shapeEndX - shapeStartX)
+                val h = kotlin.math.abs(shapeEndY - shapeStartY)
+                if (w < MIN_SHAPE_LENGTH_WORLD && h < MIN_SHAPE_LENGTH_WORLD) null
+                else Shape.Rect(shapeStartX, shapeStartY, shapeEndX, shapeEndY)
+            }
+            Tool.ELLIPSE -> {
+                val w = kotlin.math.abs(shapeEndX - shapeStartX)
+                val h = kotlin.math.abs(shapeEndY - shapeStartY)
+                if (w < MIN_SHAPE_LENGTH_WORLD && h < MIN_SHAPE_LENGTH_WORLD) null
+                else Shape.Ellipse(
+                    cx = (shapeStartX + shapeEndX) * 0.5f,
+                    cy = (shapeStartY + shapeEndY) * 0.5f,
+                    rx = w * 0.5f,
+                    ry = h * 0.5f,
+                )
+            }
+            Tool.POLYGON -> {
+                if (polygonCount < 3) null
+                else {
+                    val pts = polygonPoints.copyOf(polygonCount * 2)
+                    // Close if the user ended near the start (within snap radius).
+                    val dx = pts[0] - pts[(polygonCount - 1) * 2]
+                    val dy = pts[1] - pts[(polygonCount - 1) * 2 + 1]
+                    val closed = kotlin.math.hypot(dx, dy) <
+                        Snap.DEFAULT_ENDPOINT_RADIUS_PX / viewport.scale.coerceAtLeast(MIN_DIV_SCALE)
+                    Shape.Polygon(pts, closed)
+                }
+            }
+            else -> null
+        }
+        shapeInProgress = false
+        polygonCount = 0
+        if (shape == null) return false
+        val item = NoteItem(
+            noteId = "",
+            zIndex = 0,
+            kind = Shape.KIND,
+            tool = tool.id,
+            colorArgb = color,
+            baseWidthPx = width,
+            payload = ShapeCodec.encode(shape),
+        )
+        committedItems = committedItems + item
+        sceneDirty = true
+        strokeListener?.invoke(item)
+        return true
+    }
+
+    private fun drawShapePreview(canvas: Canvas) {
+        canvas.save()
+        canvas.translate(viewport.offsetX, viewport.offsetY)
+        canvas.scale(viewport.scale, viewport.scale)
+        ShapeRenderer.configurePaint(shapePaint, strokeColor, strokeWidthPx)
+        val previewShape: Shape? = when (strokeTool) {
+            Tool.LINE -> Shape.Line(shapeStartX, shapeStartY, shapeEndX, shapeEndY)
+            Tool.ARROW -> Shape.Arrow(shapeStartX, shapeStartY, shapeEndX, shapeEndY, strokeWidthPx * 6f)
+            Tool.RECT -> Shape.Rect(shapeStartX, shapeStartY, shapeEndX, shapeEndY)
+            Tool.ELLIPSE -> Shape.Ellipse(
+                cx = (shapeStartX + shapeEndX) * 0.5f,
+                cy = (shapeStartY + shapeEndY) * 0.5f,
+                rx = kotlin.math.abs(shapeEndX - shapeStartX) * 0.5f,
+                ry = kotlin.math.abs(shapeEndY - shapeStartY) * 0.5f,
+            )
+            Tool.POLYGON -> if (polygonCount >= 2)
+                Shape.Polygon(polygonPoints.copyOf(polygonCount * 2), closed = false)
+            else null
+            else -> null
+        }
+        if (previewShape != null) ShapeRenderer.drawShape(canvas, previewShape, shapePaint, 0)
+        canvas.restore()
+    }
+
+    private fun drawSnapMarker(canvas: Canvas) {
+        if (snapAnchorTimestamp == 0L) return
+        val elapsed = System.currentTimeMillis() - snapAnchorTimestamp
+        if (elapsed > SNAP_FADE_MS) {
+            snapAnchorTimestamp = 0L
+            return
+        }
+        val alpha = ((1f - elapsed.toFloat() / SNAP_FADE_MS) * 255f).toInt().coerceIn(0, 255)
+        val sx = viewport.worldToScreenX(snapAnchorX)
+        val sy = viewport.worldToScreenY(snapAnchorY)
+        shapePaint.style = Paint.Style.FILL
+        shapePaint.color = Color.MAGENTA
+        shapePaint.alpha = alpha
+        canvas.drawCircle(sx, sy, SNAP_MARKER_RADIUS_PX, shapePaint)
+        postInvalidateOnAnimation()
+    }
+
+    /** Phase 6.3 — bitmask: bit0=angle, bit1=grid, bit2=endpoint. */
+    var snapMask: Int = Snap.MASK_ANGLE or Snap.MASK_ENDPOINT
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
 
     private data class DecodedStroke(
         val samples: FloatArray,
@@ -959,6 +1282,14 @@ class DrawingSurface(context: Context) : View(context) {
         private const val LASSO_DASH_PX = 12f
         private const val LASSO_GAP_PX = 8f
         private const val LASSO_COLOR = 0xCC1E88E5.toInt()
+
+        // ── Shape tools (Phase 6.2) ────────────────────────────────────
+        /** Minimum world-space extent below which a shape commit is discarded. */
+        private const val MIN_SHAPE_LENGTH_WORLD: Float = 2f
+
+        // ── Snapping (Phase 6.3) ───────────────────────────────────────
+        private const val SNAP_FADE_MS: Long = 280L
+        private const val SNAP_MARKER_RADIUS_PX: Float = 5f
     }
 }
 
@@ -977,6 +1308,7 @@ fun DrawingSurfaceView(
     onTextTap: (worldX: Float, worldY: Float) -> Unit,
     modifier: Modifier = Modifier,
     sketchMode: Boolean = false,
+    snapMask: Int = Snap.MASK_ANGLE or Snap.MASK_ENDPOINT,
     onViewportReady: (ViewportController) -> Unit = {},
 ) {
     val currentOnCommit by rememberUpdatedState(onStrokeCommitted)
@@ -1019,6 +1351,7 @@ fun DrawingSurfaceView(
             )
             view.setSelection(selectedIds, selectionMatrix)
             view.setEditingTextId(editingTextId)
+            view.snapMask = snapMask
             // Re-rasterize whenever the authoritative item list changes
             // (initial load, commit, erase). [itemsSignature] is read here so
             // Compose treats the lambda as dependent on it.

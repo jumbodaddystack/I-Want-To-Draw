@@ -196,6 +196,60 @@ fun SelectionOverlay(
             )
         }
 
+        // Phase 6.1 — edge handles (4 sides) for single-axis scaling. The
+        // anchor edge is the opposite side; sx or sy is locked to 1f so the
+        // selection only scales along the dragged axis.
+        for (edgeIdx in 0..3) {
+            val (cornerA, cornerB) = when (edgeIdx) {
+                0 -> 0 to 1   // top
+                1 -> 1 to 2   // right
+                2 -> 3 to 2   // bottom
+                else -> 0 to 3 // left
+            }
+            val midScreen = Offset(
+                (screenCorners[cornerA].x + screenCorners[cornerB].x) * 0.5f,
+                (screenCorners[cornerA].y + screenCorners[cornerB].y) * 0.5f,
+            )
+            val horizontal = edgeIdx == 0 || edgeIdx == 2
+            val sourceWorldEdge = when (edgeIdx) {
+                0 -> rawCorners[0].y
+                1 -> rawCorners[1].x
+                2 -> rawCorners[2].y
+                else -> rawCorners[3].x
+            }
+            val anchorWorldEdge = when (edgeIdx) {
+                0 -> rawCorners[3].y   // top anchored on bottom
+                1 -> rawCorners[0].x   // right anchored on left
+                2 -> rawCorners[0].y   // bottom anchored on top
+                else -> rawCorners[1].x // left anchored on right
+            }
+            ScaleHandle(
+                centerPx = midScreen,
+                sizePx = handleSizePx,
+                density = density,
+                onDrag = { dx, dy ->
+                    val worldDx = dx / max(viewport.scale, MIN_DIV_SCALE)
+                    val worldDy = dy / max(viewport.scale, MIN_DIV_SCALE)
+                    if (horizontal) {
+                        val orig = sourceWorldEdge - anchorWorldEdge
+                        if (orig == 0f) return@ScaleHandle
+                        val nu = sourceWorldEdge + worldDy - anchorWorldEdge
+                        val sy = (nu / orig).coerceIn(MIN_SCALE, MAX_SCALE)
+                        val mat = StrokeTransform.scaleAround(1f, sy, 0f, anchorWorldEdge)
+                        onChangeUpdated(StrokeTransform.multiply(mat, liveMatrixRef))
+                    } else {
+                        val orig = sourceWorldEdge - anchorWorldEdge
+                        if (orig == 0f) return@ScaleHandle
+                        val nu = sourceWorldEdge + worldDx - anchorWorldEdge
+                        val sx = (nu / orig).coerceIn(MIN_SCALE, MAX_SCALE)
+                        val mat = StrokeTransform.scaleAround(sx, 1f, anchorWorldEdge, 0f)
+                        onChangeUpdated(StrokeTransform.multiply(mat, liveMatrixRef))
+                    }
+                },
+                onEnd = { onCommitUpdated() },
+            )
+        }
+
         // Rotate handle: sits centred above the top edge in screen space.
         val top = screenCorners[0]
         val topRight = screenCorners[1]
