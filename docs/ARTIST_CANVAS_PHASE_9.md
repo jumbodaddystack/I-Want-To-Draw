@@ -4,6 +4,58 @@
 
 Parent plan: [`ARTIST_CANVAS_PLAN.md`](./ARTIST_CANVAS_PLAN.md).
 
+## Implementation notes (post-landing)
+
+Sub-phases 9.1–9.4 landed on `claude/implement-phase-9-EkGgi`. The pieces that match the spec exactly:
+
+- `Notebook` model + `notebooks` table + `Note.notebookId` FK (MIGRATION_11_12)
+- `NotebookRepository.createNotebook` provisions a paired `Note` + first `NoteFrame` in one transaction; `delete()` cascades through Room's FK AND scrubs on-disk thumbnails, image deps, and audio files.
+- `note_audio` table + stroke payload v2 (one-byte `0x02` version header followed by `(x,y,p,tilt,t)` per sample). v1 strokes round-trip unchanged through `StrokeCodec.decode`; `decodeWithT` synthesises `t = 0` for v1 so the replayer's "ignore non-v2" path is implicit.
+- `notes_ocr_fts` is a **standalone** FTS4 virtual table (no `content=notes` link) with explicit `AI/AU/AD` triggers in the migration. This avoids trigger-name collisions with Room's `@Fts4(contentEntity = …)` auto-generation — the existing `MessageFts` precedent relies on Room's mechanism but our `NoteDao.updateOcrText` uses a raw `@Query("UPDATE …")` path which Room's generated triggers don't cover, so the explicit triggers were the simpler choice.
+
+Two pieces diverged from the spec for v1:
+
+- **Paginated page view (9.2)** ships as a navigator rail (`PageThumbnailRail`) over a single `DrawingSurface` instead of a `LazyColumn` of fixed-size surfaces. The spec's "scroll vertically through pages" UX is approximated by tap-to-fly: the page rail flies the existing viewport to fit each page. The infinite canvas underneath stays a single world; pages are just frames the viewport snaps between. Multi-surface rendering, page-flip animation, and per-page background overrides remain deferred.
+- **Audio-synced playback rendering (9.4)** lands the data model + `StrokeReplayer` clip math, but does NOT yet wire the replayer into `DrawingSurface`'s scene bitmap. Today playback advances the position chip + scrubber and the recorded clip plays back; the strokes themselves render statically. Wiring `StrokeReplayer.clipStroke` into the rasterizer's render loop and invalidating on the 30 Hz position tick is the remaining bit. The encoder side (v2 stroke commits during a recording) IS live — `DrawingSurface.recordingStartedAt` toggles between v1 and v2 encoding cleanly.
+
+### Files added on `claude/implement-phase-9-EkGgi`
+
+```
+data/model/Notebook.kt          data/model/NoteAudio.kt
+data/local/NotebookDao.kt       data/local/NoteAudioDao.kt
+data/local/NoteSearchDao.kt
+data/repository/NotebookRepository.kt    data/repository/NoteAudioRepository.kt
+data/repository/NoteSearchRepository.kt
+data/notes/AudioRecorder.kt     data/notes/AudioPlayer.kt
+ui/components/notes/StrokeReplayer.kt
+ui/components/notes/AudioRecordingBar.kt
+ui/components/notes/AudioPlaybackBar.kt
+ui/screens/notebooks/NotebooksListScreen.kt
+ui/screens/notebooks/NotebooksListViewModel.kt
+ui/screens/notebooks/NewNotebookSheet.kt
+ui/screens/notebooks/PageThumbnailRail.kt
+ui/screens/notes/NoteSearchScreen.kt
+```
+
+### Files modified
+
+```
+data/model/Note.kt                          (+ notebookId)
+data/local/AppDatabase.kt                   (+ entities, version 11 → 13)
+data/local/Migrations.kt                    (+ MIGRATION_11_12, MIGRATION_12_13)
+data/local/NoteDao.kt                       (observeNotes filters notebookId IS NULL; + getNotesForNotebook)
+ui/components/notes/StrokeCodec.kt          (+ v2 encode / decode / decodeWithT)
+ui/components/notes/DrawingSurface.kt       (+ recordingStartedAt, v2 commit branch)
+ui/navigation/Navigation.kt                 (+ Notebooks tab, notes_search route)
+ui/screens/notes/NotesListScreen.kt         (+ search button + onOpenSearch param)
+ui/screens/notes/NoteEditorScreen.kt        (notebook / audio wiring)
+ui/screens/notes/NoteEditorViewModel.kt     (notebook header, audio state, addNotebookPage)
+di/AppModule.kt                             (+ DAOs, migrations 11_12 + 12_13)
+AndroidManifest.xml                         (+ RECORD_AUDIO)
+```
+
+Build status: `./gradlew :app:compileDebugKotlin` was not run on this branch — the remote-execution environment has no Android SDK. Compilation has been validated manually against existing imports and call sites.
+
 ## Design summary
 
 A notebook is a note + a notebook header. The notebook header pins:

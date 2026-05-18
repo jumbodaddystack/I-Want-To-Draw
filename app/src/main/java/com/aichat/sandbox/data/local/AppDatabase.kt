@@ -7,11 +7,18 @@ import com.aichat.sandbox.data.model.Chat
 import com.aichat.sandbox.data.model.Message
 import com.aichat.sandbox.data.model.MessageFts
 import com.aichat.sandbox.data.model.Note
+import com.aichat.sandbox.data.model.NoteAudio
 import com.aichat.sandbox.data.model.NoteFrame
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.model.NoteLayer
+import com.aichat.sandbox.data.model.Notebook
 import com.aichat.sandbox.data.model.Stamp
 
+// Note: `notes_ocr_fts` (Phase 9.3) is intentionally NOT a registered
+// entity. It's a virtual FTS4 table managed entirely by `MIGRATION_11_12`
+// (creation + triggers) and queried via raw SQL through `NoteSearchDao`.
+// Decoupling from Room's `@Fts4(contentEntity = ...)` mechanism avoids
+// trigger-name collisions with the explicit sync triggers we install.
 @Database(
     entities = [
         Chat::class,
@@ -23,8 +30,10 @@ import com.aichat.sandbox.data.model.Stamp
         BrushPreset::class,
         NoteFrame::class,
         Stamp::class,
+        Notebook::class,
+        NoteAudio::class,
     ],
-    version = 11,
+    version = 13,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -33,4 +42,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun brushPresetDao(): BrushPresetDao
     abstract fun noteFrameDao(): NoteFrameDao
     abstract fun stampDao(): StampDao
+    abstract fun notebookDao(): NotebookDao
+    abstract fun noteSearchDao(): NoteSearchDao
+    abstract fun noteAudioDao(): NoteAudioDao
 }

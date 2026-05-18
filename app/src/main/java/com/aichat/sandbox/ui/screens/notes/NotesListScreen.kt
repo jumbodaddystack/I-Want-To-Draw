@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -41,6 +42,7 @@ import java.util.Locale
 fun NotesListScreen(
     onNoteClick: (String) -> Unit,
     onNewNote: () -> Unit,
+    onOpenSearch: () -> Unit = {},
     viewModel: NotesListViewModel = hiltViewModel(),
 ) {
     val notes by viewModel.notes.collectAsState()
@@ -51,16 +53,17 @@ fun NotesListScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        Surface(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onNewNote)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-            color = MaterialTheme.colorScheme.background
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onNewNote),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(vertical = 4.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
@@ -73,6 +76,12 @@ fun NotesListScreen(
                     text = "New note",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            IconButton(onClick = onOpenSearch) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = "Search notes",
                 )
             }
         }

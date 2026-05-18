@@ -15,8 +15,13 @@ import com.aichat.sandbox.data.local.MIGRATION_7_8
 import com.aichat.sandbox.data.local.MIGRATION_8_9
 import com.aichat.sandbox.data.local.MIGRATION_9_10
 import com.aichat.sandbox.data.local.MIGRATION_10_11
+import com.aichat.sandbox.data.local.MIGRATION_11_12
+import com.aichat.sandbox.data.local.MIGRATION_12_13
+import com.aichat.sandbox.data.local.NoteAudioDao
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.local.NoteFrameDao
+import com.aichat.sandbox.data.local.NoteSearchDao
+import com.aichat.sandbox.data.local.NotebookDao
 import com.aichat.sandbox.data.local.StampDao
 import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.NoteAiService
@@ -53,6 +58,8 @@ object AppModule {
             MIGRATION_8_9,
             MIGRATION_9_10,
             MIGRATION_10_11,
+            MIGRATION_11_12,
+            MIGRATION_12_13,
         ).build()
     }
 
@@ -79,6 +86,21 @@ object AppModule {
     @Provides
     fun provideStampDao(database: AppDatabase): StampDao {
         return database.stampDao()
+    }
+
+    @Provides
+    fun provideNotebookDao(database: AppDatabase): NotebookDao {
+        return database.notebookDao()
+    }
+
+    @Provides
+    fun provideNoteSearchDao(database: AppDatabase): NoteSearchDao {
+        return database.noteSearchDao()
+    }
+
+    @Provides
+    fun provideNoteAudioDao(database: AppDatabase): NoteAudioDao {
+        return database.noteAudioDao()
     }
 
     @Provides

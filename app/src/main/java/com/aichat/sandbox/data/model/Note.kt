@@ -24,4 +24,8 @@ data class Note(
     // Null on rows created before schema v6 and on notes that have never
     // had an editor session. See `EditorActionCodec`.
     val undoLogJson: String? = null,
+    // Phase 9.1 — owning notebook (if any). Standalone notes carry null.
+    // The notes-list excludes rows where this is non-null; the notebooks
+    // list owns presentation for those.
+    val notebookId: String? = null,
 )

@@ -100,6 +100,22 @@ class DrawingSurface(context: Context) : View(context) {
     private var predictedSamples: FloatArray? = null
     private var predictedSampleCount: Int = 0
 
+    /**
+     * Phase 9.4 — monotonic anchor for the active audio recording.
+     * When non-zero, [commitLiveStroke] encodes the stroke in v2 format
+     * with per-sample timestamps. Zero (the default) keeps the legacy
+     * v1 encoding path: strokes drawn without an active recording stay
+     * binary-identical to pre-9.4 commits.
+     */
+    var recordingStartedAt: Long = 0L
+
+    /**
+     * Parallel array of per-sample timestamps (ms relative to
+     * [recordingStartedAt]). Only populated when recording is active.
+     */
+    private var liveSampleTimes: FloatArray =
+        FloatArray(INITIAL_SAMPLE_CAPACITY)
+
     private var hoverX: Float = 0f
     private var hoverY: Float = 0f
     private var hoverVisible: Boolean = false
@@ -775,6 +791,10 @@ class DrawingSurface(context: Context) : View(context) {
         liveSamples[base + 1] = y
         liveSamples[base + 2] = pressure
         liveSamples[base + 3] = tilt
+        if (recordingStartedAt != 0L) {
+            liveSampleTimes[liveSampleCount] =
+                (android.os.SystemClock.elapsedRealtime() - recordingStartedAt).toFloat()
+        }
         liveSampleCount++
     }
 
@@ -784,6 +804,10 @@ class DrawingSurface(context: Context) : View(context) {
         var newSize = liveSamples.size
         while (newSize < needed) newSize *= 2
         liveSamples = liveSamples.copyOf(newSize)
+        // Keep the timestamp buffer in step with the sample capacity.
+        if (liveSampleTimes.size < newSize / StrokeCodec.FLOATS_PER_SAMPLE) {
+            liveSampleTimes = liveSampleTimes.copyOf(newSize / StrokeCodec.FLOATS_PER_SAMPLE)
+        }
     }
 
     private fun updatePredictedFromPredictor() {
@@ -838,8 +862,30 @@ class DrawingSurface(context: Context) : View(context) {
             invalidate()
             return
         }
-        val packed = FloatArray(liveSampleCount * StrokeCodec.FLOATS_PER_SAMPLE)
-        System.arraycopy(liveSamples, 0, packed, 0, packed.size)
+        // Phase 9.4 — encode in v2 (with `t`) when a recording is active;
+        // otherwise stay on the v1 path so non-recording strokes are
+        // binary-identical to pre-9.4 commits.
+        val payload = if (recordingStartedAt != 0L) {
+            val packedV2 = FloatArray(liveSampleCount * StrokeCodec.FLOATS_PER_SAMPLE_V2)
+            var src = 0
+            var dst = 0
+            var i = 0
+            while (i < liveSampleCount) {
+                packedV2[dst] = liveSamples[src]
+                packedV2[dst + 1] = liveSamples[src + 1]
+                packedV2[dst + 2] = liveSamples[src + 2]
+                packedV2[dst + 3] = liveSamples[src + 3]
+                packedV2[dst + 4] = liveSampleTimes[i]
+                src += StrokeCodec.FLOATS_PER_SAMPLE
+                dst += StrokeCodec.FLOATS_PER_SAMPLE_V2
+                i++
+            }
+            StrokeCodec.encodeV2(packedV2)
+        } else {
+            val packed = FloatArray(liveSampleCount * StrokeCodec.FLOATS_PER_SAMPLE)
+            System.arraycopy(liveSamples, 0, packed, 0, packed.size)
+            StrokeCodec.encode(packed)
+        }
         val item = NoteItem(
             noteId = "",
             // VM rewrites this with a tool-aware zIndex (highlighter sits in a
@@ -850,7 +896,7 @@ class DrawingSurface(context: Context) : View(context) {
             tool = strokeTool.id,
             colorArgb = strokeColor,
             baseWidthPx = strokeWidthPx,
-            payload = StrokeCodec.encode(packed),
+            payload = payload,
         )
         committedItems = committedItems + item
         sceneDirty = true
@@ -1455,6 +1501,10 @@ fun DrawingSurfaceView(
     onViewportReady: (ViewportController) -> Unit = {},
     onFrameDrawn: (FloatArray) -> Unit = {},
     onFrameTap: (worldX: Float, worldY: Float) -> Unit = { _, _ -> },
+    // Phase 9.4 — when non-zero, the surface tags each stroke sample with
+    // `t = SystemClock.elapsedRealtime() - recordingStartedAt` and emits
+    // v2 stroke payloads. Zero (default) keeps the v1 encoding path.
+    recordingStartedAt: Long = 0L,
 ) {
     val currentOnCommit by rememberUpdatedState(onStrokeCommitted)
     val currentOnErase by rememberUpdatedState(onItemsErased)
@@ -1487,6 +1537,7 @@ fun DrawingSurfaceView(
         },
         update = { view ->
             view.sketchMode = sketchMode
+            view.recordingStartedAt = recordingStartedAt
             view.strokeListener = { item -> currentOnCommit(item) }
             view.eraseListener = { ids -> currentOnErase(ids) }
             view.lassoListener = { polygon -> currentOnLasso(polygon) }

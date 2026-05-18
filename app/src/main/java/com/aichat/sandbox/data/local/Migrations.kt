@@ -329,3 +329,119 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_stamps_lastUsedAt` ON `stamps` (`lastUsedAt`)")
     }
 }
+
+/**
+ * Migration from version 11 to 12:
+ * Bundles Phase 9.1 (notebooks table + `notes.notebookId`) and Phase 9.3
+ * (FTS4 mirror of `notes.ocrText`). Both are additive — existing rows are
+ * left intact and the new column / table merely surface optional data.
+ *
+ * A notebook is a header row + the FK on the underlying [Note]. Notes
+ * with a non-null `notebookId` are notebook pages (one note per notebook
+ * in the 9.1 contract; this leaves room to relax that in a future phase).
+ *
+ * The FTS table follows the same shape Room generates for `messages_fts`
+ * (sub-phase 1.5). We populate it from existing `notes.ocrText` once at
+ * migration time; from then on Room maintains it via the BEFORE
+ * INSERT/UPDATE/DELETE triggers it installs from the schema annotation.
+ */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // --- Phase 9.1: notebooks table -----------------------------------
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `notebooks` (
+                `id` TEXT NOT NULL,
+                `title` TEXT NOT NULL,
+                `pageStyle` TEXT NOT NULL,
+                `pageWidth` REAL NOT NULL,
+                `pageHeight` REAL NOT NULL,
+                `defaultBrushPresetId` TEXT,
+                `coverColorArgb` INTEGER NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                `updatedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent()
+        )
+        db.execSQL("ALTER TABLE `notes` ADD COLUMN `notebookId` TEXT")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_notebookId` ON `notes` (`notebookId`)")
+
+        // --- Phase 9.3: notes_ocr_fts ------------------------------------
+        // Standalone FTS4 index (no `content=` link to `notes`). The
+        // triggers below keep it in sync; raw `UPDATE ocrText` paths in
+        // `NoteDao.updateOcrText` therefore propagate correctly.
+        db.execSQL(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS `notes_ocr_fts`
+                USING FTS4(`ocrText` TEXT NOT NULL)
+            """.trimIndent()
+        )
+        // Seed: copy existing OCR text into the index. Empty / null rows
+        // are skipped so an FTS4 search never matches the empty string.
+        db.execSQL(
+            """
+            INSERT INTO `notes_ocr_fts`(`docid`, `ocrText`)
+                SELECT `rowid`, `ocrText` FROM `notes` WHERE `ocrText` IS NOT NULL
+            """.trimIndent()
+        )
+        // Triggers keep the FTS index in sync when `notes.ocrText` is
+        // mutated by raw UPDATE statements (Room's generated FTS triggers
+        // only cover Insert/Delete, not partial-column updates like the
+        // sub-phase 2.4 `updateOcrText` path).
+        db.execSQL(
+            """
+            CREATE TRIGGER IF NOT EXISTS notes_fts_ai AFTER INSERT ON notes BEGIN
+                INSERT INTO notes_ocr_fts(docid, ocrText)
+                    VALUES(new.rowid, COALESCE(new.ocrText, ''));
+            END;
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TRIGGER IF NOT EXISTS notes_fts_ad AFTER DELETE ON notes BEGIN
+                DELETE FROM notes_ocr_fts WHERE docid = old.rowid;
+            END;
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TRIGGER IF NOT EXISTS notes_fts_au AFTER UPDATE OF ocrText ON notes BEGIN
+                DELETE FROM notes_ocr_fts WHERE docid = old.rowid;
+                INSERT INTO notes_ocr_fts(docid, ocrText)
+                    VALUES(new.rowid, COALESCE(new.ocrText, ''));
+            END;
+            """.trimIndent()
+        )
+    }
+}
+
+/**
+ * Migration from version 12 to 13:
+ * Sub-phase 9.4 — audio-synced ink. Adds the `note_audio` table.
+ *
+ * Stroke payload v2 (`x, y, p, tilt, t`) is gated per-note via
+ * `Note.schemaVersion` rather than a bulk rewrite: existing v1 strokes
+ * keep their four-floats-per-sample layout forever and the decoder
+ * synthesizes `t` at read time. Only strokes drawn during an audio
+ * recording bump to v2.
+ */
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `note_audio` (
+                `id` TEXT NOT NULL,
+                `noteId` TEXT NOT NULL,
+                `filePath` TEXT NOT NULL,
+                `durationMs` INTEGER NOT NULL,
+                `recordedAt` INTEGER NOT NULL,
+                `recordingStartedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`id`),
+                FOREIGN KEY(`noteId`) REFERENCES `notes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_audio_noteId` ON `note_audio` (`noteId`)")
+    }
+}

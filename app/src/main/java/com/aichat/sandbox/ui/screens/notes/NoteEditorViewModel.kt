@@ -84,6 +84,12 @@ class NoteEditorViewModel @Inject constructor(
     private val stampRepository: StampRepository,
     private val favoritesStore: com.aichat.sandbox.data.notes.FavoritesStore,
     val frameThumbnailRenderer: com.aichat.sandbox.data.notes.FrameThumbnailRenderer,
+    // Sub-phase 9.4 — audio-synced ink. Recorder + player + persistence.
+    private val audioRecorder: com.aichat.sandbox.data.notes.AudioRecorder,
+    val audioPlayer: com.aichat.sandbox.data.notes.AudioPlayer,
+    private val audioRepository: com.aichat.sandbox.data.repository.NoteAudioRepository,
+    // Sub-phase 9.1 — notebook header lookup (page size / style for "Add page").
+    private val notebookRepository: com.aichat.sandbox.data.repository.NotebookRepository,
 ) : ViewModel() {
 
     private val routeArg: String = savedStateHandle["noteId"] ?: NOTE_ID_NEW
@@ -470,6 +476,123 @@ class NoteEditorViewModel @Inject constructor(
         return frame.bounds()
     }
 
+    // ── Notebook mode (sub-phase 9.1 / 9.2) ──────────────────────────────
+    //
+    // A notebook owns this note (one note per notebook in 9.1). When
+    // `note.notebookId` is non-null, the editor adds a page rail and the
+    // "Add page" affordance, and pins the active frame to the page the
+    // user most recently interacted with.
+
+    private val _notebook = MutableStateFlow<com.aichat.sandbox.data.model.Notebook?>(null)
+    val notebook: StateFlow<com.aichat.sandbox.data.model.Notebook?> = _notebook.asStateFlow()
+
+    private val _pageRailOpen = MutableStateFlow(false)
+    val pageRailOpen: StateFlow<Boolean> = _pageRailOpen.asStateFlow()
+
+    fun togglePageRail() { _pageRailOpen.value = !_pageRailOpen.value }
+    fun closePageRail() { _pageRailOpen.value = false }
+
+    /**
+     * Phase 9.2 — append a new page below the current last frame, using
+     * the notebook's pinned page size. Sets the new frame as current so
+     * the editor flies to it on the next viewport sync.
+     */
+    fun addNotebookPage() {
+        val book = _notebook.value ?: return
+        val current = _frames.value
+        val lastMaxY = current.maxOfOrNull { it.maxY } ?: 0f
+        val gutter = com.aichat.sandbox.data.model.Notebook.PAGE_GUTTER
+        val nextOrdinal = (current.maxOfOrNull { it.ordinal } ?: -1) + 1
+        val minY = if (current.isEmpty()) 0f else lastMaxY + gutter
+        val frame = NoteFrame(
+            noteId = resolvedNoteId,
+            name = "Page ${nextOrdinal + 1}",
+            minX = 0f,
+            minY = minY,
+            maxX = book.pageWidth,
+            maxY = minY + book.pageHeight,
+            ordinal = nextOrdinal,
+        )
+        applyFrameMutation("Add page", before = current, after = current + frame)
+        _currentFrameId.value = frame.id
+        viewModelScope.launch { notebookRepository.touchUpdatedAt(book.id) }
+    }
+
+    // ── Audio-synced ink (sub-phase 9.4) ─────────────────────────────────
+    //
+    // Recording state, the per-note audio list, and the player are all
+    // surfaced as flows so the bottom playback bar can drive UI without
+    // additional plumbing. The recorder's monotonic anchor
+    // (`recordingStartedAt`) is exposed via [DrawingSurface] (set on the
+    // surface when recording starts) so each stroke sample lands with a
+    // `t = sampleTime - recordingStartedAt`.
+
+    val audioClips: StateFlow<List<com.aichat.sandbox.data.model.NoteAudio>> =
+        audioRepository.observeAudio(resolvedNoteId).stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = emptyList(),
+        )
+
+    private val _isRecordingAudio = MutableStateFlow(false)
+    val isRecordingAudio: StateFlow<Boolean> = _isRecordingAudio.asStateFlow()
+
+    /** Monotonic anchor for the active recording (or 0 when not recording). */
+    private val _recordingStartedAt = MutableStateFlow(0L)
+    val recordingStartedAt: StateFlow<Long> = _recordingStartedAt.asStateFlow()
+
+    fun startAudioRecording() {
+        if (_isRecordingAudio.value) return
+        try {
+            val handle = audioRecorder.start()
+            _isRecordingAudio.value = true
+            _recordingStartedAt.value = handle.startedAt
+        } catch (t: Throwable) {
+            Log.w("AudioRecording", "start failed", t)
+        }
+    }
+
+    fun stopAudioRecording() {
+        if (!_isRecordingAudio.value) return
+        val completed = audioRecorder.stop()
+        _isRecordingAudio.value = false
+        _recordingStartedAt.value = 0L
+        if (completed == null) return
+        viewModelScope.launch {
+            audioRepository.insertAudio(
+                com.aichat.sandbox.data.model.NoteAudio(
+                    noteId = resolvedNoteId,
+                    filePath = completed.filePath,
+                    durationMs = completed.durationMs,
+                    recordingStartedAt = completed.recordingStartedAt,
+                )
+            )
+        }
+    }
+
+    fun deleteAudioClip(clipId: String) {
+        viewModelScope.launch {
+            // If the player is currently playing this clip, release first
+            // so the MediaPlayer doesn't hold a handle to the deleted file.
+            if (audioPlayer.activeClip.value != null) audioPlayer.release()
+            audioRepository.deleteAudio(clipId)
+        }
+    }
+
+    fun playAudioClip(clip: com.aichat.sandbox.data.model.NoteAudio) {
+        audioPlayer.play(clip.filePath)
+    }
+
+    fun pauseAudio() = audioPlayer.pause()
+    fun resumeAudio() = audioPlayer.resume()
+    fun seekAudio(positionMs: Long) = audioPlayer.seekTo(positionMs)
+
+    override fun onCleared() {
+        super.onCleared()
+        if (_isRecordingAudio.value) audioRecorder.abort()
+        audioPlayer.release()
+    }
+
     // ── Stamps (sub-phase 8.3) ───────────────────────────────────────────
 
     val stamps: StateFlow<List<Stamp>> = stampRepository.observeAll()
@@ -799,6 +922,13 @@ class NoteEditorViewModel @Inject constructor(
                 }
                 // Sub-phase 8.1 — frame list comes from its own table.
                 _frames.value = repository.getFrames(routeArg)
+                // Sub-phase 9.1 — if this note belongs to a notebook,
+                // grab the header so the editor can render notebook UI
+                // (page rail, "Add page", pinned page size).
+                val notebookId = loadedNote?.notebookId
+                if (notebookId != null) {
+                    _notebook.value = notebookRepository.getNotebook(notebookId)
+                }
             }
         } else {
             // Brand-new note: seed a default "Ink" layer so the first stroke

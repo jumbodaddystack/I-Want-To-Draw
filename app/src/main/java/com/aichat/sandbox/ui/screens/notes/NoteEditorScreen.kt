@@ -42,6 +42,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.aichat.sandbox.ui.components.notes.AudioPlaybackBar
+import com.aichat.sandbox.ui.components.notes.AudioRecordingBar
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import com.aichat.sandbox.ui.components.notes.BrushSheet
 import com.aichat.sandbox.ui.components.notes.ColorPickerSheet
@@ -55,6 +57,7 @@ import com.aichat.sandbox.ui.components.notes.Tool
 import com.aichat.sandbox.ui.components.notes.ToolPalette
 import com.aichat.sandbox.ui.components.notes.ViewportController
 import com.aichat.sandbox.ui.components.notes.ZoomChrome
+import com.aichat.sandbox.ui.screens.notebooks.PageThumbnailRail
 import com.aichat.sandbox.data.notes.FrameThumbnailRenderer
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -93,6 +96,14 @@ fun NoteEditorScreen(
     val stamps by viewModel.stamps.collectAsState()
     val stampDrawerOpen by viewModel.stampDrawerOpen.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
+    val notebook by viewModel.notebook.collectAsState()
+    val pageRailOpen by viewModel.pageRailOpen.collectAsState()
+    val audioClips by viewModel.audioClips.collectAsState()
+    val isRecordingAudio by viewModel.isRecordingAudio.collectAsState()
+    val recordingStartedAt by viewModel.recordingStartedAt.collectAsState()
+    val audioPosition by viewModel.audioPlayer.positionMs.collectAsState()
+    val audioPlaybackState by viewModel.audioPlayer.state.collectAsState()
+    val audioActiveClip by viewModel.audioPlayer.activeClip.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
@@ -172,11 +183,22 @@ fun NoteEditorScreen(
                         )
                     }
                     // Sub-phase 8.2 — frame navigator toggle.
-                    IconButton(onClick = viewModel::toggleFrameNavigator) {
-                        Icon(
-                            imageVector = Icons.Filled.Dashboard,
-                            contentDescription = "Frames",
-                        )
+                    // In notebook mode we surface a Pages rail instead so
+                    // the canvas only carries one strip at a time.
+                    if (notebook != null) {
+                        IconButton(onClick = viewModel::togglePageRail) {
+                            Icon(
+                                imageVector = Icons.Filled.Dashboard,
+                                contentDescription = "Pages",
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = viewModel::toggleFrameNavigator) {
+                            Icon(
+                                imageVector = Icons.Filled.Dashboard,
+                                contentDescription = "Frames",
+                            )
+                        }
                     }
                     // Sub-phase 8.3 — stamp drawer.
                     IconButton(onClick = viewModel::openStampDrawer) {
@@ -360,6 +382,7 @@ fun NoteEditorScreen(
                     onViewportReady = { viewportController = it },
                     onFrameDrawn = viewModel::onFrameDrawn,
                     onFrameTap = viewModel::onFrameTap,
+                    recordingStartedAt = recordingStartedAt,
                 )
                 // Sub-phase 8.1 — frame rectangles + name labels rendered
                 // above the canvas.
@@ -407,6 +430,20 @@ fun NoteEditorScreen(
                     )
                 }
             }
+            // Sub-phase 9.4 — audio recordings strip (playback + scrubber).
+            // Hidden until at least one clip exists; the record button below
+            // surfaces independent of clip count.
+            AudioPlaybackBar(
+                clips = audioClips,
+                activeClipPath = audioActiveClip,
+                playbackState = audioPlaybackState,
+                positionMs = audioPosition,
+                onPlay = viewModel::playAudioClip,
+                onPause = viewModel::pauseAudio,
+                onResume = viewModel::resumeAudio,
+                onSeek = viewModel::seekAudio,
+                onDelete = viewModel::deleteAudioClip,
+            )
             // Sub-phase 8.4 — favorites bar above the tool palette.
             FavoritesBar(
                 slots = favorites,
@@ -431,6 +468,48 @@ fun NoteEditorScreen(
                 onPickCustomColor = viewModel::openColorPicker,
                 snapMask = snapMask,
                 onToggleSnap = viewModel::toggleSnap,
+            )
+        }
+        // Sub-phase 9.2 — left-edge page rail when in notebook mode.
+        if (pageRailOpen && notebook != null) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                PageThumbnailRail(
+                    frames = frames,
+                    currentFrameId = currentFrameId,
+                    items = viewModel.items,
+                    thumbnailRenderer = viewModel.frameThumbnailRenderer,
+                    onSelect = { frame ->
+                        viewModel.selectFrame(frame.id)
+                        val vp = viewportController
+                        if (vp != null && canvasSize != IntSize.Zero) {
+                            vp.flyTo(
+                                bounds = frame.bounds(),
+                                canvasSize = floatArrayOf(
+                                    canvasSize.width.toFloat(),
+                                    canvasSize.height.toFloat(),
+                                ),
+                            )
+                        }
+                    },
+                    onAddPage = viewModel::addNotebookPage,
+                    onClose = viewModel::closePageRail,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
+        // Sub-phase 9.4 — record button anchored above the AI side sheet.
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.BottomEnd,
+        ) {
+            AudioRecordingBar(
+                isRecording = isRecordingAudio,
+                onStart = viewModel::startAudioRecording,
+                onStop = viewModel::stopAudioRecording,
+                modifier = Modifier.padding(end = 12.dp, bottom = 160.dp),
             )
         }
         // Sub-phase 8.2 — left-edge frame navigator.

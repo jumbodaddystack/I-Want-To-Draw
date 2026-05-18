@@ -12,8 +12,16 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface NoteDao {
-    @Query("SELECT * FROM notes ORDER BY updatedAt DESC")
+    /**
+     * Standalone notes only — notebook pages (rows with non-null
+     * `notebookId`) belong to the notebooks list (Phase 9.1).
+     */
+    @Query("SELECT * FROM notes WHERE notebookId IS NULL ORDER BY updatedAt DESC")
     fun observeNotes(): Flow<List<Note>>
+
+    /** Pages owned by a single notebook, ordered for display. */
+    @Query("SELECT * FROM notes WHERE notebookId = :notebookId ORDER BY createdAt ASC")
+    suspend fun getNotesForNotebook(notebookId: String): List<Note>
 
     @Query("SELECT * FROM notes WHERE id = :noteId")
     suspend fun getNote(noteId: String): Note?
