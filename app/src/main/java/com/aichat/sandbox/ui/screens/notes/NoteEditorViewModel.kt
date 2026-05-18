@@ -9,22 +9,27 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aichat.sandbox.data.local.PreferencesManager
 import com.aichat.sandbox.data.model.ApiProvider
+import com.aichat.sandbox.data.model.BrushPreset
 import com.aichat.sandbox.data.model.Chat
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.data.notes.AiChunk
 import com.aichat.sandbox.data.notes.AskRequest
 import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.HandwritingOcr.OcrModelState
 import com.aichat.sandbox.data.notes.NoteAiService
 import com.aichat.sandbox.data.notes.NoteExporter
+import com.aichat.sandbox.data.notes.NoteImageStore
 import com.aichat.sandbox.data.notes.NoteSvgExporter
 import com.aichat.sandbox.data.notes.PdfLayout
 import com.aichat.sandbox.data.notes.PendingDraftStore
 import com.aichat.sandbox.data.notes.RecentColorsStore
+import com.aichat.sandbox.data.repository.BrushPresetRepository
 import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.ui.components.notes.HitTest
+import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.Snap
@@ -67,6 +72,8 @@ class NoteEditorViewModel @Inject constructor(
     private val noteExporter: NoteExporter,
     private val noteSvgExporter: NoteSvgExporter,
     private val recentColorsStore: RecentColorsStore,
+    private val brushPresets: BrushPresetRepository,
+    private val noteImageStore: NoteImageStore,
 ) : ViewModel() {
 
     private val routeArg: String = savedStateHandle["noteId"] ?: NOTE_ID_NEW
@@ -229,6 +236,206 @@ class NoteEditorViewModel @Inject constructor(
         _snapMask.value = _snapMask.value xor mask
     }
 
+    // ── Layers (sub-phase 6.4) ───────────────────────────────────────────
+
+    private val _layers = MutableStateFlow<List<NoteLayer>>(emptyList())
+    val layers: StateFlow<List<NoteLayer>> = _layers.asStateFlow()
+
+    private val _activeLayerId = MutableStateFlow<String?>(null)
+    val activeLayerId: StateFlow<String?> = _activeLayerId.asStateFlow()
+
+    private val _layersPanelOpen = MutableStateFlow(false)
+    val layersPanelOpen: StateFlow<Boolean> = _layersPanelOpen.asStateFlow()
+
+    fun toggleLayersPanel() { _layersPanelOpen.value = !_layersPanelOpen.value }
+    fun closeLayersPanel() { _layersPanelOpen.value = false }
+
+    fun selectLayer(layerId: String) {
+        if (_layers.value.none { it.id == layerId }) return
+        _activeLayerId.value = layerId
+    }
+
+    fun addLayer(name: String = "Layer ${_layers.value.size + 1}") {
+        val current = _layers.value
+        val nextOrdinal = (current.maxOfOrNull { it.ordinal } ?: -1) + 1
+        val layer = NoteLayer(
+            noteId = resolvedNoteId,
+            name = name,
+            opacityPercent = 100,
+            visible = true,
+            locked = false,
+            ordinal = nextOrdinal,
+        )
+        _layers.value = current + layer
+        _activeLayerId.value = layer.id
+    }
+
+    fun toggleLayerVisible(layer: NoteLayer) =
+        updateLayer(layer.id) { it.copy(visible = !it.visible) }
+
+    fun toggleLayerLocked(layer: NoteLayer) =
+        updateLayer(layer.id) { it.copy(locked = !it.locked) }
+
+    fun setLayerOpacity(layer: NoteLayer, percent: Int) =
+        updateLayer(layer.id) { it.copy(opacityPercent = percent.coerceIn(0, 100)) }
+
+    fun moveLayerUp(layer: NoteLayer) {
+        val sorted = _layers.value.sortedBy { it.ordinal }
+        val idx = sorted.indexOfFirst { it.id == layer.id }
+        if (idx < 0 || idx >= sorted.size - 1) return
+        val above = sorted[idx + 1]
+        _layers.value = _layers.value.map {
+            when (it.id) {
+                layer.id -> it.copy(ordinal = above.ordinal)
+                above.id -> it.copy(ordinal = layer.ordinal)
+                else -> it
+            }
+        }
+    }
+
+    fun moveLayerDown(layer: NoteLayer) {
+        val sorted = _layers.value.sortedBy { it.ordinal }
+        val idx = sorted.indexOfFirst { it.id == layer.id }
+        if (idx <= 0) return
+        val below = sorted[idx - 1]
+        _layers.value = _layers.value.map {
+            when (it.id) {
+                layer.id -> it.copy(ordinal = below.ordinal)
+                below.id -> it.copy(ordinal = layer.ordinal)
+                else -> it
+            }
+        }
+    }
+
+    /**
+     * Delete [layer] from the list. Items previously on it are reparented to
+     * the active layer (or the topmost remaining layer if the active layer
+     * is the one being deleted) so they don't vanish from the canvas. The
+     * reparent uses a single [EditorAction.MoveItemsBetweenLayers] so undo
+     * walks both the layer removal and the reparent together.
+     *
+     * Refuses to delete the only remaining layer — the panel button is
+     * gated on `layers.size > 1`, but the guard keeps the VM honest.
+     */
+    fun deleteLayer(layer: NoteLayer) {
+        val current = _layers.value
+        if (current.size <= 1) return
+        val survivors = current.filterNot { it.id == layer.id }
+        val replacementId = (_activeLayerId.value
+            ?.takeIf { id -> id != layer.id && survivors.any { it.id == id } }
+            ?: survivors.maxByOrNull { it.ordinal }?.id)
+        val affectedIds = items.filter { it.layerId == layer.id }.map { it.id }
+        if (affectedIds.isNotEmpty()) {
+            apply(EditorAction.MoveItemsBetweenLayers(affectedIds, layer.id, replacementId))
+        }
+        _layers.value = survivors
+        if (_activeLayerId.value == layer.id) _activeLayerId.value = replacementId
+    }
+
+    private fun updateLayer(id: String, mutate: (NoteLayer) -> NoteLayer) {
+        _layers.value = _layers.value.map { if (it.id == id) mutate(it) else it }
+    }
+
+    /** Layer id new strokes / shapes should inherit. Falls back to "no layer". */
+    private fun layerIdForNewItem(): String? = _activeLayerId.value
+
+    // ── Brush presets (sub-phase 6.5) ────────────────────────────────────
+
+    val brushPresetList: StateFlow<List<BrushPreset>> = brushPresets.observeAll()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList(),
+        )
+
+    /**
+     * Active brush preset per ink tool. Defaults to the first app-scope
+     * preset matching the tool when the user hasn't explicitly picked one.
+     * Slider edits in the BrushSheet replace this with a live-edited
+     * (un-persisted) copy until the user saves a new preset.
+     */
+    private val _activeBrushPreset = MutableStateFlow<BrushPreset?>(null)
+    val activeBrushPreset: StateFlow<BrushPreset?> = _activeBrushPreset.asStateFlow()
+
+    fun applyBrushPreset(preset: BrushPreset) {
+        _activeBrushPreset.value = preset
+        palette.setColor(palette.lastInkTool, preset.colorArgb)
+        palette.setWidth(palette.lastInkTool, preset.baseWidthPx)
+    }
+
+    /** Live BrushSheet slider edit. Doesn't persist; resets when the user picks another preset. */
+    fun setLiveBrushEdit(preset: BrushPreset) {
+        _activeBrushPreset.value = preset
+        palette.setColor(palette.lastInkTool, preset.colorArgb)
+        palette.setWidth(palette.lastInkTool, preset.baseWidthPx)
+    }
+
+    fun setActiveTextureId(textureId: String) {
+        val current = _activeBrushPreset.value ?: return
+        _activeBrushPreset.value = current.copy(textureId = textureId)
+    }
+
+    /** Save the current preset's slider state as a new user-scope preset. */
+    fun saveActiveAsUserPreset(name: String) {
+        val current = _activeBrushPreset.value ?: return
+        viewModelScope.launch {
+            val saved = brushPresets.saveUserPreset(
+                current.copy(
+                    id = UUID.randomUUID().toString(),
+                    name = name,
+                    ownerScope = BrushPreset.SCOPE_USER,
+                )
+            )
+            _activeBrushPreset.value = saved
+        }
+    }
+
+    private fun seedActiveBrushPresetIfNeeded(all: List<BrushPreset>) {
+        if (_activeBrushPreset.value != null) return
+        val toolId = palette.lastInkTool.id
+        _activeBrushPreset.value = all.firstOrNull { it.tool == toolId }
+    }
+
+    // ── Image insert (sub-phase 6.7) ─────────────────────────────────────
+
+    /**
+     * Insert an image from [sourceUri] at the supplied viewport-centre
+     * coordinates. Caller is the editor screen, which has access to the
+     * `ViewportController` for world-coord mapping. Returns silently on
+     * decode / I/O failure (the picker callback can't surface errors).
+     */
+    fun insertImageFromUri(sourceUri: Uri, centerWorldX: Float, centerWorldY: Float) {
+        viewModelScope.launch {
+            val imported = noteImageStore.importFromUri(sourceUri) ?: return@launch
+            // Scale to fit a 320-world-unit longest edge — large enough to
+            // see, small enough that a paste doesn't dominate the viewport.
+            val target = IMAGE_INSERT_TARGET_WORLD
+            val scale = target / maxOf(imported.naturalWidth, imported.naturalHeight)
+            val w = imported.naturalWidth * scale
+            val h = imported.naturalHeight * scale
+            val payload = ImageItemCodec.ImagePayload(
+                relativePath = imported.relativePath,
+                naturalWidth = imported.naturalWidth,
+                naturalHeight = imported.naturalHeight,
+                minX = centerWorldX - w / 2f,
+                minY = centerWorldY - h / 2f,
+                maxX = centerWorldX + w / 2f,
+                maxY = centerWorldY + h / 2f,
+            )
+            val item = NoteItem(
+                noteId = resolvedNoteId,
+                zIndex = nextInkZIndex++,
+                kind = NoteItem.KIND_IMAGE,
+                tool = null,
+                colorArgb = 0,
+                baseWidthPx = 0f,
+                payload = ImageItemCodec.encode(payload),
+                layerId = layerIdForNewItem(),
+            )
+            apply(EditorAction.AddItems(listOf(item)))
+        }
+    }
+
     /**
      * Existing chats, newest first — feeds the sub-phase 4.3
      * [SendToChatSheet] picker. Sourced from the same DAO query that backs
@@ -287,6 +494,28 @@ class NoteEditorViewModel @Inject constructor(
                 past.addAll(decoded.past)
                 future.addAll(decoded.future)
                 updateUndoRedoState()
+                // Sub-phase 6.4 — load the per-note layer list. If none
+                // exist (e.g. migration backfill skipped this note because
+                // there were no items at migration time, but the user has
+                // since added some), synthesise a single "Ink" layer so
+                // every new stroke lands somewhere predictable.
+                val loadedLayers = repository.getLayers(routeArg)
+                if (loadedLayers.isEmpty()) {
+                    addLayer("Ink")
+                } else {
+                    _layers.value = loadedLayers
+                    _activeLayerId.value = loadedLayers.maxByOrNull { it.ordinal }?.id
+                }
+            }
+        } else {
+            // Brand-new note: seed a default "Ink" layer so the first stroke
+            // has somewhere to land. Layer is persisted at save() time.
+            addLayer("Ink")
+        }
+        // Seed the active brush preset once presets stream in.
+        viewModelScope.launch {
+            brushPresetList.collect { all ->
+                if (all.isNotEmpty()) seedActiveBrushPresetIfNeeded(all)
             }
         }
     }
@@ -344,6 +573,7 @@ class NoteEditorViewModel @Inject constructor(
         val prepared = item.copy(
             noteId = resolvedNoteId,
             zIndex = zIndexFor(item.tool),
+            layerId = item.layerId ?: layerIdForNewItem(),
         )
         apply(EditorAction.AddItems(listOf(prepared)))
     }
@@ -441,8 +671,24 @@ class NoteEditorViewModel @Inject constructor(
                         decoded.shape, polygon, vertexCount, polyBounds,
                     )
                 }
+                NoteItem.KIND_IMAGE -> {
+                    val payload = ImageItemCodec.decode(item.payload)
+                    val b = ImageItemCodec.boundsOf(payload)
+                    itemBounds = b
+                    // Use the image's AABB intersected with the polygon's
+                    // AABB as a cheap selector — fine-grained polygon-vs-rect
+                    // tests would be needed for tight lassos around a corner;
+                    // good enough for the v1 UX.
+                    hit = b[2] >= polyBounds[0] && b[0] <= polyBounds[2] &&
+                        b[3] >= polyBounds[1] && b[1] <= polyBounds[3]
+                }
                 else -> continue
             }
+            // Sub-phase 6.4 — locked-layer items don't fall into a lasso
+            // selection. The user expects the layer-panel lock chip to make
+            // its items completely inert.
+            val layer = _layers.value.firstOrNull { it.id == item.layerId }
+            if (layer != null && layer.locked) continue
             if (hit) {
                 matched.add(item.id)
                 bounds.add(itemBounds)
@@ -1023,6 +1269,7 @@ class NoteEditorViewModel @Inject constructor(
                 }
                 TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
                 Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
+                NoteItem.KIND_IMAGE -> ImageItemCodec.boundsOf(ImageItemCodec.decode(item.payload))
                 else -> null
             }
             rect?.let { rects.add(it) }
@@ -1163,6 +1410,10 @@ class NoteEditorViewModel @Inject constructor(
                 val transformed = ShapeCodec.transform(decoded.shape, shifted)
                 ShapeCodec.encode(transformed, decoded.fillArgb)
             }
+            NoteItem.KIND_IMAGE -> {
+                val payload = ImageItemCodec.decode(source.payload)
+                ImageItemCodec.encode(ImageItemCodec.transform(payload, shifted))
+            }
             else -> source.payload.copyOf()
         }
         return source.copy(
@@ -1187,6 +1438,7 @@ class NoteEditorViewModel @Inject constructor(
                 }
                 TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
                 Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
+                NoteItem.KIND_IMAGE -> ImageItemCodec.boundsOf(ImageItemCodec.decode(item.payload))
                 else -> null
             }
             rect?.let { rects.add(it) }
@@ -1270,7 +1522,13 @@ class NoteEditorViewModel @Inject constructor(
             updatedAt = System.currentTimeMillis(),
             undoLogJson = undoJson,
         )
-        repository.saveNote(toPersist, items = items.toList())
+        // Sub-phase 6.4 — flush the layer list atomically with items so the
+        // FK invariants stay sound across the save.
+        repository.saveNoteWithLayers(
+            note = toPersist,
+            items = items.toList(),
+            layers = _layers.value,
+        )
         _note.value = toPersist
         // Fire-and-forget on the repository's singleton-scoped background scope
         // so the user isn't held on the editor while we rasterize — and so the
@@ -1347,6 +1605,9 @@ class NoteEditorViewModel @Inject constructor(
          * own the message.
          */
         private const val OCR_SNIPPET_MAX_LEN: Int = 200
+
+        /** Sub-phase 6.7 — initial longest-edge world size for inserted images. */
+        private const val IMAGE_INSERT_TARGET_WORLD: Float = 320f
     }
 }
 

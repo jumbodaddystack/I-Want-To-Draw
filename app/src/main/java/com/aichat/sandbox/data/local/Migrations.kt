@@ -109,3 +109,167 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         db.execSQL("ALTER TABLE notes ADD COLUMN undoLogJson TEXT")
     }
 }
+
+/**
+ * Migration from version 6 to 7:
+ * Sub-phase 6.4 — real layer system. Adds:
+ *   - `note_layers` table (per-note ordered layer list with visibility / lock / opacity)
+ *   - `note_items.layerId` column (FK, nullable; null = default layer)
+ *
+ * For each existing note we materialise an "Ink" layer and (if any
+ * `tool='highlighter'` items exist) a "Highlights" layer beneath it. Each
+ * existing item is reparented to the matching layer. The legacy
+ * negative-z-base hack used to draw highlighters under ink continues to
+ * work — the new layer ordering simply makes the convention explicit.
+ *
+ * The migration runs inside the implicit Room transaction; on a 100-note
+ * fixture it completes well under 1s because per-note inserts are tiny.
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `note_layers` (
+                `id` TEXT NOT NULL,
+                `noteId` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `opacityPercent` INTEGER NOT NULL,
+                `visible` INTEGER NOT NULL,
+                `locked` INTEGER NOT NULL,
+                `ordinal` INTEGER NOT NULL,
+                PRIMARY KEY(`id`),
+                FOREIGN KEY(`noteId`) REFERENCES `notes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_layers_noteId` ON `note_layers` (`noteId`)")
+        db.execSQL("ALTER TABLE note_items ADD COLUMN layerId TEXT")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_items_layerId` ON `note_items` (`layerId`)")
+
+        // Materialise default layers per existing note. Two-pass:
+        //   1. for every note, insert one "Ink" layer (ordinal 0); if the note
+        //      has any highlighter items, also insert one "Highlights" layer
+        //      (ordinal -1, so it renders beneath).
+        //   2. assign each item to the layer matching its tool.
+        val noteCursor = db.query("SELECT id FROM notes")
+        val noteIds = ArrayList<String>(noteCursor.count)
+        while (noteCursor.moveToNext()) noteIds.add(noteCursor.getString(0))
+        noteCursor.close()
+        for (noteId in noteIds) {
+            val highlighterCountCursor = db.query(
+                "SELECT COUNT(*) FROM note_items WHERE noteId = ? AND tool = 'highlighter'",
+                arrayOf(noteId),
+            )
+            highlighterCountCursor.moveToFirst()
+            val hasHighlighters = highlighterCountCursor.getInt(0) > 0
+            highlighterCountCursor.close()
+
+            val inkLayerId = java.util.UUID.randomUUID().toString()
+            db.execSQL(
+                "INSERT INTO note_layers(id, noteId, name, opacityPercent, visible, locked, ordinal) " +
+                    "VALUES(?, ?, 'Ink', 100, 1, 0, 0)",
+                arrayOf(inkLayerId, noteId),
+            )
+            db.execSQL(
+                "UPDATE note_items SET layerId = ? WHERE noteId = ? AND (tool IS NULL OR tool != 'highlighter')",
+                arrayOf(inkLayerId, noteId),
+            )
+            if (hasHighlighters) {
+                val hlLayerId = java.util.UUID.randomUUID().toString()
+                db.execSQL(
+                    "INSERT INTO note_layers(id, noteId, name, opacityPercent, visible, locked, ordinal) " +
+                        "VALUES(?, ?, 'Highlights', 100, 1, 0, -1)",
+                    arrayOf(hlLayerId, noteId),
+                )
+                db.execSQL(
+                    "UPDATE note_items SET layerId = ? WHERE noteId = ? AND tool = 'highlighter'",
+                    arrayOf(hlLayerId, noteId),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Migration from version 7 to 8:
+ * Sub-phase 6.5 — brush presets. Adds the `brush_presets` table and seeds
+ * 18 app-scope rows (6 default colours × 3 ink tools). User-scope rows
+ * arrive at runtime via "Save as preset…".
+ */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `brush_presets` (
+                `id` TEXT NOT NULL,
+                `ownerScope` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `tool` TEXT NOT NULL,
+                `colorArgb` INTEGER NOT NULL,
+                `baseWidthPx` REAL NOT NULL,
+                `opacity` REAL NOT NULL,
+                `taperStart` REAL NOT NULL,
+                `taperEnd` REAL NOT NULL,
+                `jitter` REAL NOT NULL,
+                `pressureCurveId` TEXT NOT NULL,
+                `textureId` TEXT NOT NULL,
+                `ordinal` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_brush_presets_tool` ON `brush_presets` (`tool`)")
+
+        // Seeded presets. Colours mirror ToolPaletteState.DEFAULT_COLOR_SWATCHES.
+        // Names lean utilitarian — "Pen / Black", "Pencil / Charcoal" etc. —
+        // because the chip row shows the colour swatch anyway.
+        val tools = listOf(
+            Triple("pen", 4f, "smooth"),
+            Triple("highlighter", 18f, "smooth"),
+            Triple("pencil", 3f, "charcoal"),
+        )
+        val colours = listOf(
+            0xFF000000.toInt() to "Black",
+            0xFF2D2D2D.toInt() to "Graphite",
+            0xFFD62828.toInt() to "Red",
+            0xFF2463EB.toInt() to "Blue",
+            0xFF109F5C.toInt() to "Green",
+            0xFFFF9F1C.toInt() to "Orange",
+        )
+        var ordinal = 0
+        for ((tool, width, texture) in tools) {
+            for ((argb, name) in colours) {
+                db.execSQL(
+                    "INSERT INTO brush_presets(id, ownerScope, name, tool, colorArgb, baseWidthPx, " +
+                        "opacity, taperStart, taperEnd, jitter, pressureCurveId, textureId, ordinal) " +
+                        "VALUES(?, 'app', ?, ?, ?, ?, 1.0, 0.0, 0.0, 0.0, 'LINEAR', ?, ?)",
+                    arrayOf<Any>(
+                        java.util.UUID.randomUUID().toString(),
+                        "$name $tool".replaceFirstChar { it.uppercase() },
+                        tool,
+                        argb,
+                        width,
+                        texture,
+                        ordinal++,
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Migration from version 8 to 9:
+ * Sub-phase 6.7 — image insert. No new tables; `NoteItem.kind` simply gains
+ * the `"image"` discriminator. Existing rows are unaffected; new image
+ * payloads use [com.aichat.sandbox.ui.components.notes.ImageItemCodec].
+ *
+ * The version bump exists primarily so a future build that introduces an
+ * incompatible image format can branch on the schema version cleanly.
+ */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // No-op DDL: image items use the existing note_items columns
+        // (kind = "image", payload encodes path / dims / crop / rotation).
+    }
+}

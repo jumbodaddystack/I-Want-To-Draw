@@ -10,6 +10,8 @@ import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import com.aichat.sandbox.ui.components.notes.HitTest
+import com.aichat.sandbox.ui.components.notes.ImageItemCodec
+import com.aichat.sandbox.ui.components.notes.ImageRenderer
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.ShapeRenderer
@@ -18,6 +20,7 @@ import com.aichat.sandbox.ui.components.notes.StrokeRenderer
 import com.aichat.sandbox.ui.components.notes.TextItemCodec
 import com.aichat.sandbox.ui.components.notes.TextItemRenderer
 import java.io.ByteArrayOutputStream
+import java.io.File
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
@@ -71,6 +74,7 @@ object NoteRasterizer {
         maxEdgePx: Int,
         backgroundStyle: String = BackgroundLayer.STYLE_PLAIN,
         marginWorld: Float = MARGIN_WORLD,
+        filesDir: File? = null,
     ): Bitmap {
         require(bounds.size == 4) { "bounds must be [minX, minY, maxX, maxY]" }
         require(maxEdgePx > 0) { "maxEdgePx must be > 0 (got $maxEdgePx)" }
@@ -91,7 +95,7 @@ object NoteRasterizer {
         canvas.save()
         canvas.scale(scale, scale)
         canvas.translate(-padMinX, -padMinY)
-        drawItems(canvas, items)
+        drawItems(canvas, items, filesDir)
         canvas.restore()
         return bitmap
     }
@@ -104,9 +108,10 @@ object NoteRasterizer {
         items: List<NoteItem>,
         maxEdgePx: Int = 1024,
         backgroundStyle: String = BackgroundLayer.STYLE_PLAIN,
+        filesDir: File? = null,
     ): Bitmap? {
         val bounds = computeBounds(items) ?: return null
-        return render(items, bounds, maxEdgePx, backgroundStyle)
+        return render(items, bounds, maxEdgePx, backgroundStyle, filesDir = filesDir)
     }
 
     /**
@@ -118,9 +123,10 @@ object NoteRasterizer {
         items: List<NoteItem>,
         maxEdgePx: Int = 1024,
         backgroundStyle: String = note.backgroundStyle,
+        filesDir: File? = null,
     ): Bitmap? {
         val bounds = computeBounds(items) ?: return null
-        return render(items, bounds, maxEdgePx, backgroundStyle)
+        return render(items, bounds, maxEdgePx, backgroundStyle, filesDir = filesDir)
     }
 
     /**
@@ -254,6 +260,7 @@ object NoteRasterizer {
         }
         TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
         Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
+        NoteItem.KIND_IMAGE -> ImageItemCodec.boundsOf(ImageItemCodec.decode(item.payload))
         else -> null
     }
 
@@ -265,7 +272,7 @@ object NoteRasterizer {
      * (the PDF export pipeline in 4.2 in particular) can reuse the per-item
      * paint configuration without duplicating the decode loop.
      */
-    fun drawItems(canvas: Canvas, items: List<NoteItem>) {
+    fun drawItems(canvas: Canvas, items: List<NoteItem>, filesDir: File? = null) {
         val sorted = items.sortedBy { it.zIndex }
         val paint = Paint()
         val path = Path()
@@ -288,6 +295,7 @@ object NoteRasterizer {
                 }
                 TextItemCodec.KIND -> TextItemRenderer.draw(canvas, item, matrix)
                 Shape.KIND -> ShapeRenderer.draw(canvas, item, paint)
+                NoteItem.KIND_IMAGE -> filesDir?.let { ImageRenderer.draw(canvas, item, it) }
             }
         }
     }

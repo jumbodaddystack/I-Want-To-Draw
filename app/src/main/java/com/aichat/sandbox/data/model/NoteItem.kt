@@ -16,19 +16,22 @@ import java.util.UUID
             onDelete = ForeignKey.CASCADE,
         )
     ],
-    indices = [Index("noteId"), Index("noteId", "zIndex")],
+    indices = [Index("noteId"), Index("noteId", "zIndex"), Index("layerId")],
 )
 data class NoteItem(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
     val noteId: String,
     val zIndex: Int,
-    val kind: String,        // "stroke" | "text"
+    val kind: String,        // "stroke" | "text" | "shape" | "image"
     val tool: String?,       // for strokes: "pen" | "highlighter" | "pencil" | "eraser"
     val colorArgb: Int,
     val baseWidthPx: Float,
     // Strokes: packed binary points (x,y,p,tilt). Text: UTF-8 body, font/size encoded.
     val payload: ByteArray,
+    // Sub-phase 6.4 — parent layer FK. Null = default/legacy layer (renders
+    // on top of all named layers; behaves as visible+unlocked+opacity 100).
+    val layerId: String? = null,
 ) {
     // Hand-written equals/hashCode because ByteArray uses reference equality by default.
     override fun equals(other: Any?): Boolean {
@@ -42,6 +45,7 @@ data class NoteItem(
         if (colorArgb != other.colorArgb) return false
         if (baseWidthPx != other.baseWidthPx) return false
         if (!payload.contentEquals(other.payload)) return false
+        if (layerId != other.layerId) return false
         return true
     }
 
@@ -54,6 +58,14 @@ data class NoteItem(
         result = 31 * result + colorArgb
         result = 31 * result + baseWidthPx.hashCode()
         result = 31 * result + payload.contentHashCode()
+        result = 31 * result + (layerId?.hashCode() ?: 0)
         return result
+    }
+
+    companion object {
+        const val KIND_STROKE = "stroke"
+        const val KIND_TEXT = "text"
+        const val KIND_SHAPE = "shape"
+        const val KIND_IMAGE = "image"
     }
 }

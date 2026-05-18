@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.data.model.NoteLayer
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -55,10 +56,46 @@ interface NoteDao {
     @Query("UPDATE notes SET ocrText = :text, updatedAt = :updatedAt WHERE id = :noteId")
     suspend fun updateOcrText(noteId: String, text: String, updatedAt: Long)
 
+    // ── Layers (sub-phase 6.4) ───────────────────────────────────────────
+
+    @Query("SELECT * FROM note_layers WHERE noteId = :noteId ORDER BY ordinal ASC")
+    suspend fun getLayers(noteId: String): List<NoteLayer>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertLayers(layers: List<NoteLayer>)
+
+    @Query("DELETE FROM note_layers WHERE id = :layerId")
+    suspend fun deleteLayer(layerId: String)
+
+    @Query("DELETE FROM note_layers WHERE noteId = :noteId")
+    suspend fun deleteLayersForNote(noteId: String)
+
     @Transaction
     suspend fun saveNote(note: Note, items: List<NoteItem>) {
         upsertNote(note)
         deleteItemsForNote(note.id)
+        if (items.isNotEmpty()) {
+            upsertItems(items)
+        }
+    }
+
+    /**
+     * Sub-phase 6.4 — atomic save of note + items + layers. Layers are
+     * persisted before items so the FK back-references stay valid throughout
+     * the cascade.
+     */
+    @Transaction
+    suspend fun saveNoteWithLayers(
+        note: Note,
+        items: List<NoteItem>,
+        layers: List<NoteLayer>,
+    ) {
+        upsertNote(note)
+        deleteItemsForNote(note.id)
+        deleteLayersForNote(note.id)
+        if (layers.isNotEmpty()) {
+            upsertLayers(layers)
+        }
         if (items.isNotEmpty()) {
             upsertItems(items)
         }

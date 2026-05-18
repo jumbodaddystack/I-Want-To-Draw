@@ -6,8 +6,8 @@
 
 ## Status
 
-- **Current phase:** Phase 6 — foundation slice complete (6.1, 6.2, 6.3, 6.8); 6.4 / 6.5 / 6.6 / 6.7 still open
-- **Next sub-phase:** 6.4 Layers panel (highest blocker for remaining sub-phases — touches every render path)
+- **Current phase:** Phase 6 — all sub-phases code-complete (6.1 / 6.2 / 6.3 / 6.4 / 6.5 / 6.6 / 6.7 / 6.8). The Phase 6 verification matrix still needs a real-hardware pass and Phase 5.5 device verification is also outstanding.
+- **Next sub-phase:** 5.5 device verification (then Phase 6 matrix) before moving on to Phase 7.1 (vector JSON serializer).
 - **Last verified device pass:** n/a (5.5 + Phase 6 verification matrix pending)
 
 ## Phase index
@@ -41,10 +41,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 - [x] **6.1** Selection handles overlay (translate / scale / rotate with live preview) ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-61--selection-handles-overlay))
 - [x] **6.2** Shape tools — line, rectangle, ellipse, arrow, polygon — new `shape` item kind ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-62--shape-tools))
 - [x] **6.3** Snapping system (angle, grid, to-other-strokes) ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-63--snapping-system))
-- [ ] **6.4** Layers panel UI (visibility, lock, reorder, opacity per layer) ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-64--layers-panel))
-- [ ] **6.5** Brush customization (per-tool sliders + named presets) ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-65--brush-customization--presets))
-- [ ] **6.6** Brush textures (smooth, charcoal, watercolor, marker) ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-66--brush-textures))
-- [ ] **6.7** Image insert (drag / paste / pick into canvas as `image` item) ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-67--image-insert))
+- [x] **6.4** Layers panel UI (visibility, lock, reorder, opacity per layer) ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-64--layers-panel))
+- [x] **6.5** Brush customization (per-tool sliders + named presets) ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-65--brush-customization--presets))
+- [x] **6.6** Brush textures (smooth, charcoal, watercolor, marker) ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-66--brush-textures))
+- [x] **6.7** Image insert (drag / paste / pick into canvas as `image` item) ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-67--image-insert))
 - [x] **6.8** SVG export ([details](./ARTIST_CANVAS_PHASE_6.md#sub-phase-68--svg-export--phase-6-verification)) — Phase 6 verification matrix still pending real-hardware run
 
 ### Phase 7 — AI vector edit pipeline · [`details`](./ARTIST_CANVAS_PHASE_7.md)

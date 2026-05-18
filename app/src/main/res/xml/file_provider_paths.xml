@@ -6,4 +6,8 @@
     <files-path
         name="note-thumbs"
         path="note-thumbs/" />
+    <!-- Sub-phase 6.7 — inserted-image originals. -->
+    <files-path
+        name="note-images"
+        path="note-images/" />
 </paths>

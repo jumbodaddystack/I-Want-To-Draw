@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.NoteRasterizer
 import com.aichat.sandbox.data.notes.OcrResult
@@ -71,10 +72,33 @@ class NoteRepository @Inject constructor(
         noteDao.saveNote(note, items)
     }
 
+    /** Sub-phase 6.4 — atomic save including the layer list. */
+    suspend fun saveNoteWithLayers(
+        note: Note,
+        items: List<NoteItem>,
+        layers: List<NoteLayer>,
+    ) = withContext(Dispatchers.IO) {
+        noteDao.saveNoteWithLayers(note, items, layers)
+    }
+
+    suspend fun getLayers(noteId: String): List<NoteLayer> = withContext(Dispatchers.IO) {
+        noteDao.getLayers(noteId)
+    }
+
     suspend fun deleteNote(noteId: String) = withContext(Dispatchers.IO) {
         // Item rows cascade via the foreign key, but the cached PNG isn't part
         // of the database — delete it explicitly so the files dir doesn't grow.
         thumbnailFile(noteId).delete()
+        // Sub-phase 6.7 — collect referenced image paths *before* the cascade
+        // removes the rows, then unlink each file. Orphan files left after a
+        // crash are swept by [com.aichat.sandbox.data.notes.NoteImageStore.sweepOrphans].
+        val items = noteDao.getItems(noteId)
+        for (item in items) {
+            if (item.kind != NoteItem.KIND_IMAGE) continue
+            val path = com.aichat.sandbox.ui.components.notes.ImageItemCodec
+                .decodeRelativePath(item.payload) ?: continue
+            File(context.filesDir, path).delete()
+        }
         noteDao.deleteNote(noteId)
     }
 

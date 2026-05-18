@@ -3,12 +3,16 @@ package com.aichat.sandbox.di
 import android.content.Context
 import androidx.room.Room
 import com.aichat.sandbox.data.local.AppDatabase
+import com.aichat.sandbox.data.local.BrushPresetDao
 import com.aichat.sandbox.data.local.ChatDao
 import com.aichat.sandbox.data.local.MIGRATION_1_2
 import com.aichat.sandbox.data.local.MIGRATION_2_3
 import com.aichat.sandbox.data.local.MIGRATION_3_4
 import com.aichat.sandbox.data.local.MIGRATION_4_5
 import com.aichat.sandbox.data.local.MIGRATION_5_6
+import com.aichat.sandbox.data.local.MIGRATION_6_7
+import com.aichat.sandbox.data.local.MIGRATION_7_8
+import com.aichat.sandbox.data.local.MIGRATION_8_9
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.NoteAiService
@@ -40,6 +44,9 @@ object AppModule {
             MIGRATION_3_4,
             MIGRATION_4_5,
             MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8,
+            MIGRATION_8_9,
         ).build()
     }
 
@@ -51,6 +58,11 @@ object AppModule {
     @Provides
     fun provideNoteDao(database: AppDatabase): NoteDao {
         return database.noteDao()
+    }
+
+    @Provides
+    fun provideBrushPresetDao(database: AppDatabase): BrushPresetDao {
+        return database.brushPresetDao()
     }
 
     @Provides
