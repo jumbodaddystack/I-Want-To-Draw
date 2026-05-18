@@ -4,6 +4,23 @@
 
 Parent plan: [`ARTIST_CANVAS_PLAN.md`](./ARTIST_CANVAS_PLAN.md).
 
+## Status
+
+| Sub-phase | State | Notes |
+| --- | --- | --- |
+| 5.1 | ✅ Implemented | `ToolDynamics` extracted; `StrokeRenderer` routes width/alpha through it; JVM tests in `ToolDynamicsTest`. |
+| 5.2 | ✅ Implemented | `Note.undoLogJson` + `MIGRATION_5_6`; `EditorActionCodec` (JSON, base64 payloads, 256 KB cap, FIFO eviction); rehydrated in `NoteEditorViewModel.init`, persisted in `save()`. Tests in `EditorActionCodecTest`. |
+| 5.3 | ✅ Implemented | `RecentColorsStore` (DataStore, 12-entry FIFO, app-wide); `ColorPickerSheet` (hue ring + SL square + alpha slider + hex round-trip + recents); `ToolPalette` long-press + `+` tile open the sheet. |
+| 5.4 | ✅ Implemented | `ViewportController.fitToContent` / `centerOnContent` / `resetToOneHundred`; `ZoomChrome` chip + popover slotted into the editor TopAppBar. JVM tests in `ViewportControllerTest`. Minimap remains optional (not shipped). |
+| 5.5 | ⏳ Pending hardware | Cannot run on real S-Pen hardware in CI; verify on a Samsung S25 Ultra per the matrix below. |
+
+### Notes / deviations
+
+- **Highlighter base alpha** lifted from `~0.30` (76/255) to `0.35` (89/255) to match the spec — a single pass now reads slightly heavier on white paper. Old highlighter strokes re-render with the new alpha (data unchanged).
+- **`StateFlow<Float>` on ViewportController** — left as Compose `mutableStateOf` because the editor consumes it from a `@Composable` (`ZoomChrome`) that recomposes on the underlying snapshot read. A `StateFlow` wrapper would have been redundant.
+- **Minimap** — not shipped (the spec marks it optional behind a feature flag); the chip popover covers the navigation gap.
+- **Phase 5.1 `DrawingSurface` edits** — the spec's "≈ lines 329–351 / 849–870" pointer ended up being entirely inside `StrokeRenderer.drawStrokePath`, which is the shared path both `DrawingSurface` (live + replay) and `NoteRasterizer` (export) call. Centralising there means `DrawingSurface` did not need its own modification.
+
 ## Sub-phase 5.1 — Pressure & tilt → width/opacity modulation
 
 ### Scope

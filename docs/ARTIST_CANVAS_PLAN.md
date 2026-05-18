@@ -6,9 +6,9 @@
 
 ## Status
 
-- **Current phase:** Phase 5 — not started
-- **Next sub-phase:** 5.1 Pressure & tilt → width/opacity modulation
-- **Last verified device pass:** n/a (Phases 5–9 pending)
+- **Current phase:** Phase 5 — implementation complete (5.1–5.4); device verification pending
+- **Next sub-phase:** 5.5 Phase 5 device verification (on hardware)
+- **Last verified device pass:** n/a (5.5 pending)
 
 ## Phase index
 
@@ -30,10 +30,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 
 ### Phase 5 — Foundation polish · [`details`](./ARTIST_CANVAS_PHASE_5.md)
 
-- [ ] **5.1** Pressure & tilt → width/opacity modulation in `DrawingSurface` segment renderer ([details](./ARTIST_CANVAS_PHASE_5.md#sub-phase-51--pressure--tilt--widthopacity-modulation))
-- [ ] **5.2** Persisted undo/redo across sessions (action log on `Note`) ([details](./ARTIST_CANVAS_PHASE_5.md#sub-phase-52--persisted-undoredo-across-sessions))
-- [ ] **5.3** Full color picker (HSL wheel + hex + recent colors, swatches stay as presets) ([details](./ARTIST_CANVAS_PHASE_5.md#sub-phase-53--full-color-picker))
-- [ ] **5.4** Zoom/pan UI affordances (zoom %, Fit, 100%, Center, optional minimap) ([details](./ARTIST_CANVAS_PHASE_5.md#sub-phase-54--zoompan-ui-affordances))
+- [x] **5.1** Pressure & tilt → width/opacity modulation in `DrawingSurface` segment renderer ([details](./ARTIST_CANVAS_PHASE_5.md#sub-phase-51--pressure--tilt--widthopacity-modulation))
+- [x] **5.2** Persisted undo/redo across sessions (action log on `Note`) ([details](./ARTIST_CANVAS_PHASE_5.md#sub-phase-52--persisted-undoredo-across-sessions))
+- [x] **5.3** Full color picker (HSL wheel + hex + recent colors, swatches stay as presets) ([details](./ARTIST_CANVAS_PHASE_5.md#sub-phase-53--full-color-picker))
+- [x] **5.4** Zoom/pan UI affordances (zoom %, Fit, 100%, Center, optional minimap) ([details](./ARTIST_CANVAS_PHASE_5.md#sub-phase-54--zoompan-ui-affordances))
 - [ ] **5.5** Phase 5 device verification ([details](./ARTIST_CANVAS_PHASE_5.md#sub-phase-55--phase-5-device-verification))
 
 ### Phase 6 — Artist toolbox · [`details`](./ARTIST_CANVAS_PHASE_6.md)

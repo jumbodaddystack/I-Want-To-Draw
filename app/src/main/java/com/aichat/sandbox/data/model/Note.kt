@@ -20,4 +20,8 @@ data class Note(
     val ocrText: String?,          // most-recent OCR pass for search / non-vision AI fallback
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+    // Phase 5.2 — serialized `EditorAction` stack (past + future), JSON.
+    // Null on rows created before schema v6 and on notes that have never
+    // had an editor session. See `EditorActionCodec`.
+    val undoLogJson: String? = null,
 )

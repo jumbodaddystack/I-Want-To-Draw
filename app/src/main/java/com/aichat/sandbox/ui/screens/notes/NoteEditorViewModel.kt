@@ -20,6 +20,7 @@ import com.aichat.sandbox.data.notes.NoteAiService
 import com.aichat.sandbox.data.notes.NoteExporter
 import com.aichat.sandbox.data.notes.PdfLayout
 import com.aichat.sandbox.data.notes.PendingDraftStore
+import com.aichat.sandbox.data.notes.RecentColorsStore
 import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.ui.components.notes.HitTest
@@ -60,6 +61,7 @@ class NoteEditorViewModel @Inject constructor(
     private val preferencesManager: PreferencesManager,
     private val chatRepository: ChatRepository,
     private val noteExporter: NoteExporter,
+    private val recentColorsStore: RecentColorsStore,
 ) : ViewModel() {
 
     private val routeArg: String = savedStateHandle["noteId"] ?: NOTE_ID_NEW
@@ -88,9 +90,10 @@ class NoteEditorViewModel @Inject constructor(
     private var nextInkZIndex: Int = 0
     private var nextHighlighterZIndex: Int = HIGHLIGHTER_Z_BASE
 
-    // In-memory undo / redo log. Capped to keep a long session bounded; the
-    // oldest action is dropped silently when [UNDO_STACK_CAP] is exceeded.
-    // Not persisted across editor exit (v1 scope).
+    // Undo / redo log. Capped to keep a long session bounded; the oldest
+    // action is dropped silently when [UNDO_STACK_CAP] is exceeded. Persisted
+    // to `Note.undoLogJson` on each save and re-hydrated in [init]
+    // (sub-phase 5.2).
     private val past = ArrayDeque<EditorAction>()
     private val future = ArrayDeque<EditorAction>()
 
@@ -189,6 +192,27 @@ class NoteEditorViewModel @Inject constructor(
         )
 
     /**
+     * Sub-phase 5.3 — twelve most-recent custom colours, app-wide. Surfaced
+     * to the [ColorPickerSheet] so the user can re-apply yesterday's pick
+     * with one tap.
+     */
+    val recentColors: StateFlow<List<Int>> = recentColorsStore.recentColors
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = emptyList(),
+        )
+
+    /**
+     * Sub-phase 5.3 — whether the colour picker sheet is currently open. The
+     * sheet edits the active ink tool's colour; the VM owns the open/close
+     * state so a configuration change (rotation) doesn't lose the user's
+     * in-flight pick.
+     */
+    private val _colorPickerOpen = MutableStateFlow(false)
+    val colorPickerOpen: StateFlow<Boolean> = _colorPickerOpen.asStateFlow()
+
+    /**
      * Existing chats, newest first — feeds the sub-phase 4.3
      * [SendToChatSheet] picker. Sourced from the same DAO query that backs
      * the chat-list tab so ordering stays consistent.
@@ -232,17 +256,58 @@ class NoteEditorViewModel @Inject constructor(
         }
         if (routeArg != NOTE_ID_NEW) {
             viewModelScope.launch {
-                repository.getNote(routeArg)?.let { loaded -> _note.value = loaded }
+                val loadedNote = repository.getNote(routeArg)
+                if (loadedNote != null) _note.value = loadedNote
                 val loaded = repository.getItems(routeArg)
                 items.clear()
                 items.addAll(loaded)
                 refreshZIndexCounters(loaded)
+                // Sub-phase 5.2: rehydrate undo / redo. Malformed payloads
+                // land as empty stacks (the codec already logged a warning).
+                val decoded = EditorActionCodec.decode(loadedNote?.undoLogJson)
+                past.clear()
+                future.clear()
+                past.addAll(decoded.past)
+                future.addAll(decoded.future)
+                updateUndoRedoState()
             }
         }
     }
 
     fun setTitle(title: String) {
         _note.update { it.copy(title = title) }
+    }
+
+    // ── Colour picker (sub-phase 5.3) ────────────────────────────────────
+
+    fun openColorPicker() {
+        if (!palette.selected.isInk) {
+            // Eraser / lasso / text tools don't carry an ink colour; if the
+            // user somehow triggered the picker (long-press on a stale
+            // swatch, for instance) we fall back to PEN so the picked colour
+            // lands somewhere visible.
+            palette.select(Tool.PEN)
+        }
+        _colorPickerOpen.value = true
+    }
+
+    fun dismissColorPicker() {
+        _colorPickerOpen.value = false
+    }
+
+    /**
+     * Apply [colorArgb] to the active ink tool and record it on the recents
+     * list. The picker stays responsible for parsing the colour; we just
+     * propagate. Fire-and-forget for the recents write — a failed datastore
+     * commit is non-fatal and would just mean the colour isn't pre-loaded
+     * next time.
+     */
+    fun confirmColorPick(colorArgb: Int) {
+        palette.setColor(palette.lastInkTool, colorArgb)
+        _colorPickerOpen.value = false
+        viewModelScope.launch {
+            recentColorsStore.record(colorArgb)
+        }
     }
 
     fun setBackgroundStyle(style: String) {
@@ -1152,9 +1217,15 @@ class NoteEditorViewModel @Inject constructor(
     suspend fun save(): String {
         val current = _note.value
         val sanitizedTitle = current.title.ifBlank { DEFAULT_TITLE }
+        // Sub-phase 5.2: serialize the undo/redo log alongside the note row.
+        // [EditorActionCodec.encode] applies the 256 KB cap; if both stacks
+        // wind up empty we store `null` so a never-edited note doesn't carry
+        // an empty `{schema:1,past:[],future:[]}` blob forever.
+        val undoJson = EditorActionCodec.encode(past.toList(), future.toList())
         val toPersist = current.copy(
             title = sanitizedTitle,
             updatedAt = System.currentTimeMillis(),
+            undoLogJson = undoJson,
         )
         repository.saveNote(toPersist, items = items.toList())
         _note.value = toPersist

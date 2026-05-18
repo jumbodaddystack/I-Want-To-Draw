@@ -10,7 +10,7 @@ import com.aichat.sandbox.data.model.NoteItem
 
 @Database(
     entities = [Chat::class, Message::class, MessageFts::class, Note::class, NoteItem::class],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

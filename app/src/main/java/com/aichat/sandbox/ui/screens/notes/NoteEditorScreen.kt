@@ -35,11 +35,13 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
+import com.aichat.sandbox.ui.components.notes.ColorPickerSheet
 import com.aichat.sandbox.ui.components.notes.DrawingSurfaceView
 import com.aichat.sandbox.ui.components.notes.TextItemEditor
 import com.aichat.sandbox.ui.components.notes.Tool
 import com.aichat.sandbox.ui.components.notes.ToolPalette
 import com.aichat.sandbox.ui.components.notes.ViewportController
+import com.aichat.sandbox.ui.components.notes.ZoomChrome
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -62,6 +64,8 @@ fun NoteEditorScreen(
     val availableModels by viewModel.availableModels.collectAsState()
     val chats by viewModel.chats.collectAsState()
     val sendToChatMode by viewModel.sendToChatMode.collectAsState()
+    val colorPickerOpen by viewModel.colorPickerOpen.collectAsState()
+    val recentColors by viewModel.recentColors.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
@@ -122,6 +126,22 @@ fun NoteEditorScreen(
                             contentDescription = "Ask about this note",
                         )
                     }
+                    // Phase 5.4 — zoom chip + Fit / 100% / Center popover.
+                    // Bounds are recomputed lazily on each menu open so the
+                    // user doesn't pay for a scan on every TopAppBar
+                    // recomposition.
+                    ZoomChrome(
+                        viewport = viewportController,
+                        canvasSize = canvasSize,
+                        contentBoundsProvider = {
+                            val bounds = viewModel.computeBoundsForExport()
+                            // The exporter returns a default A4-ish rect for
+                            // empty notes; fit-on-empty would be visually
+                            // confusing, so collapse those to null.
+                            if (viewModel.items.isEmpty()) null else bounds
+                        },
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
                     IconButton(onClick = viewModel::undo, enabled = canUndo) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Undo,
@@ -250,7 +270,10 @@ fun NoteEditorScreen(
                     )
                 }
             }
-            ToolPalette(state = viewModel.palette)
+            ToolPalette(
+                state = viewModel.palette,
+                onPickCustomColor = viewModel::openColorPicker,
+            )
         }
         if (pdfDialogVisible) {
             ExportPdfDialog(
@@ -270,6 +293,14 @@ fun NoteEditorScreen(
                         )
                     }
                 },
+            )
+        }
+        if (colorPickerOpen) {
+            ColorPickerSheet(
+                initialColorArgb = viewModel.palette.activeInkColor(),
+                recents = recentColors,
+                onConfirm = viewModel::confirmColorPick,
+                onDismiss = viewModel::dismissColorPicker,
             )
         }
         if (sendToChatMode != null) {

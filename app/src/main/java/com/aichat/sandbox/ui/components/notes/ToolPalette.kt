@@ -3,6 +3,7 @@ package com.aichat.sandbox.ui.components.notes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Create
@@ -46,6 +49,7 @@ import androidx.compose.ui.unit.dp
 fun ToolPalette(
     state: ToolPaletteState,
     modifier: Modifier = Modifier,
+    onPickCustomColor: () -> Unit = {},
 ) {
     val selected = state.selected
     Surface(
@@ -64,7 +68,7 @@ fun ToolPalette(
             HorizontalDivider(thickness = 0.5.dp)
 
             if (selected.isInk) {
-                InkConfigRow(state = state)
+                InkConfigRow(state = state, onPickCustomColor = onPickCustomColor)
             } else if (selected.isEraser) {
                 EraserConfigRow(state = state)
             } else if (selected.isLasso) {
@@ -129,10 +133,17 @@ private fun Tool.icon(): ImageVector = when (this) {
 }
 
 @Composable
-private fun InkConfigRow(state: ToolPaletteState) {
+private fun InkConfigRow(
+    state: ToolPaletteState,
+    onPickCustomColor: () -> Unit,
+) {
     val activeInk = state.lastInkTool
     val activeColor = state.colorFor(activeInk)
     val activeWidth = state.widthFor(activeInk)
+    // Whether `activeColor` matches one of the default swatches drives the
+    // highlight: a custom hue lights up the "+" tile instead, so the user
+    // can see "my picked colour" reflected somewhere on the row.
+    val isCustomColor = activeColor !in ToolPaletteState.DEFAULT_COLOR_SWATCHES
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -150,8 +161,17 @@ private fun InkConfigRow(state: ToolPaletteState) {
                     colorArgb = swatch,
                     selected = swatch == activeColor,
                     onSelect = { state.setColor(activeInk, swatch) },
+                    onLongPress = onPickCustomColor,
                 )
             }
+            // Phase 5.3 — "+" tile opens the full HSL picker. Long-pressing
+            // any existing swatch does the same thing, so two affordances
+            // converge on one sheet.
+            CustomColorTile(
+                showingCustom = isCustomColor,
+                customColorArgb = if (isCustomColor) activeColor else null,
+                onClick = onPickCustomColor,
+            )
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -235,6 +255,7 @@ private fun ColorSwatch(
     colorArgb: Int,
     selected: Boolean,
     onSelect: () -> Unit,
+    onLongPress: () -> Unit = {},
 ) {
     val color = Color(colorArgb)
     val ring = MaterialTheme.colorScheme.primary
@@ -248,6 +269,44 @@ private fun ColorSwatch(
                 color = if (selected) ring else Color.Black.copy(alpha = 0.25f),
                 shape = CircleShape,
             )
-            .clickable(onClick = onSelect)
+            .pointerInput(colorArgb) {
+                detectTapGestures(
+                    onTap = { onSelect() },
+                    onLongPress = { onLongPress() },
+                )
+            }
     )
+}
+
+@Composable
+private fun CustomColorTile(
+    showingCustom: Boolean,
+    customColorArgb: Int?,
+    onClick: () -> Unit,
+) {
+    val ring = MaterialTheme.colorScheme.primary
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(
+                if (showingCustom && customColorArgb != null) Color(customColorArgb)
+                else MaterialTheme.colorScheme.surfaceVariant
+            )
+            .border(
+                width = if (showingCustom) 2.dp else 0.5.dp,
+                color = if (showingCustom) ring else Color.Black.copy(alpha = 0.25f),
+                shape = CircleShape,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Add,
+            contentDescription = "Custom colour",
+            tint = if (showingCustom) Color.White
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp),
+        )
+    }
 }

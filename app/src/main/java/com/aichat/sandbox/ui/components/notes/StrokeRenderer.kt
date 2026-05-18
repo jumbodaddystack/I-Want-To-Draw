@@ -10,11 +10,12 @@ import android.graphics.Shader
 import kotlin.random.Random
 
 /**
- * Pure rendering math + shared stroke draw routine (sub-phase 1.4, extended
- * for the per-tool paint configuration in sub-phase 1.6).
+ * Shared stroke draw routine (sub-phase 1.4, extended in 1.6 and 5.1).
  *
- * The math helpers ([pressureCurve], [tiltFactor], [widthAt], [alphaAt]) are
- * free of Android APIs so they can be unit-tested on the JVM.
+ * Per-segment width and alpha now come from [ToolDynamics] so the curves
+ * are unit-testable on the JVM and the renderer stays free of pure-math
+ * arithmetic. Anything Android-specific (paint configuration, shader caching,
+ * Canvas operations) lives here; the dynamics math lives in [ToolDynamics].
  *
  * [drawStrokePath] is shared by live, predicted, and replay rendering so a
  * stroke looks identical on commit as it did while being drawn.
@@ -25,57 +26,16 @@ object StrokeRenderer {
     const val TOOL_HIGHLIGHTER = "highlighter"
     const val TOOL_PENCIL = "pencil"
 
-    private const val MIN_PRESSURE_GAIN = 0.4f
-    private const val PRESSURE_GAIN_RANGE = 0.6f
-    private const val PENCIL_TILT_GAIN = 1.5f
-    private const val HIGHLIGHTER_ALPHA = 76     // ~30%
-    private const val PENCIL_BASE_ALPHA = 200    // grain handles the rest
-    private const val PENCIL_TILT_ALPHA_DROP = 0.5f
-    private val HALF_PI = (Math.PI / 2.0).toFloat()
+    private const val PENCIL_GRAIN_ALPHA = 200    // grain shader handles the rest
 
     /** Lazily-built 64x64 tileable noise bitmap shared by every pencil paint. */
     @Volatile private var pencilShader: BitmapShader? = null
 
     /**
-     * Maps raw stylus pressure (0..1, clamped) to a width multiplier. The floor
-     * keeps very light strokes visible; growth is linear from there.
-     */
-    fun pressureCurve(pressure: Float): Float {
-        val clamped = pressure.coerceIn(0f, 1f)
-        return MIN_PRESSURE_GAIN + PRESSURE_GAIN_RANGE * clamped
-    }
-
-    /**
-     * Tilt multiplier. Pencil flattens to a thicker, softer mark as the pen
-     * tips over (radians, 0 = upright, π/2 = flat against the screen). Other
-     * tools ignore tilt and return 1.0.
-     */
-    fun tiltFactor(tool: String?, tiltRadians: Float): Float {
-        if (tool != TOOL_PENCIL) return 1.0f
-        val normalized = (tiltRadians / HALF_PI).coerceIn(0f, 1f)
-        return 1.0f + PENCIL_TILT_GAIN * normalized
-    }
-
-    /** Final per-sample width: `base * pressureGain * tiltGain`. */
-    fun widthAt(baseWidthPx: Float, pressure: Float, tiltRadians: Float, tool: String?): Float =
-        baseWidthPx * pressureCurve(pressure) * tiltFactor(tool, tiltRadians)
-
-    /**
-     * Per-sample alpha multiplier. Pencil fades as the pen tips over (the
-     * mark widens via [tiltFactor] but with thinner pigment); other tools
-     * use the caller's [baseAlpha] unchanged.
-     */
-    fun alphaAt(baseAlpha: Int, tool: String?, tiltRadians: Float): Int {
-        if (tool != TOOL_PENCIL) return baseAlpha
-        val normalized = (tiltRadians / HALF_PI).coerceIn(0f, 1f)
-        val factor = 1f - PENCIL_TILT_ALPHA_DROP * normalized
-        return (baseAlpha * factor).toInt().coerceIn(0, 255)
-    }
-
-    /**
      * Configure [paint] for a freshly issued stroke of [tool] with [colorArgb].
-     * Sets cap, color, alpha, blend, and (for pencil) the shared grain shader.
-     * Caller still owns `strokeWidth` — [drawStrokePath] sets that per segment.
+     * Sets cap, color, base alpha, blend, and (for pencil) the shared grain
+     * shader. Per-sample width/alpha are written later by [drawStrokePath]
+     * via [ToolDynamics], so callers don't need to set them.
      */
     fun configureToolPaint(paint: Paint, tool: String?, colorArgb: Int) {
         paint.style = Paint.Style.STROKE
@@ -87,13 +47,14 @@ object StrokeRenderer {
             TOOL_HIGHLIGHTER -> {
                 paint.strokeCap = Paint.Cap.SQUARE
                 paint.shader = null
-                // Force ~30% alpha regardless of the colour's own alpha so the
-                // user's underlying ink stays visible through a highlight.
-                paint.alpha = HIGHLIGHTER_ALPHA
+                // Base alpha set per-segment by [ToolDynamics.highlighter].
+                paint.alpha = Color.alpha(colorArgb)
             }
             TOOL_PENCIL -> {
                 paint.shader = obtainPencilShader()
-                paint.alpha = PENCIL_BASE_ALPHA
+                // Per-segment alpha multiplied in via [ToolDynamics.pencil];
+                // the grain shader provides the rest of the visual noise.
+                paint.alpha = PENCIL_GRAIN_ALPHA
             }
             else -> {
                 paint.shader = null
@@ -138,8 +99,8 @@ object StrokeRenderer {
      *
      * `samples` is the packed `[x,y,p,t, x,y,p,t, …]` layout used everywhere
      * else in the notes module; only the first `sampleCount` samples are
-     * read. The caller controls paint color / cap / alpha; this function only
-     * sets `strokeWidth` per segment.
+     * read. The caller controls paint color / cap / base alpha; this function
+     * sets `strokeWidth` and `alpha` per segment via [ToolDynamics].
      */
     fun drawStrokePath(
         canvas: Canvas,
@@ -152,19 +113,17 @@ object StrokeRenderer {
     ) {
         if (sampleCount < 1) return
         val s = StrokeCodec.FLOATS_PER_SAMPLE
-        // Save and restore alpha so pencil's per-segment modulation doesn't
-        // leak into the caller's paint between strokes.
+        // Save and restore alpha so per-segment modulation doesn't leak
+        // between strokes that share a Paint instance.
         val baseAlpha = paint.alpha
         try {
             if (sampleCount == 1) {
-                paint.strokeWidth = widthAt(baseWidthPx, samples[2], samples[3], tool)
-                paint.alpha = alphaAt(baseAlpha, tool, samples[3])
+                applyStyle(paint, baseAlpha, samples[2], samples[3], baseWidthPx, tool)
                 canvas.drawPoint(samples[0], samples[1], paint)
                 return
             }
             if (sampleCount == 2) {
-                paint.strokeWidth = widthAt(baseWidthPx, samples[s + 2], samples[s + 3], tool)
-                paint.alpha = alphaAt(baseAlpha, tool, samples[s + 3])
+                applyStyle(paint, baseAlpha, samples[s + 2], samples[s + 3], baseWidthPx, tool)
                 canvas.drawLine(samples[0], samples[1], samples[s], samples[s + 1], paint)
                 return
             }
@@ -175,8 +134,7 @@ object StrokeRenderer {
             val mid01x = (samples[0] + samples[s]) * 0.5f
             val mid01y = (samples[1] + samples[s + 1]) * 0.5f
             scratchPath.lineTo(mid01x, mid01y)
-            paint.strokeWidth = widthAt(baseWidthPx, samples[s + 2], samples[s + 3], tool)
-            paint.alpha = alphaAt(baseAlpha, tool, samples[s + 3])
+            applyStyle(paint, baseAlpha, samples[s + 2], samples[s + 3], baseWidthPx, tool)
             canvas.drawPath(scratchPath, paint)
 
             // Middle segments: mid(s_{i-1}, s_i) → quadTo(s_i) → mid(s_i, s_{i+1}).
@@ -191,8 +149,7 @@ object StrokeRenderer {
                 scratchPath.reset()
                 scratchPath.moveTo(startX, startY)
                 scratchPath.quadTo(samples[ci], samples[ci + 1], endX, endY)
-                paint.strokeWidth = widthAt(baseWidthPx, samples[ci + 2], samples[ci + 3], tool)
-                paint.alpha = alphaAt(baseAlpha, tool, samples[ci + 3])
+                applyStyle(paint, baseAlpha, samples[ci + 2], samples[ci + 3], baseWidthPx, tool)
                 canvas.drawPath(scratchPath, paint)
             }
 
@@ -205,11 +162,29 @@ object StrokeRenderer {
                 (samples[prevI + 1] + samples[lastI + 1]) * 0.5f,
             )
             scratchPath.lineTo(samples[lastI], samples[lastI + 1])
-            paint.strokeWidth = widthAt(baseWidthPx, samples[lastI + 2], samples[lastI + 3], tool)
-            paint.alpha = alphaAt(baseAlpha, tool, samples[lastI + 3])
+            applyStyle(paint, baseAlpha, samples[lastI + 2], samples[lastI + 3], baseWidthPx, tool)
             canvas.drawPath(scratchPath, paint)
         } finally {
             paint.alpha = baseAlpha
         }
+    }
+
+    /**
+     * Resolve the per-segment dynamics for [tool] and write [paint]'s width
+     * and alpha. [baseAlpha] is the paint's pre-modulation alpha — preserved
+     * so an opaque pen colour with explicit per-pixel alpha rounds-trips, and
+     * so the highlighter's translucent base alpha still reads as translucent.
+     */
+    private fun applyStyle(
+        paint: Paint,
+        baseAlpha: Int,
+        pressure: Float,
+        tilt: Float,
+        baseWidthPx: Float,
+        tool: String?,
+    ) {
+        val style = ToolDynamics.forTool(tool, baseWidthPx, pressure, tilt)
+        paint.strokeWidth = style.widthPx
+        paint.alpha = (baseAlpha * style.alpha).toInt().coerceIn(0, 255)
     }
 }

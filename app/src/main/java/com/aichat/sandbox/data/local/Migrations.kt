@@ -97,3 +97,15 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("ALTER TABLE chats ADD COLUMN pinnedNoteId TEXT")
     }
 }
+
+/**
+ * Migration from version 5 to 6:
+ * Sub-phase 5.2 — persisted undo/redo. Adds `undoLogJson` to `notes`. The
+ * column is nullable so existing rows are left undisturbed and the editor
+ * loads them with an empty stack (the same behaviour as a freshly opened note).
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE notes ADD COLUMN undoLogJson TEXT")
+    }
+}
