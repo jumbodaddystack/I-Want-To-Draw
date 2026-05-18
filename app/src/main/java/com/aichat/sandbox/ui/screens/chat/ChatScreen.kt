@@ -618,7 +618,8 @@ private fun MessageBubble(
                         modifier = if (isStreaming) Modifier.semantics {
                             contentDescription = "Assistant is typing"
                         } else Modifier,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        isStreaming = isStreaming,
                     )
                 }
             }
