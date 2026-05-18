@@ -3,7 +3,9 @@ package com.aichat.sandbox.data.repository
 import android.content.Context
 import android.graphics.Bitmap
 import com.aichat.sandbox.data.local.NoteDao
+import com.aichat.sandbox.data.local.NoteFrameDao
 import com.aichat.sandbox.data.model.Note
+import com.aichat.sandbox.data.model.NoteFrame
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.data.notes.HandwritingOcr
@@ -34,6 +36,7 @@ import javax.inject.Singleton
 class NoteRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val noteDao: NoteDao,
+    private val noteFrameDao: NoteFrameDao,
     private val ocr: HandwritingOcr,
 ) {
 
@@ -83,6 +86,21 @@ class NoteRepository @Inject constructor(
 
     suspend fun getLayers(noteId: String): List<NoteLayer> = withContext(Dispatchers.IO) {
         noteDao.getLayers(noteId)
+    }
+
+    /** Sub-phase 8.1 — load the frame list (ordered) for [noteId]. */
+    suspend fun getFrames(noteId: String): List<NoteFrame> = withContext(Dispatchers.IO) {
+        noteFrameDao.getFrames(noteId)
+    }
+
+    /**
+     * Sub-phase 8.1 — replace the frame set for [noteId] atomically.
+     * Deletes any frame on this note not present in [frames] and upserts
+     * the rest. Empty list clears every frame.
+     */
+    suspend fun saveFrames(noteId: String, frames: List<NoteFrame>) = withContext(Dispatchers.IO) {
+        noteFrameDao.deleteFramesForNote(noteId)
+        if (frames.isNotEmpty()) noteFrameDao.upsertFrames(frames)
     }
 
     suspend fun deleteNote(noteId: String) = withContext(Dispatchers.IO) {

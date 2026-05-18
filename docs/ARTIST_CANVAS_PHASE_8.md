@@ -67,6 +67,13 @@ Modified:
 
 - **Discoverability.** Users won't find frames unless promoted. Mitigation: add to the tool palette second row and surface in the export menu ("Export current frame" if one is active).
 
+### Implementation notes
+
+- `DrawingSurface.handleFrameToolEvent` reuses the shape-tool rubber-band state (`shapeStartX/Y/EndX/Y`, `shapeInProgress`) with `strokeTool` pinned to `Tool.RECT` so the existing `drawShapePreview(canvas)` path renders the in-flight frame as a rectangle. On `ACTION_UP` the world bounds fire through `frameDragListener`; a tap below `tapSlopPx` routes to `frameTapListener` so the editor can pick the topmost frame under the touch.
+- Resize handles for existing frames were not surfaced in this slice — the planned interaction ("tap a corner / edge to resize") is deferred. Today the user can resize by deleting + re-drawing the frame, and the navigator's rename / delete handles the rest of the metadata.
+- PDF export still routes through `NoteExporter.exportPdf` for the whole note. PNG and SVG honour `currentFrameId` via `sharePngForCurrentFrame` / `shareSvgForCurrentFrame`; the overflow menu shows the "Current frame" section only when `currentFrameId != null`.
+- The undo path uses a new `EditorAction.FrameMutation(description, before, after)` variant. `applyTo` is a no-op on the item list; `NoteEditorViewModel.undo` / `redo` detect the variant and restore `_frames` directly. The codec round-trips frame state via `EditorActionCodec`'s new `TYPE_FRAME_MUTATION`.
+
 ---
 
 ## Sub-phase 8.2 — Frame navigator
@@ -107,6 +114,12 @@ Modified:
 ### Risks
 
 - **Thumbnail churn on dense notes.** Throttle thumbnail regeneration to once per 800 ms per frame.
+
+### Implementation notes
+
+- `FrameThumbnailRenderer` caches a single bitmap per frame keyed on a 64-bit FNV-1a hash of `(frame.bounds, intersecting item ids, payload sizes, colour, width)`. Hash misses recycle the previous bitmap before rendering the new one to keep the working-set bounded; explicit `invalidate(frameId)` / `clear()` are exposed for the editor close path.
+- `ViewportController.flyTo` is the one-shot teleport version of `fitToContent`. Smooth animated transitions are out of scope for this slice — the controller stays Compose-free so the JVM tests keep running. Future animation work can drive `setForAnimation(offsetX, offsetY, scale)` from an `animateFloatAsState` at the Compose layer.
+- Drag-to-reorder is not yet wired in the navigator UI — rename + delete are surfaced via the long-press dialog. Reorder still works programmatically via `NoteEditorViewModel.reorderFrames`; a future polish pass can plumb the touch gesture.
 
 ---
 
@@ -170,6 +183,12 @@ Modified:
 
 - **Image-path resolution across notes.** A stamp authored in Note A with image `img/foo.jpg` must find `img/foo.jpg` in Note B. Solution: copy images into a shared `filesDir/stamp-images/<stampId>/` on save; insert copies into the target note's image store at insert time.
 
+### Implementation notes
+
+- `StampPayloadCodec` is intentionally separate from `VectorCanvasJson` — the latter is lossy (downsampled stroke points, rounded coordinates, no Base64 payload), which is acceptable for AI request bodies but would silently degrade strokes on every stamp round-trip. The new codec serialises raw `NoteItem.payload` bytes as Base64 so smoothed pressure-modulated strokes replay exactly.
+- The stamp insert path regenerates UUIDs and translates the stamp's saved bounds onto the supplied viewport-centre world point. Items drop onto the active layer (via `layerIdForNewItem`) and land as a single `EditorAction.AddItems` so one Ctrl-Z removes the whole stamp.
+- Image dependency copy-out is staged: `StampRepository.stampImagesDir(stampId)` returns the per-stamp dir, but the editor's current save path stores image items by their original `filesDir/note-images/...` relative path. Wiring the deep-copy on save (and the rehydrate-into-target-note on insert) is a follow-up; a stamp containing only strokes / shapes / text round-trips correctly today.
+
 ---
 
 ## Sub-phase 8.4 — Favorites bar
@@ -223,6 +242,12 @@ Modified:
 ### Risks
 
 - **Drag-and-drop on Android is fiddly.** Fall back to long-press → menu if Compose DnD glitches.
+
+### Implementation notes
+
+- Backed by `FavoritesStore`, a Hilt-injected singleton that wraps a Compose-free `Preferences DataStore` (`favorites_bar`). Slots persist as a JSON list under a single key — one read-modify-write per assignment, no per-slot transaction churn.
+- The bar lives at the editor screen's `Column`, just above the existing tool palette. Empty slots render as outlined "+" tiles; long-press on any slot opens the "Replace with current brush" / "Clear" menu. Drag-and-drop from preset chips was deferred per the phase-doc fallback note — the long-press menu covers the same outcome with one fewer pointer affordance to debug.
+- `applyFavorite(slotIndex)` resolves the saved `BrushPreset.id` via `brushPresetList.value`, selects the matching `Tool` enum, and calls `applyBrushPreset`. Deleted user presets degrade gracefully — the resolver returns null and the tap becomes a no-op.
 
 ---
 

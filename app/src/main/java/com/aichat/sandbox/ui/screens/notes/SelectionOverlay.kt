@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
@@ -89,6 +90,7 @@ fun SelectionOverlay(
     onConvertToText: () -> Unit,
     canPaste: Boolean,
     onCannedEdit: ((com.aichat.sandbox.data.notes.CannedEditAction) -> Unit)? = null,
+    onSaveAsStamp: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (selection.isEmpty() || worldBounds == null || viewport == null) return
@@ -296,6 +298,7 @@ fun SelectionOverlay(
         ) {
             FloatingSelectionMenu(
                 onCannedEdit = onCannedEdit,
+                onSaveAsStamp = onSaveAsStamp,
                 canPaste = canPaste,
                 onAsk = onAsk,
                 onConvertToText = onConvertToText,
@@ -417,6 +420,7 @@ private fun FloatingSelectionMenu(
     onCopy: () -> Unit,
     onPaste: () -> Unit,
     onCannedEdit: ((com.aichat.sandbox.data.notes.CannedEditAction) -> Unit)? = null,
+    onSaveAsStamp: (() -> Unit)? = null,
 ) {
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -450,6 +454,13 @@ private fun FloatingSelectionMenu(
                     icon = Icons.Filled.Category,
                     label = "Auto-shape",
                     onClick = { onCannedEdit(com.aichat.sandbox.data.notes.CannedEditAction.AUTO_SHAPE) },
+                )
+            }
+            if (onSaveAsStamp != null) {
+                MenuButton(
+                    icon = Icons.Filled.Bookmark,
+                    label = "Save stamp",
+                    onClick = onSaveAsStamp,
                 )
             }
             MenuButton(icon = Icons.Filled.FileCopy, label = "Duplicate", onClick = onDuplicate)

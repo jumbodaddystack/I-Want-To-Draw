@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HorizontalRule
 import androidx.compose.material.icons.filled.Pentagon
@@ -86,6 +87,8 @@ fun ToolPalette(
                 // Phase 6.2 — shape tools reuse the active ink color + width.
                 InkConfigRow(state = state, onPickCustomColor = onPickCustomColor)
                 SnapChipRow(snapMask = snapMask, onToggle = onToggleSnap)
+            } else if (selected.isFrame) {
+                FrameHintRow()
             }
         }
     }
@@ -146,6 +149,7 @@ private fun Tool.icon(): ImageVector = when (this) {
     Tool.ELLIPSE -> Icons.Outlined.Circle
     Tool.ARROW -> Icons.AutoMirrored.Filled.TrendingFlat
     Tool.POLYGON -> Icons.Filled.Pentagon
+    Tool.FRAME -> Icons.Filled.CropFree
 }
 
 @Composable
@@ -248,6 +252,19 @@ private fun LassoHintRow() {
     ) {
         Text(
             text = "Lasso — draw a loop to select strokes.",
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
+}
+
+@Composable
+private fun FrameHintRow() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Frame — drag a rectangle to define an exportable region.",
             style = MaterialTheme.typography.labelMedium,
         )
     }

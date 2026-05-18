@@ -101,6 +101,38 @@ object NoteRasterizer {
     }
 
     /**
+     * Sub-phase 8.1 — render a frame's contents into a bitmap bounded by
+     * the frame's rect. Items whose bounding box intersects the frame are
+     * drawn; items fully outside are skipped. The frame edge gets a small
+     * paper margin so a stroke that hugs the edge still has breathing
+     * room.
+     */
+    fun renderForFrame(
+        items: List<NoteItem>,
+        frameBounds: FloatArray,
+        maxEdgePx: Int = 1024,
+        backgroundStyle: String = BackgroundLayer.STYLE_PLAIN,
+        marginWorld: Float = 0f,
+        filesDir: File? = null,
+    ): Bitmap {
+        val included = items.filter { item ->
+            val b = boundsOf(item) ?: return@filter false
+            rectsIntersect(b, frameBounds)
+        }
+        return render(
+            items = included,
+            bounds = frameBounds,
+            maxEdgePx = maxEdgePx,
+            backgroundStyle = backgroundStyle,
+            marginWorld = marginWorld,
+            filesDir = filesDir,
+        )
+    }
+
+    private fun rectsIntersect(a: FloatArray, b: FloatArray): Boolean =
+        !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3])
+
+    /**
      * Render only [items], computing bounds on the fly. Returns `null` if the
      * selection has no visible geometry (e.g. only empty text boxes).
      */

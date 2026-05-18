@@ -13,7 +13,11 @@ import com.aichat.sandbox.data.local.MIGRATION_5_6
 import com.aichat.sandbox.data.local.MIGRATION_6_7
 import com.aichat.sandbox.data.local.MIGRATION_7_8
 import com.aichat.sandbox.data.local.MIGRATION_8_9
+import com.aichat.sandbox.data.local.MIGRATION_9_10
+import com.aichat.sandbox.data.local.MIGRATION_10_11
 import com.aichat.sandbox.data.local.NoteDao
+import com.aichat.sandbox.data.local.NoteFrameDao
+import com.aichat.sandbox.data.local.StampDao
 import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.NoteAiService
 import com.aichat.sandbox.data.remote.ApiClient
@@ -47,6 +51,8 @@ object AppModule {
             MIGRATION_6_7,
             MIGRATION_7_8,
             MIGRATION_8_9,
+            MIGRATION_9_10,
+            MIGRATION_10_11,
         ).build()
     }
 
@@ -66,13 +72,24 @@ object AppModule {
     }
 
     @Provides
+    fun provideNoteFrameDao(database: AppDatabase): NoteFrameDao {
+        return database.noteFrameDao()
+    }
+
+    @Provides
+    fun provideStampDao(database: AppDatabase): StampDao {
+        return database.stampDao()
+    }
+
+    @Provides
     @Singleton
     fun provideNoteRepository(
         @ApplicationContext context: Context,
         noteDao: NoteDao,
+        noteFrameDao: NoteFrameDao,
         handwritingOcr: HandwritingOcr,
     ): NoteRepository {
-        return NoteRepository(context, noteDao, handwritingOcr)
+        return NoteRepository(context, noteDao, noteFrameDao, handwritingOcr)
     }
 
     @Provides

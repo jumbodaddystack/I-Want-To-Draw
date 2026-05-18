@@ -273,3 +273,59 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         // (kind = "image", payload encodes path / dims / crop / rotation).
     }
 }
+
+/**
+ * Migration from version 9 to 10:
+ * Sub-phase 8.1 — frame primitive. Adds the `note_frames` table holding
+ * named rectangles in world space per note. Frames don't clip rendering;
+ * they exist to define exportable regions and (in Phase 9) notebook
+ * pages. Notes without frames are unaffected.
+ */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `note_frames` (
+                `id` TEXT NOT NULL,
+                `noteId` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `minX` REAL NOT NULL,
+                `minY` REAL NOT NULL,
+                `maxX` REAL NOT NULL,
+                `maxY` REAL NOT NULL,
+                `ordinal` INTEGER NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                PRIMARY KEY(`id`),
+                FOREIGN KEY(`noteId`) REFERENCES `notes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_frames_noteId` ON `note_frames` (`noteId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_frames_noteId_ordinal` ON `note_frames` (`noteId`, `ordinal`)")
+    }
+}
+
+/**
+ * Migration from version 10 to 11:
+ * Sub-phase 8.3 — object library. Adds the `stamps` table holding saved
+ * selections as reusable JSON payloads. Stamps are app-scoped (not
+ * per-note) so a user can drop the same stamp into any note.
+ */
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `stamps` (
+                `id` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `thumbnailPath` TEXT NOT NULL,
+                `payloadJson` TEXT NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                `lastUsedAt` INTEGER,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_stamps_lastUsedAt` ON `stamps` (`lastUsedAt`)")
+    }
+}

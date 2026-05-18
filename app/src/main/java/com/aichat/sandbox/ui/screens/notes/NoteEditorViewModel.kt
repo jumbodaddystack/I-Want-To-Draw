@@ -12,8 +12,10 @@ import com.aichat.sandbox.data.model.ApiProvider
 import com.aichat.sandbox.data.model.BrushPreset
 import com.aichat.sandbox.data.model.Chat
 import com.aichat.sandbox.data.model.Note
+import com.aichat.sandbox.data.model.NoteFrame
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.model.NoteLayer
+import com.aichat.sandbox.data.model.Stamp
 import com.aichat.sandbox.data.notes.AiChunk
 import com.aichat.sandbox.data.notes.AskMode
 import com.aichat.sandbox.data.notes.AskRequest
@@ -32,6 +34,7 @@ import com.aichat.sandbox.data.notes.RecentColorsStore
 import com.aichat.sandbox.data.repository.BrushPresetRepository
 import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
+import com.aichat.sandbox.data.repository.StampRepository
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.Shape
@@ -78,6 +81,9 @@ class NoteEditorViewModel @Inject constructor(
     private val recentColorsStore: RecentColorsStore,
     private val brushPresets: BrushPresetRepository,
     private val noteImageStore: NoteImageStore,
+    private val stampRepository: StampRepository,
+    private val favoritesStore: com.aichat.sandbox.data.notes.FavoritesStore,
+    val frameThumbnailRenderer: com.aichat.sandbox.data.notes.FrameThumbnailRenderer,
 ) : ViewModel() {
 
     private val routeArg: String = savedStateHandle["noteId"] ?: NOTE_ID_NEW
@@ -355,6 +361,275 @@ class NoteEditorViewModel @Inject constructor(
     /** Layer id new strokes / shapes should inherit. Falls back to "no layer". */
     private fun layerIdForNewItem(): String? = _activeLayerId.value
 
+    // ── Frames (sub-phase 8.1) ───────────────────────────────────────────
+
+    private val _frames = MutableStateFlow<List<NoteFrame>>(emptyList())
+    val frames: StateFlow<List<NoteFrame>> = _frames.asStateFlow()
+
+    /** Sub-phase 8.1 — id of the frame the user most recently created or tapped. */
+    private val _currentFrameId = MutableStateFlow<String?>(null)
+    val currentFrameId: StateFlow<String?> = _currentFrameId.asStateFlow()
+
+    /** Sub-phase 8.2 — navigator open / closed. */
+    private val _frameNavigatorOpen = MutableStateFlow(false)
+    val frameNavigatorOpen: StateFlow<Boolean> = _frameNavigatorOpen.asStateFlow()
+
+    fun toggleFrameNavigator() { _frameNavigatorOpen.value = !_frameNavigatorOpen.value }
+    fun closeFrameNavigator() { _frameNavigatorOpen.value = false }
+
+    fun onFrameDrawn(bounds: FloatArray) {
+        if (bounds.size < 4) return
+        val current = _frames.value
+        val nextOrdinal = (current.maxOfOrNull { it.ordinal } ?: -1) + 1
+        val frame = NoteFrame(
+            noteId = resolvedNoteId,
+            name = "Frame ${nextOrdinal + 1}",
+            minX = bounds[0],
+            minY = bounds[1],
+            maxX = bounds[2],
+            maxY = bounds[3],
+            ordinal = nextOrdinal,
+        )
+        applyFrameMutation("Add frame", before = current, after = current + frame)
+        _currentFrameId.value = frame.id
+    }
+
+    fun onFrameTap(worldX: Float, worldY: Float) {
+        // Most recently added (highest ordinal) wins for overlapping frames.
+        val hit = _frames.value
+            .filter { worldX in it.minX..it.maxX && worldY in it.minY..it.maxY }
+            .maxByOrNull { it.ordinal }
+        _currentFrameId.value = hit?.id
+    }
+
+    fun renameFrame(frameId: String, newName: String) {
+        val before = _frames.value
+        val sanitized = newName.trim().ifBlank { "Frame" }
+        val after = before.map { if (it.id == frameId) it.copy(name = sanitized) else it }
+        if (after == before) return
+        applyFrameMutation("Rename frame", before, after)
+    }
+
+    fun deleteFrame(frameId: String) {
+        val before = _frames.value
+        val after = before.filterNot { it.id == frameId }
+        if (after.size == before.size) return
+        applyFrameMutation("Delete frame", before, after)
+        if (_currentFrameId.value == frameId) _currentFrameId.value = null
+    }
+
+    fun updateFrameBounds(frameId: String, bounds: FloatArray) {
+        if (bounds.size < 4) return
+        val before = _frames.value
+        val after = before.map {
+            if (it.id == frameId) it.copy(
+                minX = bounds[0], minY = bounds[1], maxX = bounds[2], maxY = bounds[3],
+            ) else it
+        }
+        if (after == before) return
+        applyFrameMutation("Resize frame", before, after)
+    }
+
+    fun reorderFrames(orderedIds: List<String>) {
+        val before = _frames.value
+        val byId = before.associateBy { it.id }
+        val after = orderedIds.mapIndexedNotNull { i, id ->
+            byId[id]?.copy(ordinal = i)
+        }
+        // Preserve any frames missing from the order list (defensive — caller
+        // should always supply the full set).
+        val seen = orderedIds.toHashSet()
+        val survivors = after + before.filterNot { it.id in seen }
+        if (survivors == before) return
+        applyFrameMutation("Reorder frames", before, survivors)
+    }
+
+    fun selectFrame(frameId: String?) {
+        _currentFrameId.value = frameId
+    }
+
+    /**
+     * Common path for every frame mutation: record the before / after into a
+     * `FrameMutation` undo entry and update the live state. Frame ops don't
+     * touch the item list so we bypass [apply] and update the state directly,
+     * then push the action onto the past stack.
+     */
+    private fun applyFrameMutation(
+        description: String,
+        before: List<NoteFrame>,
+        after: List<NoteFrame>,
+    ) {
+        _frames.value = after
+        apply(EditorAction.FrameMutation(description, before, after))
+    }
+
+    /** Returns the world-bounds of the currently-selected frame, or null. */
+    fun currentFrameBounds(): FloatArray? {
+        val id = _currentFrameId.value ?: return null
+        val frame = _frames.value.firstOrNull { it.id == id } ?: return null
+        return frame.bounds()
+    }
+
+    // ── Stamps (sub-phase 8.3) ───────────────────────────────────────────
+
+    val stamps: StateFlow<List<Stamp>> = stampRepository.observeAll()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = emptyList(),
+        )
+
+    private val _stampDrawerOpen = MutableStateFlow(false)
+    val stampDrawerOpen: StateFlow<Boolean> = _stampDrawerOpen.asStateFlow()
+
+    fun openStampDrawer() { _stampDrawerOpen.value = true }
+    fun closeStampDrawer() { _stampDrawerOpen.value = false }
+
+    /**
+     * Sub-phase 8.3 — save the current selection as a reusable stamp.
+     * Captures a 256 px thumbnail and serialises the selection via
+     * [com.aichat.sandbox.data.notes.VectorCanvasJson]. Fire-and-forget;
+     * the drawer's [stamps] flow surfaces the new entry once persisted.
+     */
+    fun saveSelectionAsStamp(name: String) {
+        val ids = _selection.value
+        if (ids.isEmpty()) return
+        val selected = items.filter { it.id in ids }
+        if (selected.isEmpty()) return
+        viewModelScope.launch {
+            val bounds = com.aichat.sandbox.data.notes.NoteRasterizer.computeBounds(selected)
+                ?: return@launch
+            val thumbnail = com.aichat.sandbox.data.notes.NoteRasterizer.render(
+                items = selected,
+                bounds = bounds,
+                maxEdgePx = STAMP_THUMBNAIL_MAX_EDGE_PX,
+                backgroundStyle = com.aichat.sandbox.ui.components.notes.BackgroundLayer.STYLE_PLAIN,
+            )
+            try {
+                val payloadJson = com.aichat.sandbox.data.notes.StampPayloadCodec.encode(
+                    items = selected,
+                    bounds = bounds,
+                )
+                stampRepository.saveStamp(
+                    name = name,
+                    thumbnail = thumbnail,
+                    payloadJson = payloadJson,
+                )
+            } finally {
+                thumbnail.recycle()
+            }
+        }
+    }
+
+    /**
+     * Sub-phase 8.3 — insert [stampId]'s items at [centerWorldX], [centerWorldY].
+     * Each item gets a fresh UUID so re-inserting the same stamp produces
+     * independent copies, then a translation centres the union bounds on
+     * the supplied point. Drops onto the active layer.
+     */
+    fun insertStamp(stampId: String, centerWorldX: Float, centerWorldY: Float) {
+        viewModelScope.launch {
+            val stamp = stampRepository.getStamp(stampId) ?: return@launch
+            val parsed = com.aichat.sandbox.data.notes.StampPayloadCodec.parse(stamp.payloadJson)
+                ?: return@launch
+            // Recentre bounds onto the supplied world point.
+            val cx = (parsed.bounds[0] + parsed.bounds[2]) * 0.5f
+            val cy = (parsed.bounds[1] + parsed.bounds[3]) * 0.5f
+            val dx = centerWorldX - cx
+            val dy = centerWorldY - cy
+            val shift = com.aichat.sandbox.ui.components.notes.StrokeTransform.translation(dx, dy)
+            val translated = parsed.items.map { item ->
+                rebuildStampItem(item, shift)
+            }
+            if (translated.isEmpty()) return@launch
+            apply(EditorAction.AddItems(translated))
+            stampRepository.touchLastUsed(stampId)
+            closeStampDrawer()
+        }
+    }
+
+    private fun rebuildStampItem(
+        item: NoteItem,
+        shift: FloatArray,
+    ): NoteItem {
+        val newPayload = when (item.kind) {
+            STROKE_KIND -> {
+                val samples = StrokeCodec.decode(item.payload)
+                StrokeCodec.encode(
+                    com.aichat.sandbox.ui.components.notes.StrokeTransform.applyToSamples(shift, samples)
+                )
+            }
+            TextItemCodec.KIND -> {
+                val decoded = TextItemCodec.decode(item.payload)
+                val newMatrix = com.aichat.sandbox.ui.components.notes.StrokeTransform.multiply(shift, decoded.matrix)
+                TextItemCodec.encode(TextItemCodec.withMatrix(decoded, newMatrix))
+            }
+            Shape.KIND -> {
+                val decoded = ShapeCodec.decode(item.payload)
+                val transformed = ShapeCodec.transform(decoded.shape, shift)
+                ShapeCodec.encode(transformed, decoded.fillArgb)
+            }
+            NoteItem.KIND_IMAGE -> {
+                val payload = ImageItemCodec.decode(item.payload)
+                ImageItemCodec.encode(ImageItemCodec.transform(payload, shift))
+            }
+            else -> item.payload.copyOf()
+        }
+        return item.copy(
+            id = UUID.randomUUID().toString(),
+            noteId = resolvedNoteId,
+            zIndex = zIndexFor(item.tool),
+            payload = newPayload,
+            layerId = layerIdForNewItem(),
+        )
+    }
+
+    fun renameStamp(stampId: String, newName: String) {
+        viewModelScope.launch { stampRepository.rename(stampId, newName) }
+    }
+
+    fun deleteStamp(stampId: String) {
+        viewModelScope.launch { stampRepository.delete(stampId) }
+    }
+
+    // ── Favorites bar (sub-phase 8.4) ────────────────────────────────────
+    //
+    // The bar's storage lives in `FavoritesStore` (DataStore-backed). The
+    // VM surfaces the live slot list and a single `applyFavorite` entry
+    // point that resolves the preset, mutates the palette / active preset,
+    // and falls back to a no-op when the slot is empty or the linked
+    // preset has been deleted.
+
+    val favorites: StateFlow<List<com.aichat.sandbox.data.notes.FavoriteSlot>> =
+        favoritesStore.observe().stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = com.aichat.sandbox.data.notes.FavoritesStore.DEFAULT_SLOTS,
+        )
+
+    fun applyFavorite(slotIndex: Int) {
+        val slot = favorites.value.firstOrNull { it.index == slotIndex } ?: return
+        val presetId = slot.brushPresetId ?: return
+        val preset = brushPresetList.value.firstOrNull { it.id == presetId } ?: return
+        // Map the preset's tool back to the palette enum.
+        val tool = Tool.entries.firstOrNull { it.id == preset.tool } ?: return
+        palette.select(tool)
+        applyBrushPreset(preset)
+    }
+
+    fun assignFavoriteFromActiveBrush(slotIndex: Int) {
+        val activePreset = _activeBrushPreset.value ?: return
+        viewModelScope.launch {
+            favoritesStore.assignSlot(slotIndex, activePreset.id)
+        }
+    }
+
+    fun clearFavoriteSlot(slotIndex: Int) {
+        viewModelScope.launch {
+            favoritesStore.assignSlot(slotIndex, null)
+        }
+    }
+
     // ── Brush presets (sub-phase 6.5) ────────────────────────────────────
 
     val brushPresetList: StateFlow<List<BrushPreset>> = brushPresets.observeAll()
@@ -522,6 +797,8 @@ class NoteEditorViewModel @Inject constructor(
                     _layers.value = loadedLayers
                     _activeLayerId.value = loadedLayers.maxByOrNull { it.ordinal }?.id
                 }
+                // Sub-phase 8.1 — frame list comes from its own table.
+                _frames.value = repository.getFrames(routeArg)
             }
         } else {
             // Brand-new note: seed a default "Ink" layer so the first stroke
@@ -622,6 +899,11 @@ class NoteEditorViewModel @Inject constructor(
     fun undo() {
         val action = past.removeLastOrNull() ?: return
         action.invert().applyTo(items)
+        // Sub-phase 8.1 — frame mutations live outside the item list.
+        // Restore the frame state from the action data on undo.
+        if (action is EditorAction.FrameMutation) {
+            _frames.value = action.before
+        }
         future.addLast(action)
         updateUndoRedoState()
     }
@@ -629,6 +911,9 @@ class NoteEditorViewModel @Inject constructor(
     fun redo() {
         val action = future.removeLastOrNull() ?: return
         action.applyTo(items)
+        if (action is EditorAction.FrameMutation) {
+            _frames.value = action.after
+        }
         past.addLast(action)
         updateUndoRedoState()
     }
@@ -1688,6 +1973,34 @@ class NoteEditorViewModel @Inject constructor(
     }
 
     /**
+     * Sub-phase 8.1 — share the currently-selected frame as a PNG. Returns
+     * null when no frame is selected (UI gates this; the guard keeps the
+     * VM honest under racy state).
+     */
+    suspend fun sharePngForCurrentFrame(): Uri? {
+        val bounds = currentFrameBounds() ?: return null
+        commitTextEdit()
+        save()
+        return noteExporter.exportPng(
+            note = _note.value,
+            items = items.toList(),
+            frameBounds = bounds,
+        )
+    }
+
+    /** Sub-phase 8.1 — SVG export bounded to the active frame. */
+    suspend fun shareSvgForCurrentFrame(): Uri? {
+        val bounds = currentFrameBounds() ?: return null
+        commitTextEdit()
+        save()
+        return noteSvgExporter.exportSvg(
+            note = _note.value,
+            items = items.toList(),
+            frameBounds = bounds,
+        )
+    }
+
+    /**
      * Phase 6.8 — vector-fidelity export. Same save-first contract as
      * [sharePng] / [sharePdf] so the resulting SVG reflects the user's most
      * recent geometry.
@@ -1751,6 +2064,9 @@ class NoteEditorViewModel @Inject constructor(
             items = items.toList(),
             layers = _layers.value,
         )
+        // Sub-phase 8.1 — flush the frame list. Lives in its own table to
+        // keep the items / layers transaction small.
+        repository.saveFrames(toPersist.id, _frames.value)
         _note.value = toPersist
         // Fire-and-forget on the repository's singleton-scoped background scope
         // so the user isn't held on the editor while we rasterize — and so the
@@ -1830,6 +2146,9 @@ class NoteEditorViewModel @Inject constructor(
 
         /** Sub-phase 6.7 — initial longest-edge world size for inserted images. */
         private const val IMAGE_INSERT_TARGET_WORLD: Float = 320f
+
+        /** Sub-phase 8.3 — stamp thumbnail longest edge. */
+        private const val STAMP_THUMBNAIL_MAX_EDGE_PX: Int = 256
     }
 }
 

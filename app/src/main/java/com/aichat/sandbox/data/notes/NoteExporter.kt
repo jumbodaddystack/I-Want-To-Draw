@@ -44,15 +44,28 @@ class NoteExporter @Inject constructor(
         note: Note,
         items: List<NoteItem>,
         marginWorld: Float = NoteRasterizer.MARGIN_WORLD,
+        /** Sub-phase 8.1 — if non-null, bound the render to this frame's world rect. */
+        frameBounds: FloatArray? = null,
     ): Uri = withContext(Dispatchers.IO) {
-        val bounds = NoteRasterizer.computeBounds(items) ?: defaultPaperBounds()
-        val bitmap = NoteRasterizer.render(
-            items = items,
-            bounds = bounds,
-            maxEdgePx = EXPORT_MAX_EDGE_PX,
-            backgroundStyle = note.backgroundStyle,
-            marginWorld = marginWorld,
-        )
+        val bitmap = if (frameBounds != null) {
+            NoteRasterizer.renderForFrame(
+                items = items,
+                frameBounds = frameBounds,
+                maxEdgePx = EXPORT_MAX_EDGE_PX,
+                backgroundStyle = note.backgroundStyle,
+                marginWorld = 0f,
+                filesDir = context.filesDir,
+            )
+        } else {
+            val bounds = NoteRasterizer.computeBounds(items) ?: defaultPaperBounds()
+            NoteRasterizer.render(
+                items = items,
+                bounds = bounds,
+                maxEdgePx = EXPORT_MAX_EDGE_PX,
+                backgroundStyle = note.backgroundStyle,
+                marginWorld = marginWorld,
+            )
+        }
         val dir = exportsDir().apply { if (!exists()) mkdirs() }
         val outName = "${sanitizeBaseName(note.title)}-${System.currentTimeMillis()}.png"
         val finalFile = File(dir, outName)

@@ -227,6 +227,22 @@ class DrawingSurface(context: Context) : View(context) {
     var selectionShouldClearListener: (() -> Unit)? = null
 
     /**
+     * Sub-phase 8.1 — fired when the user finishes dragging a rectangle
+     * with the FRAME tool. Coordinates are world-space `[minX, minY, maxX, maxY]`.
+     * Degenerate drags (no measurable motion) are suppressed so a stray
+     * stylus tap doesn't create a 0×0 frame.
+     */
+    var frameDragListener: ((bounds: FloatArray) -> Unit)? = null
+
+    /**
+     * Sub-phase 8.1 — fired when the user taps (no drag) the canvas with
+     * the FRAME tool active. Hands the world-space point so the editor can
+     * resolve "which frame contains this tap" and update the current-frame
+     * highlight.
+     */
+    var frameTapListener: ((worldX: Float, worldY: Float) -> Unit)? = null
+
+    /**
      * Fired when the user taps the canvas with the TEXT tool active
      * (sub-phase 1.9). The receiver decides whether to begin a new text
      * item at `(worldX, worldY)` or open the editor for whichever text
@@ -462,6 +478,11 @@ class DrawingSurface(context: Context) : View(context) {
             // Phase 6.2 — shape tools accept any pointer (stylus or finger)
             // and emit a rubber-band preview between ACTION_DOWN / UP.
             return handleShapeToolEvent(event)
+        }
+        if (paletteTool.isFrame) {
+            // Sub-phase 8.1 — frame tool: drag a rectangle to create, tap
+            // an existing frame to select it.
+            return handleFrameToolEvent(event)
         }
         val stylusIdx = stylusPointerIndex(event)
         if (stylusIdx >= 0) {
@@ -1014,6 +1035,86 @@ class DrawingSurface(context: Context) : View(context) {
         canvas.drawPath(lassoPath, lassoPaint)
     }
 
+    // ── Frame tool routing (sub-phase 8.1) ──────────────────────────────
+    // A frame is a named rectangle in world space. The tool's gesture is a
+    // simple drag — `frameDragListener` fires once on ACTION_UP with the
+    // final world bounds. Tap (down+up below slop) routes to
+    // `frameTapListener` so the editor can promote the touched frame to
+    // "current" for export / navigator highlight. We reuse the shape
+    // rubber-band state to render the in-progress rectangle so the user
+    // sees what they're creating; on commit the shape state clears without
+    // emitting a `Shape.Rect` item.
+
+    private var frameTapStartX: Float = 0f
+    private var frameTapStartY: Float = 0f
+    private var frameTapActive: Boolean = false
+
+    private fun handleFrameToolEvent(event: MotionEvent): Boolean {
+        return when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (selectedIds.isNotEmpty()) selectionShouldClearListener?.invoke()
+                frameTapStartX = event.x
+                frameTapStartY = event.y
+                frameTapActive = true
+                val wx = viewport.screenToWorldX(event.x)
+                val wy = viewport.screenToWorldY(event.y)
+                shapeStartX = wx
+                shapeStartY = wy
+                shapeEndX = wx
+                shapeEndY = wy
+                shapeInProgress = true
+                // Use the RECT shape's preview path; record strokeTool so the
+                // rubber-band uses the rect renderer.
+                strokeTool = Tool.RECT
+                strokeColor = FRAME_PREVIEW_COLOR
+                strokeWidthPx = FRAME_PREVIEW_WIDTH_PX
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!shapeInProgress) return true
+                val dx = event.x - frameTapStartX
+                val dy = event.y - frameTapStartY
+                if (frameTapActive && (kotlin.math.abs(dx) > tapSlopPx || kotlin.math.abs(dy) > tapSlopPx)) {
+                    frameTapActive = false
+                }
+                shapeEndX = viewport.screenToWorldX(event.x)
+                shapeEndY = viewport.screenToWorldY(event.y)
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (frameTapActive) {
+                    // Tap (no drag) → select frame under the tap point.
+                    val wx = viewport.screenToWorldX(event.x)
+                    val wy = viewport.screenToWorldY(event.y)
+                    frameTapListener?.invoke(wx, wy)
+                } else if (shapeInProgress) {
+                    val minX = kotlin.math.min(shapeStartX, shapeEndX)
+                    val minY = kotlin.math.min(shapeStartY, shapeEndY)
+                    val maxX = kotlin.math.max(shapeStartX, shapeEndX)
+                    val maxY = kotlin.math.max(shapeStartY, shapeEndY)
+                    if (maxX - minX > FRAME_MIN_SIZE_WORLD && maxY - minY > FRAME_MIN_SIZE_WORLD) {
+                        frameDragListener?.invoke(floatArrayOf(minX, minY, maxX, maxY))
+                    }
+                }
+                shapeInProgress = false
+                frameTapActive = false
+                strokeTool = paletteTool
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                shapeInProgress = false
+                frameTapActive = false
+                strokeTool = paletteTool
+                invalidate()
+                true
+            }
+            else -> false
+        }
+    }
+
     // ── Shape tool routing (Phase 6.2) ───────────────────────────────────
 
     private fun handleShapeToolEvent(event: MotionEvent): Boolean {
@@ -1323,6 +1424,13 @@ class DrawingSurface(context: Context) : View(context) {
         // ── Snapping (Phase 6.3) ───────────────────────────────────────
         private const val SNAP_FADE_MS: Long = 280L
         private const val SNAP_MARKER_RADIUS_PX: Float = 5f
+
+        // ── Frame tool (sub-phase 8.1) ────────────────────────────────
+        /** Minimum world-space extent for a created frame (both axes). */
+        private const val FRAME_MIN_SIZE_WORLD: Float = 4f
+        /** Rubber-band preview colour used while dragging out a frame. */
+        private const val FRAME_PREVIEW_COLOR: Int = 0xFF1E88E5.toInt()
+        private const val FRAME_PREVIEW_WIDTH_PX: Float = 1.5f
     }
 }
 
@@ -1345,12 +1453,16 @@ fun DrawingSurfaceView(
     layers: List<NoteLayer> = emptyList(),
     activeTextureId: String? = null,
     onViewportReady: (ViewportController) -> Unit = {},
+    onFrameDrawn: (FloatArray) -> Unit = {},
+    onFrameTap: (worldX: Float, worldY: Float) -> Unit = { _, _ -> },
 ) {
     val currentOnCommit by rememberUpdatedState(onStrokeCommitted)
     val currentOnErase by rememberUpdatedState(onItemsErased)
     val currentOnLasso by rememberUpdatedState(onLassoCompleted)
     val currentOnSelectionClear by rememberUpdatedState(onSelectionShouldClear)
     val currentOnTextTap by rememberUpdatedState(onTextTap)
+    val currentOnFrameDrawn by rememberUpdatedState(onFrameDrawn)
+    val currentOnFrameTap by rememberUpdatedState(onFrameTap)
     val currentOnViewportReady by rememberUpdatedState(onViewportReady)
     // Reading items.size during composition makes this composable observe the
     // SnapshotStateList: erases + future undo/redo refresh the surface
@@ -1367,6 +1479,8 @@ fun DrawingSurfaceView(
                 lassoListener = { polygon -> currentOnLasso(polygon) }
                 selectionShouldClearListener = { currentOnSelectionClear() }
                 textTapListener = { wx, wy -> currentOnTextTap(wx, wy) }
+                frameDragListener = { bounds -> currentOnFrameDrawn(bounds) }
+                frameTapListener = { wx, wy -> currentOnFrameTap(wx, wy) }
                 setFilesDir(ctx.filesDir)
                 currentOnViewportReady(viewport)
             }
@@ -1378,6 +1492,8 @@ fun DrawingSurfaceView(
             view.lassoListener = { polygon -> currentOnLasso(polygon) }
             view.selectionShouldClearListener = { currentOnSelectionClear() }
             view.textTapListener = { wx, wy -> currentOnTextTap(wx, wy) }
+            view.frameDragListener = { bounds -> currentOnFrameDrawn(bounds) }
+            view.frameTapListener = { wx, wy -> currentOnFrameTap(wx, wy) }
             view.backgroundStyle = backgroundStyle
             view.setToolConfig(
                 tool = paletteState.selected,

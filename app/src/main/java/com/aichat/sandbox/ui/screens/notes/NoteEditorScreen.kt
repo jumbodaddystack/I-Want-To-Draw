@@ -13,7 +13,10 @@ import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreVert
@@ -43,11 +46,16 @@ import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import com.aichat.sandbox.ui.components.notes.BrushSheet
 import com.aichat.sandbox.ui.components.notes.ColorPickerSheet
 import com.aichat.sandbox.ui.components.notes.DrawingSurfaceView
+import com.aichat.sandbox.ui.components.notes.FavoritesBar
+import com.aichat.sandbox.ui.components.notes.FrameOverlay
+import com.aichat.sandbox.ui.components.notes.SaveStampDialog
+import com.aichat.sandbox.ui.components.notes.StampDrawer
 import com.aichat.sandbox.ui.components.notes.TextItemEditor
 import com.aichat.sandbox.ui.components.notes.Tool
 import com.aichat.sandbox.ui.components.notes.ToolPalette
 import com.aichat.sandbox.ui.components.notes.ViewportController
 import com.aichat.sandbox.ui.components.notes.ZoomChrome
+import com.aichat.sandbox.data.notes.FrameThumbnailRenderer
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -79,11 +87,18 @@ fun NoteEditorScreen(
     val brushPresets by viewModel.brushPresetList.collectAsState()
     val activeBrushPreset by viewModel.activeBrushPreset.collectAsState()
     val pendingEdit by viewModel.pendingEdit.collectAsState()
+    val frames by viewModel.frames.collectAsState()
+    val currentFrameId by viewModel.currentFrameId.collectAsState()
+    val frameNavigatorOpen by viewModel.frameNavigatorOpen.collectAsState()
+    val stamps by viewModel.stamps.collectAsState()
+    val stampDrawerOpen by viewModel.stampDrawerOpen.collectAsState()
+    val favorites by viewModel.favorites.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
     var pdfDialogVisible by remember { mutableStateOf(false) }
     var brushSheetOpen by remember { mutableStateOf(false) }
+    var saveStampDialogVisible by remember { mutableStateOf(false) }
     var viewportController by remember { mutableStateOf<ViewportController?>(null) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
@@ -156,6 +171,20 @@ fun NoteEditorScreen(
                             contentDescription = "Ask about this note",
                         )
                     }
+                    // Sub-phase 8.2 — frame navigator toggle.
+                    IconButton(onClick = viewModel::toggleFrameNavigator) {
+                        Icon(
+                            imageVector = Icons.Filled.Dashboard,
+                            contentDescription = "Frames",
+                        )
+                    }
+                    // Sub-phase 8.3 — stamp drawer.
+                    IconButton(onClick = viewModel::openStampDrawer) {
+                        Icon(
+                            imageVector = Icons.Filled.Bookmark,
+                            contentDescription = "Stamps",
+                        )
+                    }
                     // Sub-phase 6.4 — layers panel toggle.
                     IconButton(onClick = viewModel::toggleLayersPanel) {
                         Icon(
@@ -201,6 +230,7 @@ fun NoteEditorScreen(
                         EditorOverflowMenu(
                             expanded = menuExpanded,
                             current = note.backgroundStyle,
+                            hasActiveFrame = currentFrameId != null,
                             onDismiss = { menuExpanded = false },
                             onBackgroundSelect = { style ->
                                 viewModel.setBackgroundStyle(style)
@@ -254,6 +284,34 @@ fun NoteEditorScreen(
                                 menuExpanded = false
                                 viewModel.openSendNoteToChatPicker()
                             },
+                            onExportFramePng = {
+                                menuExpanded = false
+                                scope.launch {
+                                    val uri = viewModel.sharePngForCurrentFrame() ?: return@launch
+                                    val send = Intent(Intent.ACTION_SEND).apply {
+                                        type = "image/png"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(
+                                        Intent.createChooser(send, "Share frame as PNG")
+                                    )
+                                }
+                            },
+                            onExportFrameSvg = {
+                                menuExpanded = false
+                                scope.launch {
+                                    val uri = viewModel.shareSvgForCurrentFrame() ?: return@launch
+                                    val send = Intent(Intent.ACTION_SEND).apply {
+                                        type = "image/svg+xml"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(
+                                        Intent.createChooser(send, "Share frame as SVG")
+                                    )
+                                }
+                            },
                         )
                     }
                 },
@@ -300,6 +358,15 @@ fun NoteEditorScreen(
                     layers = layers,
                     activeTextureId = activeBrushPreset?.textureId,
                     onViewportReady = { viewportController = it },
+                    onFrameDrawn = viewModel::onFrameDrawn,
+                    onFrameTap = viewModel::onFrameTap,
+                )
+                // Sub-phase 8.1 — frame rectangles + name labels rendered
+                // above the canvas.
+                FrameOverlay(
+                    frames = frames,
+                    currentFrameId = currentFrameId,
+                    viewport = viewportController,
                 )
                 SelectionOverlay(
                     selection = selection,
@@ -319,6 +386,7 @@ fun NoteEditorScreen(
                     onCannedEdit = { action ->
                         viewModel.applyCannedEditAction(action)
                     },
+                    onSaveAsStamp = { saveStampDialogVisible = true },
                 )
                 val target = textEditTarget
                 val vp = viewportController
@@ -339,6 +407,15 @@ fun NoteEditorScreen(
                     )
                 }
             }
+            // Sub-phase 8.4 — favorites bar above the tool palette.
+            FavoritesBar(
+                slots = favorites,
+                presets = brushPresets,
+                activePresetId = activeBrushPreset?.id,
+                onApply = viewModel::applyFavorite,
+                onAssignActive = viewModel::assignFavoriteFromActiveBrush,
+                onClear = viewModel::clearFavoriteSlot,
+            )
             if (brushSheetOpen) {
                 BrushSheet(
                     presets = brushPresets,
@@ -355,6 +432,37 @@ fun NoteEditorScreen(
                 snapMask = snapMask,
                 onToggleSnap = viewModel::toggleSnap,
             )
+        }
+        // Sub-phase 8.2 — left-edge frame navigator.
+        if (frameNavigatorOpen) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                FrameNavigator(
+                    frames = frames,
+                    currentFrameId = currentFrameId,
+                    items = viewModel.items,
+                    thumbnailRenderer = viewModel.frameThumbnailRenderer,
+                    onSelect = { frame ->
+                        viewModel.selectFrame(frame.id)
+                        val vp = viewportController
+                        if (vp != null && canvasSize != IntSize.Zero) {
+                            vp.flyTo(
+                                bounds = frame.bounds(),
+                                canvasSize = floatArrayOf(
+                                    canvasSize.width.toFloat(),
+                                    canvasSize.height.toFloat(),
+                                ),
+                            )
+                        }
+                    },
+                    onRename = viewModel::renameFrame,
+                    onDelete = viewModel::deleteFrame,
+                    onClose = viewModel::closeFrameNavigator,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
         }
         if (layersPanelOpen) {
             Box(
@@ -396,6 +504,41 @@ fun NoteEditorScreen(
                         )
                     }
                 },
+            )
+        }
+        // Sub-phase 8.3 — bottom-aligned stamp drawer.
+        if (stampDrawerOpen) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                StampDrawer(
+                    stamps = stamps,
+                    onInsert = { stampId ->
+                        val vp = viewportController
+                        val cx: Float
+                        val cy: Float
+                        if (vp != null && canvasSize != IntSize.Zero) {
+                            cx = vp.screenToWorldX(canvasSize.width / 2f)
+                            cy = vp.screenToWorldY(canvasSize.height / 2f)
+                        } else {
+                            cx = 0f; cy = 0f
+                        }
+                        viewModel.insertStamp(stampId, cx, cy)
+                    },
+                    onRename = viewModel::renameStamp,
+                    onDelete = viewModel::deleteStamp,
+                    onDismiss = viewModel::closeStampDrawer,
+                )
+            }
+        }
+        if (saveStampDialogVisible) {
+            SaveStampDialog(
+                onConfirm = { name ->
+                    viewModel.saveSelectionAsStamp(name)
+                    saveStampDialogVisible = false
+                },
+                onDismiss = { saveStampDialogVisible = false },
             )
         }
         if (colorPickerOpen) {
@@ -488,6 +631,7 @@ fun NoteEditorScreen(
 private fun EditorOverflowMenu(
     expanded: Boolean,
     current: String,
+    hasActiveFrame: Boolean,
     onDismiss: () -> Unit,
     onBackgroundSelect: (String) -> Unit,
     onInsertImage: () -> Unit,
@@ -496,6 +640,8 @@ private fun EditorOverflowMenu(
     onSharePdf: () -> Unit,
     onShareSvg: () -> Unit,
     onSendToChat: () -> Unit,
+    onExportFramePng: () -> Unit,
+    onExportFrameSvg: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         Text(
@@ -569,6 +715,28 @@ private fun EditorOverflowMenu(
             },
             onClick = onSendToChat,
         )
+        if (hasActiveFrame) {
+            HorizontalDivider()
+            Text(
+                text = "Current frame",
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            DropdownMenuItem(
+                text = { Text("Export frame as PNG") },
+                leadingIcon = {
+                    Icon(Icons.Filled.CropFree, contentDescription = null)
+                },
+                onClick = onExportFramePng,
+            )
+            DropdownMenuItem(
+                text = { Text("Export frame as SVG") },
+                leadingIcon = {
+                    Icon(Icons.Filled.CropFree, contentDescription = null)
+                },
+                onClick = onExportFrameSvg,
+            )
+        }
         HorizontalDivider()
         Text(
             text = "Background",

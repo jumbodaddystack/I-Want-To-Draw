@@ -46,8 +46,10 @@ class NoteSvgExporter @Inject constructor(
     suspend fun exportSvg(
         note: Note,
         items: List<NoteItem>,
+        /** Sub-phase 8.1 — if non-null, bound the viewBox + content to this frame. */
+        frameBounds: FloatArray? = null,
     ): Uri = withContext(Dispatchers.IO) {
-        val svg = renderSvg(note, items, context.filesDir)
+        val svg = renderSvg(note, items, context.filesDir, frameBounds)
         val dir = exportsDir().apply { if (!exists()) mkdirs() }
         val outName = "${NoteExporter.sanitizeBaseName(note.title)}-${System.currentTimeMillis()}.svg"
         val finalFile = File(dir, outName)
@@ -80,12 +82,27 @@ class NoteSvgExporter @Inject constructor(
          * exporters can pin the wire format with golden fixtures without
          * touching Android `FileProvider`.
          */
-        fun renderSvg(note: Note, items: List<NoteItem>, filesDir: java.io.File? = null): String {
-            val bounds = NoteRasterizer.computeBounds(items) ?: NoteExporter.defaultPaperBounds()
-            val minX = bounds[0] - MARGIN_WORLD
-            val minY = bounds[1] - MARGIN_WORLD
-            val width = max(1f, bounds[2] - bounds[0] + 2 * MARGIN_WORLD)
-            val height = max(1f, bounds[3] - bounds[1] + 2 * MARGIN_WORLD)
+        fun renderSvg(
+            note: Note,
+            items: List<NoteItem>,
+            filesDir: java.io.File? = null,
+            /** Sub-phase 8.1 — bound viewBox and item filter to this frame. */
+            frameBounds: FloatArray? = null,
+        ): String {
+            val baseBounds = frameBounds
+                ?: NoteRasterizer.computeBounds(items)
+                ?: NoteExporter.defaultPaperBounds()
+            val visibleItems = if (frameBounds == null) items else items.filter { item ->
+                val ib = NoteRasterizer.computeBounds(listOf(item)) ?: return@filter false
+                rectsIntersect(ib, frameBounds)
+            }
+            // Frame exports skip the outer paper margin so the SVG viewBox is
+            // exactly the frame rect (matches the PNG / PDF exports).
+            val margin = if (frameBounds == null) MARGIN_WORLD else 0f
+            val minX = baseBounds[0] - margin
+            val minY = baseBounds[1] - margin
+            val width = max(1f, baseBounds[2] - baseBounds[0] + 2 * margin)
+            val height = max(1f, baseBounds[3] - baseBounds[1] + 2 * margin)
             val sb = StringBuilder(2048)
             sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n")
             sb.append("<svg xmlns=\"http://www.w3.org/2000/svg\" ")
@@ -100,7 +117,7 @@ class NoteSvgExporter @Inject constructor(
                 .append("\" width=\"").append(fmt(width)).append("\" height=\"")
                 .append(fmt(height)).append("\" fill=\"#FFFFFF\"/>\n")
             sb.append("  <g id=\"items\">\n")
-            for (item in items.sortedBy { it.zIndex }) {
+            for (item in visibleItems.sortedBy { it.zIndex }) {
                 when (item.kind) {
                     "stroke" -> appendStroke(sb, item)
                     Shape.KIND -> appendShape(sb, item)
@@ -338,6 +355,9 @@ class NoteSvgExporter @Inject constructor(
                 }
             }
         }
+
+        private fun rectsIntersect(a: FloatArray, b: FloatArray): Boolean =
+            !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3])
 
         /** Format a float without scientific notation, trimming trailing zeros. */
         internal fun fmt(value: Float): String {

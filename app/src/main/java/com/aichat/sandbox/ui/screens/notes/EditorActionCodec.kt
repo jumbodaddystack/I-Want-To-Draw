@@ -49,6 +49,7 @@ object EditorActionCodec {
     private const val TYPE_UPDATE_TEXT = "UpdateText"
     private const val TYPE_MOVE_LAYERS = "MoveItemsBetweenLayers"
     private const val TYPE_COMPOSITE_EDIT = "CompositeEdit"
+    private const val TYPE_FRAME_MUTATION = "FrameMutation"
 
     /** Result of a successful decode. */
     data class Decoded(
@@ -185,6 +186,12 @@ object EditorActionCodec {
                 if (action.oldLayerId != null) obj.addProperty("oldLayerId", action.oldLayerId)
                 if (action.newLayerId != null) obj.addProperty("newLayerId", action.newLayerId)
             }
+            is EditorAction.FrameMutation -> {
+                obj.addProperty("type", TYPE_FRAME_MUTATION)
+                obj.addProperty("description", action.description)
+                obj.add("before", encodeFrames(action.before))
+                obj.add("after", encodeFrames(action.after))
+            }
             is EditorAction.CompositeEdit -> {
                 obj.addProperty("type", TYPE_COMPOSITE_EDIT)
                 obj.addProperty("description", action.description)
@@ -227,6 +234,11 @@ object EditorActionCodec {
                     ids = decodeStringList(obj.getAsJsonArray("ids")),
                     oldLayerId = obj.get("oldLayerId")?.takeIf { !it.isJsonNull }?.asString,
                     newLayerId = obj.get("newLayerId")?.takeIf { !it.isJsonNull }?.asString,
+                )
+                TYPE_FRAME_MUTATION -> EditorAction.FrameMutation(
+                    description = obj.get("description")?.asString ?: "",
+                    before = decodeFrames(obj.getAsJsonArray("before")),
+                    after = decodeFrames(obj.getAsJsonArray("after")),
                 )
                 TYPE_COMPOSITE_EDIT -> {
                     val pairs = obj.getAsJsonArray("modified") ?: JsonArray()
@@ -314,6 +326,44 @@ object EditorActionCodec {
         if (arr == null) return emptyList()
         val out = ArrayList<String>(arr.size())
         for (el in arr) out += el.asString
+        return out
+    }
+
+    private fun encodeFrames(frames: List<com.aichat.sandbox.data.model.NoteFrame>): JsonArray {
+        val arr = JsonArray(frames.size)
+        for (frame in frames) {
+            val obj = JsonObject()
+            obj.addProperty("id", frame.id)
+            obj.addProperty("noteId", frame.noteId)
+            obj.addProperty("name", frame.name)
+            obj.addProperty("minX", frame.minX)
+            obj.addProperty("minY", frame.minY)
+            obj.addProperty("maxX", frame.maxX)
+            obj.addProperty("maxY", frame.maxY)
+            obj.addProperty("ordinal", frame.ordinal)
+            obj.addProperty("createdAt", frame.createdAt)
+            arr.add(obj)
+        }
+        return arr
+    }
+
+    private fun decodeFrames(arr: JsonArray?): List<com.aichat.sandbox.data.model.NoteFrame> {
+        if (arr == null) return emptyList()
+        val out = ArrayList<com.aichat.sandbox.data.model.NoteFrame>(arr.size())
+        for (el in arr) {
+            val obj = el as? JsonObject ?: continue
+            out += com.aichat.sandbox.data.model.NoteFrame(
+                id = obj.get("id").asString,
+                noteId = obj.get("noteId").asString,
+                name = obj.get("name").asString,
+                minX = obj.get("minX").asFloat,
+                minY = obj.get("minY").asFloat,
+                maxX = obj.get("maxX").asFloat,
+                maxY = obj.get("maxY").asFloat,
+                ordinal = obj.get("ordinal").asInt,
+                createdAt = obj.get("createdAt")?.asLong ?: 0L,
+            )
+        }
         return out
     }
 

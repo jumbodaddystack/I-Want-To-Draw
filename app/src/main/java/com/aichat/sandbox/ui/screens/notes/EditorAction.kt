@@ -197,6 +197,29 @@ sealed interface EditorAction {
     }
 
     /**
+     * Sub-phase 8.1 — frame mutation marker. Frames don't live in the item
+     * list (they're tracked separately on the VM), but the editor still
+     * needs to record an undo entry so create / resize / delete / rename
+     * are reversible. The action's [applyTo] is a no-op on the item list
+     * — its purpose is to carry a description and an inverse for the
+     * undo log.
+     *
+     * The actual mutation against `NoteEditorViewModel.frames` happens via
+     * a dispatched callback when the user creates / resizes / renames /
+     * deletes a frame. The frame state is recomputed from `applyTo` at
+     * undo / redo time by routing through `NoteEditorViewModel.applyFrameAction`.
+     */
+    data class FrameMutation(
+        val description: String,
+        val before: List<com.aichat.sandbox.data.model.NoteFrame>,
+        val after: List<com.aichat.sandbox.data.model.NoteFrame>,
+    ) : EditorAction {
+        override fun applyTo(items: MutableList<NoteItem>) { /* frames live outside the item list */ }
+        override fun invert(): EditorAction =
+            FrameMutation(description, before = after, after = before)
+    }
+
+    /**
      * Sub-phase 6.4 — reparent every item in [ids] from [oldLayerId] to
      * [newLayerId]. Inversion swaps the two layer ids back. Items whose
      * current layer doesn't match [oldLayerId] are skipped silently (a stale

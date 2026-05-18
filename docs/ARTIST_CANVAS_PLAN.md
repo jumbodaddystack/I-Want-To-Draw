@@ -6,9 +6,9 @@
 
 ## Status
 
-- **Current phase:** Phase 7 — sub-phases 7.1 / 7.2 / 7.3 / 7.4 / 7.5 code-complete. 7.6 safety checklist is mostly in place (parser fuzz, applier defense-in-depth, single-undo-entry CompositeEdit) but the on-device verification matrix from 7.6 is still outstanding alongside the pending Phase 5.5 / Phase 6 device passes.
-- **Next sub-phase:** 7.6 on-device verification matrix (also: 5.5 + Phase 6 matrix on real hardware) before moving on to Phase 8.1 (frame primitive).
-- **Last verified device pass:** n/a (5.5, Phase 6 matrix, and Phase 7 matrix pending)
+- **Current phase:** Phase 8 — sub-phases 8.1 / 8.2 / 8.3 / 8.4 code-complete. The frame primitive (`note_frames` table, `FRAME` tool, `FrameOverlay`, `FrameMutation` undo), the navigator strip with `FrameThumbnailRenderer` + `ViewportController.flyTo`, the stamp library (`stamps` table, lossless `StampPayloadCodec`, save-as-stamp from the lasso menu, bottom `StampDrawer`), and the six-slot `FavoritesBar` backed by a `Preferences DataStore` blob are all in place. 8.5 on-device verification matrix is outstanding alongside the pending Phase 5.5 / Phase 6 / Phase 7 device passes.
+- **Next sub-phase:** 8.5 on-device verification matrix (also: 5.5 + Phase 6 + Phase 7 matrices on real hardware) before moving on to Phase 9.1.
+- **Last verified device pass:** n/a (5.5, Phase 6 matrix, Phase 7 matrix, and Phase 8 matrix pending)
 
 ## Phase index
 
@@ -58,10 +58,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 
 ### Phase 8 — Canvas as project · [`details`](./ARTIST_CANVAS_PHASE_8.md)
 
-- [ ] **8.1** Frame primitive — named rectangle within the infinite canvas ([details](./ARTIST_CANVAS_PHASE_8.md#sub-phase-81--frame-primitive))
-- [ ] **8.2** Frame navigator (jump to / rename / reorder / per-frame thumbnail) ([details](./ARTIST_CANVAS_PHASE_8.md#sub-phase-82--frame-navigator))
-- [ ] **8.3** Object library (long-press selection → save as stamp; drawer to drop back in) ([details](./ARTIST_CANVAS_PHASE_8.md#sub-phase-83--object-library))
-- [ ] **8.4** Customizable favorites bar (saved tool + color + width combos) ([details](./ARTIST_CANVAS_PHASE_8.md#sub-phase-84--favorites-bar))
+- [x] **8.1** Frame primitive — named rectangle within the infinite canvas ([details](./ARTIST_CANVAS_PHASE_8.md#sub-phase-81--frame-primitive)) — `NoteFrame` + `note_frames` table (MIGRATION_9_10), `Tool.FRAME` routed through `DrawingSurface.handleFrameToolEvent` (drag = create, tap = select), `FrameOverlay` renders constant-screen-width rectangles + name labels, `EditorAction.FrameMutation` keeps create/resize/rename/delete on the undo log, `NoteRasterizer.renderForFrame` + `NoteSvgExporter.renderSvg(frameBounds)` + `NoteExporter.exportPng(frameBounds=…)` bound exports to the active frame's rect.
+- [x] **8.2** Frame navigator (jump to / rename / reorder / per-frame thumbnail) ([details](./ARTIST_CANVAS_PHASE_8.md#sub-phase-82--frame-navigator)) — `FrameNavigator` Compose strip (LazyColumn, 96-dp thumbnails) on the left edge; `FrameThumbnailRenderer` caches by `(frameId, FNV-1a content hash)` and reuses `NoteRasterizer.renderForFrame`; `ViewportController.flyTo(bounds, canvasSize)` teleports the viewport to fit a frame with a 24 dp margin; rename / delete share a single dialog.
+- [x] **8.3** Object library (long-press selection → save as stamp; drawer to drop back in) ([details](./ARTIST_CANVAS_PHASE_8.md#sub-phase-83--object-library)) — `Stamp` + `stamps` table (MIGRATION_10_11), `StampRepository` owns thumbnail PNGs under `filesDir/stamps/` and per-stamp image subdirs under `filesDir/stamp-images/<stampId>/`, lossless `StampPayloadCodec` (Base64'd payload bytes), "Save as stamp…" entry on the selection menu, `StampDrawer` 3-column grid with rename / delete dialog, `insertStamp` regenerates UUIDs and centres on the viewport.
+- [x] **8.4** Customizable favorites bar (saved tool + color + width combos) ([details](./ARTIST_CANVAS_PHASE_8.md#sub-phase-84--favorites-bar)) — `FavoriteSlot` + `FavoritesStore` backed by a JSON blob in a `Preferences DataStore`, six fixed slots, `FavoritesBar` row above the bottom palette, tap = `applyFavorite` (resolves preset → palette tool + colour + width), long-press = "Replace with current brush" / "Clear" menu (drag-and-drop deferred per phase-doc fallback note).
 - [ ] **8.5** Phase 8 device verification ([details](./ARTIST_CANVAS_PHASE_8.md#sub-phase-85--phase-8-device-verification))
 
 ### Phase 9 — Handwriting notebook mode · [`details`](./ARTIST_CANVAS_PHASE_9.md)

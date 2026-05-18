@@ -140,6 +140,33 @@ class ViewportController(
         onChanged?.invoke()
     }
 
+    /**
+     * Sub-phase 8.2 — fly the viewport to fit [bounds]. Identical to
+     * [fitToContent] today (one-shot teleport); a future animated fly-to
+     * will be plumbed through Compose's `animateFloatAsState` at the call
+     * site (the frame navigator), since this class deliberately stays
+     * Compose-free for testability.
+     */
+    fun flyTo(bounds: FloatArray, canvasSize: FloatArray, marginPx: Float = 24f) {
+        fitToContent(bounds, canvasSize, marginPx)
+    }
+
+    /**
+     * Sub-phase 8.2 — animation hook used by the frame navigator's fly-to.
+     * Lets the call site drive an [animateFloatAsState] without touching
+     * the private setters. The supplied values are not clamped here — the
+     * navigator is expected to pass values produced from
+     * [fitToContent]-like math.
+     */
+    fun setForAnimation(newOffsetX: Float, newOffsetY: Float, newScale: Float) {
+        val clampedScale = newScale.coerceIn(MIN_SCALE, MAX_SCALE)
+        if (offsetX == newOffsetX && offsetY == newOffsetY && scale == clampedScale) return
+        offsetX = newOffsetX
+        offsetY = newOffsetY
+        scale = clampedScale
+        onChanged?.invoke()
+    }
+
     fun screenToWorldX(screenX: Float): Float = (screenX - offsetX) / scale
     fun screenToWorldY(screenY: Float): Float = (screenY - offsetY) / scale
     fun worldToScreenX(worldX: Float): Float = worldX * scale + offsetX

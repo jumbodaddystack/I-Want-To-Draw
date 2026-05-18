@@ -33,6 +33,12 @@ enum class Tool(
     ELLIPSE("shape_ellipse", "Ellipse"),
     ARROW("shape_arrow", "Arrow"),
     POLYGON("shape_polygon", "Polygon"),
+
+    // Sub-phase 8.1 — frame tool. Drag a rectangle in world space to create
+    // a named region. Frames live alongside items and define exportable
+    // sub-rects of the infinite canvas (also: the substrate Phase 9 uses
+    // for notebook pages).
+    FRAME("frame", "Frame"),
     ;
 
     val isInk: Boolean get() = this == PEN || this == HIGHLIGHTER || this == PENCIL
@@ -42,6 +48,7 @@ enum class Tool(
     val isShape: Boolean
         get() = this == LINE || this == RECT || this == ELLIPSE ||
             this == ARROW || this == POLYGON
+    val isFrame: Boolean get() = this == FRAME
 }
 
 /**
