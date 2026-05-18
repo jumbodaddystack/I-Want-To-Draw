@@ -57,6 +57,8 @@ class NoteRepository @Inject constructor(
 
     fun observeNotes(): Flow<List<Note>> = noteDao.observeNotes()
 
+    fun observeNote(noteId: String): Flow<Note?> = noteDao.observeNote(noteId)
+
     suspend fun getNote(noteId: String): Note? = withContext(Dispatchers.IO) {
         noteDao.getNote(noteId)
     }
