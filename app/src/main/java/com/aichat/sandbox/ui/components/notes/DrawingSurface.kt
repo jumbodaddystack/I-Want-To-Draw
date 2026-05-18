@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.input.motionprediction.MotionEventPredictor
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.ui.screens.notes.LassoController
 import kotlin.math.hypot
 
@@ -84,6 +85,12 @@ class DrawingSurface(context: Context) : View(context) {
     /** Committed strokes, kept on the view so we can re-rasterize on viewport changes. */
     private var committedItems: List<NoteItem> = emptyList()
 
+    /** Per-note layer list (sub-phase 6.4). Empty list = legacy / unlayered note. */
+    private var layerLookup: LayerLookup = LayerLookup(emptyList())
+
+    /** Absolute path to the app's filesDir — feeds [ImageRenderer.draw]. Set lazily. */
+    private var filesDir: java.io.File? = null
+
     /** Active live-stroke samples packed as `[x, y, pressure, tilt]` per sample, world coords. */
     private var liveSamples: FloatArray =
         FloatArray(INITIAL_SAMPLE_CAPACITY * StrokeCodec.FLOATS_PER_SAMPLE)
@@ -107,6 +114,10 @@ class DrawingSurface(context: Context) : View(context) {
     private var strokeTool: Tool = Tool.PEN
     private var strokeColor: Int = DEFAULT_INK_COLOR
     private var strokeWidthPx: Float = DEFAULT_STROKE_WIDTH_PX
+
+    /** Texture id for the in-flight stroke — comes from the current brush preset (6.5 / 6.6). */
+    private var strokeTextureId: String? = null
+    private var strokeTextureForStroke: String? = null
 
     /** Strokes hit by the current eraser swipe; filtered out of the scene rasterization. */
     private val pendingErase: HashSet<String> = HashSet()
@@ -252,10 +263,10 @@ class DrawingSurface(context: Context) : View(context) {
     }
 
     /**
-     * Replace the committed-item set and re-rasterize the scene. Items are
-     * sorted by `zIndex` so highlighter strokes (negative range) render
-     * under pen / pencil strokes (positive range) regardless of the order
-     * the caller hands them over.
+     * Replace the committed-item set and re-rasterize the scene. Items keep
+     * their original list order — layer-aware sort + visibility filter is
+     * applied during render through [LayerLookup.renderOrder] so eraser /
+     * snap / hit-test paths still see the full set.
      */
     fun replayItems(items: List<NoteItem>) {
         val sorted = items.sortedBy { it.zIndex }
@@ -281,12 +292,26 @@ class DrawingSurface(context: Context) : View(context) {
         colorArgb: Int,
         widthPx: Float,
         areaEraserRadiusPx: Float,
+        textureId: String? = null,
     ) {
         paletteTool = tool
         inkColor = colorArgb
         baseWidthPx = widthPx
+        strokeTextureId = textureId
         this.areaEraserRadiusPx = areaEraserRadiusPx
         invalidate()
+    }
+
+    /** Sub-phase 6.4 — replace the layer set and re-rasterize. */
+    fun setLayers(layers: List<NoteLayer>) {
+        layerLookup = LayerLookup(layers)
+        sceneDirty = true
+        invalidate()
+    }
+
+    /** Sub-phase 6.7 — caller supplies filesDir so [ImageRenderer] can resolve relative paths. */
+    fun setFilesDir(dir: java.io.File) {
+        filesDir = dir
     }
 
     /**
@@ -358,7 +383,9 @@ class DrawingSurface(context: Context) : View(context) {
             canvas.translate(viewport.offsetX, viewport.offsetY)
             canvas.scale(viewport.scale, viewport.scale)
             if (liveSampleCount > 0) {
-                StrokeRenderer.configureToolPaint(livePaint, strokeTool.id, strokeColor)
+                StrokeRenderer.configureToolPaint(
+                    livePaint, strokeTool.id, strokeColor, strokeTextureForStroke,
+                )
                 StrokeRenderer.drawStrokePath(
                     canvas, livePaint, liveSamples, liveSampleCount,
                     strokeWidthPx, strokeTool.id, scratchPath,
@@ -366,7 +393,9 @@ class DrawingSurface(context: Context) : View(context) {
             }
             val predicted = predictedSamples
             if (predicted != null && predictedSampleCount > 0) {
-                StrokeRenderer.configureToolPaint(predictedPaint, strokeTool.id, strokeColor)
+                StrokeRenderer.configureToolPaint(
+                    predictedPaint, strokeTool.id, strokeColor, strokeTextureForStroke,
+                )
                 // Predicted tail fades in to mask overshoot at direction changes.
                 predictedPaint.alpha =
                     (predictedPaint.alpha * PREDICTED_ALPHA_FRACTION).toInt().coerceIn(0, 255)
@@ -519,6 +548,7 @@ class DrawingSurface(context: Context) : View(context) {
                 strokeTool = resolveStrokeTool(event)
                 strokeColor = inkColor
                 strokeWidthPx = baseWidthPx
+                strokeTextureForStroke = strokeTextureId
                 liveSampleCount = 0
                 lassoCount = 0
                 clearPredicted()
@@ -841,6 +871,10 @@ class DrawingSurface(context: Context) : View(context) {
         var changed = false
         for (item in committedItems) {
             if (item.id in pendingErase) continue
+            // Layer-locked items are eraser-immune (sub-phase 6.4); hidden
+            // items can't be hit because they aren't rendered.
+            if (layerLookup.isLocked(item)) continue
+            if (!layerLookup.isVisible(item)) continue
             val hit = when (item.kind) {
                 STROKE_KIND -> {
                     val decoded = decode(item) ?: continue
@@ -892,7 +926,7 @@ class DrawingSurface(context: Context) : View(context) {
         canvas.save()
         canvas.translate(viewport.offsetX, viewport.offsetY)
         canvas.scale(viewport.scale, viewport.scale)
-        for (item in committedItems) {
+        for (item in layerLookup.renderOrder(committedItems)) {
             if (item.id in pendingErase) continue
             // Selected items are drawn live in onDraw so a Compose-side
             // transform gesture renders without re-rasterizing every frame.
@@ -900,24 +934,35 @@ class DrawingSurface(context: Context) : View(context) {
             // Currently in-edit text item is hidden — the Compose editor
             // owns the visual real estate.
             if (item.id == editingTextId) continue
-            when (item.kind) {
-                STROKE_KIND -> {
-                    val decoded = decode(item) ?: continue
-                    StrokeRenderer.configureToolPaint(replayPaint, item.tool, item.colorArgb)
-                    StrokeRenderer.drawStrokePath(
-                        canvas, replayPaint, decoded.samples, decoded.count,
-                        item.baseWidthPx, item.tool, scratchPath,
-                    )
-                }
-                TextItemCodec.KIND -> {
-                    TextItemRenderer.draw(canvas, item, textScratchMatrix)
-                }
-                Shape.KIND -> {
-                    ShapeRenderer.draw(canvas, item, replayPaint)
-                }
-            }
+            drawItemWithLayerOpacity(canvas, item)
         }
         canvas.restore()
+    }
+
+    private fun drawItemWithLayerOpacity(canvas: Canvas, item: NoteItem) {
+        val opacity = layerLookup.opacity(item)
+        val needsLayer = opacity < 0.999f
+        if (needsLayer) {
+            val alpha = (opacity * 255f).toInt().coerceIn(0, 255)
+            canvas.saveLayerAlpha(null, alpha)
+        }
+        when (item.kind) {
+            STROKE_KIND -> {
+                val decoded = decode(item) ?: run {
+                    if (needsLayer) canvas.restore()
+                    return
+                }
+                StrokeRenderer.configureToolPaint(replayPaint, item.tool, item.colorArgb)
+                StrokeRenderer.drawStrokePath(
+                    canvas, replayPaint, decoded.samples, decoded.count,
+                    item.baseWidthPx, item.tool, scratchPath,
+                )
+            }
+            TextItemCodec.KIND -> TextItemRenderer.draw(canvas, item, textScratchMatrix)
+            Shape.KIND -> ShapeRenderer.draw(canvas, item, replayPaint)
+            NoteItem.KIND_IMAGE -> filesDir?.let { ImageRenderer.draw(canvas, item, it) }
+        }
+        if (needsLayer) canvas.restore()
     }
 
     /**
@@ -941,22 +986,10 @@ class DrawingSurface(context: Context) : View(context) {
             if (item.id !in selectedIds) continue
             if (item.id in pendingErase) continue
             if (item.id == editingTextId) continue
-            when (item.kind) {
-                STROKE_KIND -> {
-                    val decoded = decode(item) ?: continue
-                    StrokeRenderer.configureToolPaint(replayPaint, item.tool, item.colorArgb)
-                    StrokeRenderer.drawStrokePath(
-                        canvas, replayPaint, decoded.samples, decoded.count,
-                        item.baseWidthPx, item.tool, scratchPath,
-                    )
-                }
-                TextItemCodec.KIND -> {
-                    TextItemRenderer.draw(canvas, item, textScratchMatrix)
-                }
-                Shape.KIND -> {
-                    ShapeRenderer.draw(canvas, item, replayPaint)
-                }
-            }
+            // Hide selected items on hidden layers so toggling visibility off
+            // mid-drag actually hides them.
+            if (!layerLookup.isVisible(item)) continue
+            drawItemWithLayerOpacity(canvas, item)
         }
         canvas.restore()
     }
@@ -1309,6 +1342,8 @@ fun DrawingSurfaceView(
     modifier: Modifier = Modifier,
     sketchMode: Boolean = false,
     snapMask: Int = Snap.MASK_ANGLE or Snap.MASK_ENDPOINT,
+    layers: List<NoteLayer> = emptyList(),
+    activeTextureId: String? = null,
     onViewportReady: (ViewportController) -> Unit = {},
 ) {
     val currentOnCommit by rememberUpdatedState(onStrokeCommitted)
@@ -1332,6 +1367,7 @@ fun DrawingSurfaceView(
                 lassoListener = { polygon -> currentOnLasso(polygon) }
                 selectionShouldClearListener = { currentOnSelectionClear() }
                 textTapListener = { wx, wy -> currentOnTextTap(wx, wy) }
+                setFilesDir(ctx.filesDir)
                 currentOnViewportReady(viewport)
             }
         },
@@ -1348,9 +1384,11 @@ fun DrawingSurfaceView(
                 colorArgb = paletteState.activeInkColor(),
                 widthPx = paletteState.activeInkWidth(),
                 areaEraserRadiusPx = paletteState.areaEraserRadiusPx,
+                textureId = activeTextureId,
             )
             view.setSelection(selectedIds, selectionMatrix)
             view.setEditingTextId(editingTextId)
+            view.setLayers(layers)
             view.snapMask = snapMask
             // Re-rasterize whenever the authoritative item list changes
             // (initial load, commit, erase). [itemsSignature] is read here so

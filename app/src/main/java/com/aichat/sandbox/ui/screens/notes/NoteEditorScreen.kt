@@ -2,6 +2,9 @@ package com.aichat.sandbox.ui.screens.notes
 
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -12,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Polyline
@@ -36,6 +40,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
+import com.aichat.sandbox.ui.components.notes.BrushSheet
 import com.aichat.sandbox.ui.components.notes.ColorPickerSheet
 import com.aichat.sandbox.ui.components.notes.DrawingSurfaceView
 import com.aichat.sandbox.ui.components.notes.TextItemEditor
@@ -68,12 +73,34 @@ fun NoteEditorScreen(
     val colorPickerOpen by viewModel.colorPickerOpen.collectAsState()
     val recentColors by viewModel.recentColors.collectAsState()
     val snapMask by viewModel.snapMask.collectAsState()
+    val layers by viewModel.layers.collectAsState()
+    val activeLayerId by viewModel.activeLayerId.collectAsState()
+    val layersPanelOpen by viewModel.layersPanelOpen.collectAsState()
+    val brushPresets by viewModel.brushPresetList.collectAsState()
+    val activeBrushPreset by viewModel.activeBrushPreset.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
     var pdfDialogVisible by remember { mutableStateOf(false) }
+    var brushSheetOpen by remember { mutableStateOf(false) }
     var viewportController by remember { mutableStateOf<ViewportController?>(null) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val vp = viewportController
+        val cx: Float
+        val cy: Float
+        if (vp != null && canvasSize != IntSize.Zero) {
+            cx = vp.screenToWorldX(canvasSize.width / 2f)
+            cy = vp.screenToWorldY(canvasSize.height / 2f)
+        } else {
+            cx = 0f; cy = 0f
+        }
+        viewModel.insertImageFromUri(uri, cx, cy)
+    }
 
     fun saveAndExit() {
         scope.launch {
@@ -128,6 +155,13 @@ fun NoteEditorScreen(
                             contentDescription = "Ask about this note",
                         )
                     }
+                    // Sub-phase 6.4 — layers panel toggle.
+                    IconButton(onClick = viewModel::toggleLayersPanel) {
+                        Icon(
+                            imageVector = Icons.Filled.Layers,
+                            contentDescription = "Layers",
+                        )
+                    }
                     // Phase 5.4 — zoom chip + Fit / 100% / Center popover.
                     // Bounds are recomputed lazily on each menu open so the
                     // user doesn't pay for a scan on every TopAppBar
@@ -170,6 +204,18 @@ fun NoteEditorScreen(
                             onBackgroundSelect = { style ->
                                 viewModel.setBackgroundStyle(style)
                                 menuExpanded = false
+                            },
+                            onInsertImage = {
+                                menuExpanded = false
+                                imagePicker.launch(
+                                    PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                                    )
+                                )
+                            },
+                            onToggleBrushSheet = {
+                                menuExpanded = false
+                                brushSheetOpen = !brushSheetOpen
                             },
                             onSharePng = {
                                 menuExpanded = false
@@ -250,6 +296,8 @@ fun NoteEditorScreen(
                     onTextTap = viewModel::onTextToolTap,
                     modifier = Modifier.fillMaxSize(),
                     snapMask = snapMask,
+                    layers = layers,
+                    activeTextureId = activeBrushPreset?.textureId,
                     onViewportReady = { viewportController = it },
                 )
                 SelectionOverlay(
@@ -287,12 +335,44 @@ fun NoteEditorScreen(
                     )
                 }
             }
+            if (brushSheetOpen) {
+                BrushSheet(
+                    presets = brushPresets,
+                    activePreset = activeBrushPreset,
+                    onApplyPreset = viewModel::applyBrushPreset,
+                    onLiveEdit = viewModel::setLiveBrushEdit,
+                    onSaveAsPreset = { _, name -> viewModel.saveActiveAsUserPreset(name) },
+                    onTextureChange = viewModel::setActiveTextureId,
+                )
+            }
             ToolPalette(
                 state = viewModel.palette,
                 onPickCustomColor = viewModel::openColorPicker,
                 snapMask = snapMask,
                 onToggleSnap = viewModel::toggleSnap,
             )
+        }
+        if (layersPanelOpen) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize(),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                LayersPanel(
+                    layers = layers,
+                    activeLayerId = activeLayerId,
+                    onAddLayer = viewModel::addLayer,
+                    onSelectLayer = viewModel::selectLayer,
+                    onToggleVisible = viewModel::toggleLayerVisible,
+                    onToggleLocked = viewModel::toggleLayerLocked,
+                    onOpacityChange = viewModel::setLayerOpacity,
+                    onMoveUp = viewModel::moveLayerUp,
+                    onMoveDown = viewModel::moveLayerDown,
+                    onDelete = viewModel::deleteLayer,
+                    onClose = viewModel::closeLayersPanel,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
         }
         if (pdfDialogVisible) {
             ExportPdfDialog(
@@ -394,12 +474,34 @@ private fun EditorOverflowMenu(
     current: String,
     onDismiss: () -> Unit,
     onBackgroundSelect: (String) -> Unit,
+    onInsertImage: () -> Unit,
+    onToggleBrushSheet: () -> Unit,
     onSharePng: () -> Unit,
     onSharePdf: () -> Unit,
     onShareSvg: () -> Unit,
     onSendToChat: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        Text(
+            text = "Insert",
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        DropdownMenuItem(
+            text = { Text("Insert image…") },
+            leadingIcon = {
+                Icon(Icons.Filled.Image, contentDescription = null)
+            },
+            onClick = onInsertImage,
+        )
+        DropdownMenuItem(
+            text = { Text("Brush settings") },
+            leadingIcon = {
+                Icon(Icons.Filled.MoreVert, contentDescription = null)
+            },
+            onClick = onToggleBrushSheet,
+        )
+        HorizontalDivider()
         Text(
             text = "Share",
             style = MaterialTheme.typography.labelMedium,

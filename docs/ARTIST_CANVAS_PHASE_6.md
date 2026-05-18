@@ -6,30 +6,19 @@ Parent plan: [`ARTIST_CANVAS_PLAN.md`](./ARTIST_CANVAS_PLAN.md).
 
 Sequencing inside the phase is deliberate — 6.4 (layers) touches every render path, so we land 6.1–6.3 first to establish the selection + shape primitives the layer panel will reference. 6.5 / 6.6 ride on top of the existing tool palette. 6.7 / 6.8 are largely independent.
 
-## Progress (foundation slice)
+## Progress
 
-6.1 + 6.2 + 6.3 + 6.8 shipped on `claude/implement-phase-6-OPwbx` as a single
-PR. They were chosen as a contained, no-schema-change, no-new-permission
-slice that delivers immediate user-visible wins.
+6.1 + 6.2 + 6.3 + 6.8 shipped on `claude/implement-phase-6-OPwbx` as the
+foundation slice.
 
-Still open in this phase (intentionally deferred):
+6.4 + 6.5 + 6.6 + 6.7 shipped on `claude/implement-phase-6-aCoJI` as the
+remainder slice. Database is now at version 9 with three additive
+migrations (`MIGRATION_6_7`, `MIGRATION_7_8`, `MIGRATION_8_9`); the
+existing notes load and render unchanged.
 
-- **6.4 Layers panel** — touches every render path; needs a one-time
-  migration over every existing note. Highest-risk sub-phase in the doc.
-- **6.5 Brush customization + presets** — new `brush_presets` table,
-  schema version bump (7 → 8), 18 seeded app-scope rows.
-- **6.6 Brush textures** — needs four seamless WebP tiles
-  (smooth / charcoal / watercolour / marker). Shader plumbing is
-  straightforward; the asset commission is the bottleneck.
-- **6.7 Image insert** — schema version bump (8 → 9), new
-  `READ_MEDIA_IMAGES` permission, `filesDir/note-images/` lifecycle,
-  LRU bitmap cache. Mostly independent of layers / presets; could be
-  taken next without 6.4–6.6.
-
-Build order if picking up: **6.4 → 6.5 → 6.6 → 6.7**. 6.4 lands the
-layers schema that 6.5 (brush presets) and the SVG export will eventually
-want to surface; 6.5 introduces the schema 6.6 augments with `textureId`
-references; 6.7 is independent and could land in parallel.
+Phase-6 verification matrix (14 items in 6.8) still needs the on-device
+run — that's the only remaining gate before the phase tracker can flip
+its real-hardware date in the parent plan's Status block.
 
 ## Sub-phase 6.1 — Selection handles overlay
 
@@ -282,6 +271,52 @@ Modified:
 - **Migration touches every existing note.** Run it inside the migration callback in a single transaction; assert row counts before/after in an instrumented test.
 - **Render order ties.** Same layer + same `zIndex` happens on bulk paste. Tie-break on `noteItem.id` lexicographically to keep ordering deterministic.
 
+### Status (remainder slice)
+
+Files landed:
+
+- `NoteLayer.kt` — Room entity with FK→Note cascade.
+- `MIGRATION_6_7` — creates `note_layers` + adds `note_items.layerId`;
+  for every existing note, materialises an "Ink" layer (and a
+  "Highlights" layer if any highlighter items exist) and reparents
+  items accordingly. Runs inside the Room migration callback.
+- `NoteDao.getLayers / upsertLayers / saveNoteWithLayers` — atomic
+  save path.
+- `LayerLookup.kt` — pure helper that resolves render order, visibility,
+  lock, and per-item opacity. Covered by `LayerLookupTest`.
+- `LayersPanel.kt` — slide-in Compose panel with add / select /
+  visibility / lock / opacity slider / reorder arrows / delete.
+- `EditorAction.MoveItemsBetweenLayers` — undoable reparent action; codec
+  support added in `EditorActionCodec` (`TYPE_MOVE_LAYERS`).
+- `NoteEditorViewModel` exposes `layers`, `activeLayerId`,
+  `layersPanelOpen` and a full CRUD surface. Selection lasso and eraser
+  skip locked-layer items.
+- `DrawingSurface.setLayers` + `LayerLookup`-aware rasterizer wire the
+  per-item opacity into a `saveLayerAlpha` pass.
+
+**Deviations:**
+
+- **Reorder via arrow buttons rather than drag-handle.** The spec asked
+  for drag-handle reordering; the panel ships with up/down arrows that
+  swap adjacent ordinals. Equivalent outcome, simpler to land without
+  pulling in a reorderable-list dependency. Drag-handle is a follow-up.
+- **`EditorAction` variants `AddLayer / RemoveLayer / RenameLayer /
+  SetLayerProps` are not yet undoable.** Visibility / lock / opacity
+  changes and reorders mutate `_layers` directly; only the item-level
+  `MoveItemsBetweenLayers` lands on the undo log. Rationale: layer
+  attribute edits are easy to redo manually and the codec churn
+  wasn't worth a week-one slice. Item reparents that result from
+  `deleteLayer` *are* undoable; if the user wants the layer back they
+  add it and pull the reparented items into it. To be revisited if
+  user feedback indicates this is missed.
+- **Legacy `HIGHLIGHTER_Z_BASE` constant retained.** The plan called for
+  retiring it; the constant is still used by `NoteEditorViewModel`'s
+  `zIndexFor(tool)` so highlighter strokes drawn on the default layer
+  still sit beneath ink. Once every note has at least one named layer
+  (post-migration this is the steady state) the constant is
+  effectively dead; clean-up deferred to Phase 7 to avoid risking a
+  rendering regression here.
+
 ---
 
 ## Sub-phase 6.5 — Brush customization + presets
@@ -337,6 +372,44 @@ Modified:
 
 - **Preset matrix explodes the test surface.** Snapshot-test each app-scope preset against a golden bitmap; if any drifts, fail CI.
 
+### Status (remainder slice)
+
+Files landed:
+
+- `BrushPreset.kt` — Room entity with `(ownerScope, name, tool,
+  colorArgb, baseWidthPx, opacity, taperStart, taperEnd, jitter,
+  pressureCurveId, textureId, ordinal)`.
+- `BrushPresetDao.kt` + `BrushPresetRepository.kt`.
+- `MIGRATION_7_8` — creates `brush_presets` and seeds 18 app-scope rows
+  (6 default swatches × 3 ink tools) with the per-tool default texture
+  (`smooth` for pen / highlighter, `charcoal` for pencil).
+- `BrushSheet.kt` — collapsible Compose sheet: preset chip row, width /
+  opacity / taper-start / taper-end / jitter sliders, texture chip row,
+  "Save as preset…" dialog. Mounted above the existing tool palette
+  when the user opens it from the overflow menu.
+- `NoteEditorViewModel` exposes `brushPresetList`, `activeBrushPreset`,
+  and `applyBrushPreset / setLiveBrushEdit / saveActiveAsUserPreset /
+  setActiveTextureId`. Picking a preset auto-applies its colour and
+  width onto the palette so the user's next stroke uses it.
+
+**Deviations:**
+
+- **Brush sheet doesn't yet show a live stroke preview canvas.** Sliders
+  drive the live `activeBrushPreset` and feed straight through to the
+  next stroke; an in-sheet preview is a polish follow-up.
+- **Pressure curve picker not surfaced.** `BrushPreset.pressureCurveId`
+  is persisted but the BrushSheet currently doesn't expose a control
+  for it — the data column is in place for the curve picker that
+  lands in 6.5's polish follow-up. `ToolDynamics` is unchanged.
+- **Sliders edit the active preset in-place rather than starting a draft
+  on first change.** Saving a brand-new preset clones the active one;
+  the original app-scope row is never mutated. This is simpler than
+  the spec's "draft on first slider touch" pattern and matches how
+  Concepts behaves once you `+`.
+- **Long-press save not wired.** Save goes through the explicit Save
+  icon button in the sheet. Long-press on a tool tab is reserved for
+  the future "duplicate to user preset" gesture.
+
 ---
 
 ## Sub-phase 6.6 — Brush textures
@@ -376,6 +449,41 @@ Modified:
 ### Risks
 
 - **Shader memory.** Each `BitmapShader` ties up its tile bitmap. Four textures × one device == fine. Bigger sets need an LRU.
+
+### Status (remainder slice)
+
+Files landed:
+
+- `TextureRegistry.kt` — REPEAT-tiled `BitmapShader` cache for the four
+  texture ids (`smooth`, `charcoal`, `watercolor`, `marker`). Synchronized
+  lazy init.
+- `StrokeRenderer.configureToolPaint(paint, tool, colorArgb, textureId?)`
+  — optional `textureId` overrides the per-tool default shader. `null`
+  / `"smooth"` keeps the pre-6.6 paint exactly so existing notes render
+  byte-identically.
+- `DrawingSurface.setToolConfig(... textureId)` — live + predicted +
+  replay paths consume the active preset's texture.
+- `BrushSheet` exposes a four-chip texture row; the choice writes
+  through to `NoteEditorViewModel.setActiveTextureId`.
+
+**Deviations:**
+
+- **Textures are generated, not commissioned WebP assets.** The four
+  tiles are produced procedurally with fixed RNG seeds in
+  `TextureRegistry` — charcoal grain via density-biased noise,
+  watercolour via overlapping tileable radial gradients, marker via
+  diagonal fibre streaks at 30°. Visual character matches the spec's
+  intent; swapping in commissioned `tex_*.webp` is a drop-in by
+  replacing `buildTile(textureId)` with `decodeResource`. No binary
+  assets were added to the repo.
+- **Per-item texture is *not* persisted** — strokes don't carry their
+  textureId on disk. Textures are applied at paint time based on the
+  *current* preset (the same model the spec's "switching texture on
+  a preset doesn't require re-saving existing items" calls for); the
+  tradeoff is that strokes drawn with a custom texture revert to the
+  per-tool default when the user re-opens the note. Per-item
+  persistence is a Phase 7 follow-up that piggy-backs on the vector
+  JSON edit pipeline.
 
 ---
 
@@ -429,6 +537,55 @@ Modified:
 ### Risks
 
 - **Storage bloat.** Users insert massive photos. Mitigation: on insert, if longest edge > 4096 px, resize to 4096 before persisting; keep aspect.
+
+### Status (remainder slice)
+
+Files landed:
+
+- `ImageItemCodec.kt` — little-endian binary payload format:
+  `[version:u8=1][pathLength:u16][path:utf8][naturalW:f][naturalH:f]
+  [minX:f][minY:f][maxX:f][maxY:f][rotation:f]`. Covered by
+  `ImageItemCodecTest`.
+- `ImageRenderer.kt` — 64 MB `LruCache<absolutePath, Bitmap>`. Missing
+  files render as an outlined placeholder so disappearing assets are
+  visible rather than silent.
+- `NoteImageStore.kt` — copy-from-Uri into `filesDir/note-images/`,
+  4096-edge cap with `inSampleSize`, MIME-aware re-encode (PNG / JPEG).
+- `MIGRATION_8_9` — schema bump only; no DDL changes required (image
+  items reuse the existing `note_items` columns and carry their data
+  in the payload).
+- `NoteItem.KIND_IMAGE` constant + `transform()` support in
+  `EditorAction.TransformItems`.
+- `NoteRepository.deleteNote` now collects referenced image paths and
+  unlinks them before the cascade.
+- `AndroidManifest.xml` declares `READ_MEDIA_IMAGES` (API 33+).
+- `NoteEditorScreen` registers an `ActivityResultContracts.PickVisualMedia`
+  launcher; the overflow menu's "Insert image…" entry fires it, and
+  the picked URI is forwarded to `NoteEditorViewModel.insertImageFromUri`
+  which anchors the image at the viewport centre.
+- `NoteSvgExporter.appendImage` embeds the image as a base64
+  `<image href="data:...">` so the SVG export round-trips cleanly.
+- `file_provider_paths.xml` exposes `note-images/` so future flows can
+  surface the original through `FileProvider`.
+
+**Deviations:**
+
+- **Paste / drag-drop is not yet wired.** The spec calls for pasting
+  an image from the clipboard and dragging from a chat into the
+  canvas; both are deferred. The picker covers the "insert from
+  gallery" path which is the most-used import flow; paste handler
+  is a follow-up that hooks `ClipboardManager.primaryClip`.
+- **Hit-test for images is bounding-box only.** A lasso that brushes
+  past an image's AABB selects it; the spec's "intersect polygon
+  with image rect" check is approximated by an AABB-vs-AABB test.
+  Tight corner lassos around the image edge will not match — close
+  enough for v1.
+- **Orphan sweep is implemented but not auto-scheduled.**
+  `NoteImageStore.sweepOrphans(referencedRelativePaths)` is ready
+  to be called from a maintenance pass; today, files are deleted
+  eagerly when a note is deleted via the repository. Crash-mid-save
+  files are recoverable manually; auto-sweep on app start lands
+  alongside the Phase 9 notebook entity.
 
 ---
 

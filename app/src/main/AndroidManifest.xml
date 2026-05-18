@@ -3,6 +3,16 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Sub-phase 6.7 image insert.
+         API 33+ uses the photo picker (PickVisualMedia) which needs no
+         permission; declaring READ_MEDIA_IMAGES lets us also support
+         direct gallery reads if a future flow needs them. On API ≤ 32 the
+         picker still works (Compatibility Picker shim) but a runtime
+         READ_EXTERNAL_STORAGE prompt may be raised by the OS if a direct
+         document is opened. -->
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:targetApi="33" />
 
     <uses-feature
         android:name="android.hardware.type.stylus"

@@ -47,6 +47,7 @@ object EditorActionCodec {
     private const val TYPE_REMOVE_ITEMS = "RemoveItems"
     private const val TYPE_TRANSFORM_ITEMS = "TransformItems"
     private const val TYPE_UPDATE_TEXT = "UpdateText"
+    private const val TYPE_MOVE_LAYERS = "MoveItemsBetweenLayers"
 
     /** Result of a successful decode. */
     data class Decoded(
@@ -177,6 +178,12 @@ object EditorActionCodec {
                 obj.addProperty("oldBody", action.oldBody)
                 obj.addProperty("newBody", action.newBody)
             }
+            is EditorAction.MoveItemsBetweenLayers -> {
+                obj.addProperty("type", TYPE_MOVE_LAYERS)
+                obj.add("ids", encodeStringList(action.ids))
+                if (action.oldLayerId != null) obj.addProperty("oldLayerId", action.oldLayerId)
+                if (action.newLayerId != null) obj.addProperty("newLayerId", action.newLayerId)
+            }
         }
         return obj
     }
@@ -200,6 +207,11 @@ object EditorActionCodec {
                     id = obj.get("id").asString,
                     oldBody = obj.get("oldBody").asString,
                     newBody = obj.get("newBody").asString,
+                )
+                TYPE_MOVE_LAYERS -> EditorAction.MoveItemsBetweenLayers(
+                    ids = decodeStringList(obj.getAsJsonArray("ids")),
+                    oldLayerId = obj.get("oldLayerId")?.takeIf { !it.isJsonNull }?.asString,
+                    newLayerId = obj.get("newLayerId")?.takeIf { !it.isJsonNull }?.asString,
                 )
                 else -> {
                     logWarn("skipping unknown action type=$type")
@@ -241,11 +253,13 @@ object EditorActionCodec {
             "payload",
             Base64.getEncoder().encodeToString(item.payload),
         )
+        if (item.layerId != null) obj.addProperty("layerId", item.layerId)
         return obj
     }
 
     private fun decodeItem(obj: JsonObject): NoteItem {
         val toolEl = obj.get("tool")
+        val layerEl = obj.get("layerId")
         return NoteItem(
             id = obj.get("id").asString,
             noteId = obj.get("noteId").asString,
@@ -255,6 +269,7 @@ object EditorActionCodec {
             colorArgb = obj.get("colorArgb").asInt,
             baseWidthPx = obj.get("baseWidthPx").asFloat,
             payload = Base64.getDecoder().decode(obj.get("payload").asString),
+            layerId = if (layerEl == null || layerEl.isJsonNull) null else layerEl.asString,
         )
     }
 

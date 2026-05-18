@@ -1,6 +1,7 @@
 package com.aichat.sandbox.ui.screens.notes
 
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
@@ -10,6 +11,7 @@ import com.aichat.sandbox.ui.components.notes.TextItemCodec
 private const val STROKE_KIND = "stroke"
 private const val TEXT_KIND = TextItemCodec.KIND
 private const val SHAPE_KIND = Shape.KIND
+private const val IMAGE_KIND = NoteItem.KIND_IMAGE
 
 /**
  * Reversible canvas mutations recorded in the editor's undo / redo stack
@@ -87,7 +89,13 @@ sealed interface EditorAction {
             STROKE_KIND -> transformStroke(item, m)
             TEXT_KIND -> transformText(item, m)
             SHAPE_KIND -> transformShape(item, m)
+            IMAGE_KIND -> transformImage(item, m)
             else -> item
+        }
+
+        private fun transformImage(item: NoteItem, m: FloatArray): NoteItem {
+            val payload = ImageItemCodec.decode(item.payload)
+            return item.copy(payload = ImageItemCodec.encode(ImageItemCodec.transform(payload, m)))
         }
 
         private fun transformShape(item: NoteItem, m: FloatArray): NoteItem {
@@ -143,5 +151,29 @@ sealed interface EditorAction {
                 return
             }
         }
+    }
+
+    /**
+     * Sub-phase 6.4 — reparent every item in [ids] from [oldLayerId] to
+     * [newLayerId]. Inversion swaps the two layer ids back. Items whose
+     * current layer doesn't match [oldLayerId] are skipped silently (a stale
+     * undo branch can do this).
+     */
+    data class MoveItemsBetweenLayers(
+        val ids: List<String>,
+        val oldLayerId: String?,
+        val newLayerId: String?,
+    ) : EditorAction {
+        override fun applyTo(items: MutableList<NoteItem>) {
+            if (ids.isEmpty() || oldLayerId == newLayerId) return
+            val target = ids.toHashSet()
+            for (i in items.indices) {
+                val item = items[i]
+                if (item.id !in target) continue
+                if (item.layerId != oldLayerId) continue
+                items[i] = item.copy(layerId = newLayerId)
+            }
+        }
+        override fun invert(): EditorAction = MoveItemsBetweenLayers(ids, newLayerId, oldLayerId)
     }
 }

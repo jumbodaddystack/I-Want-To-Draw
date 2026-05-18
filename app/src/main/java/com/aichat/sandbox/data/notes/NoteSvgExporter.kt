@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
@@ -13,6 +14,7 @@ import com.aichat.sandbox.ui.components.notes.StrokeRenderer
 import com.aichat.sandbox.ui.components.notes.TextItemCodec
 import com.aichat.sandbox.ui.components.notes.TextItemRenderer
 import dagger.hilt.android.qualifiers.ApplicationContext
+import android.util.Base64 as AndroidBase64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -45,7 +47,7 @@ class NoteSvgExporter @Inject constructor(
         note: Note,
         items: List<NoteItem>,
     ): Uri = withContext(Dispatchers.IO) {
-        val svg = renderSvg(note, items)
+        val svg = renderSvg(note, items, context.filesDir)
         val dir = exportsDir().apply { if (!exists()) mkdirs() }
         val outName = "${NoteExporter.sanitizeBaseName(note.title)}-${System.currentTimeMillis()}.svg"
         val finalFile = File(dir, outName)
@@ -78,7 +80,7 @@ class NoteSvgExporter @Inject constructor(
          * exporters can pin the wire format with golden fixtures without
          * touching Android `FileProvider`.
          */
-        fun renderSvg(note: Note, items: List<NoteItem>): String {
+        fun renderSvg(note: Note, items: List<NoteItem>, filesDir: java.io.File? = null): String {
             val bounds = NoteRasterizer.computeBounds(items) ?: NoteExporter.defaultPaperBounds()
             val minX = bounds[0] - MARGIN_WORLD
             val minY = bounds[1] - MARGIN_WORLD
@@ -103,6 +105,7 @@ class NoteSvgExporter @Inject constructor(
                     "stroke" -> appendStroke(sb, item)
                     Shape.KIND -> appendShape(sb, item)
                     TextItemCodec.KIND -> appendText(sb, item)
+                    NoteItem.KIND_IMAGE -> appendImage(sb, item, filesDir)
                 }
             }
             sb.append("  </g>\n</svg>\n")
@@ -236,6 +239,41 @@ class NoteSvgExporter @Inject constructor(
                         .append(" stroke-width=\"").append(fmt(width)).append("\"/>\n")
                 }
             }
+        }
+
+        private fun appendImage(sb: StringBuilder, item: NoteItem, filesDir: java.io.File?) {
+            val payload = ImageItemCodec.decode(item.payload)
+            val width = payload.maxX - payload.minX
+            val height = payload.maxY - payload.minY
+            val href = filesDir?.let { dir ->
+                val file = java.io.File(dir, payload.relativePath)
+                if (!file.exists()) null
+                else try {
+                    val bytes = file.readBytes()
+                    val mime = when (file.extension.lowercase()) {
+                        "jpg", "jpeg" -> "image/jpeg"
+                        "webp" -> "image/webp"
+                        "gif" -> "image/gif"
+                        else -> "image/png"
+                    }
+                    "data:$mime;base64," + AndroidBase64.encodeToString(bytes, AndroidBase64.NO_WRAP)
+                } catch (_: Throwable) { null }
+            }
+            sb.append("    <image x=\"").append(fmt(payload.minX))
+                .append("\" y=\"").append(fmt(payload.minY))
+                .append("\" width=\"").append(fmt(width))
+                .append("\" height=\"").append(fmt(height)).append('"')
+            if (payload.rotationRad != 0f) {
+                val deg = Math.toDegrees(payload.rotationRad.toDouble()).toFloat()
+                val cx = (payload.minX + payload.maxX) * 0.5f
+                val cy = (payload.minY + payload.maxY) * 0.5f
+                sb.append(" transform=\"rotate(").append(fmt(deg)).append(' ')
+                    .append(fmt(cx)).append(' ').append(fmt(cy)).append(")\"")
+            }
+            if (href != null) {
+                sb.append(" href=\"").append(href).append('"')
+            }
+            sb.append("/>\n")
         }
 
         private fun appendText(sb: StringBuilder, item: NoteItem) {

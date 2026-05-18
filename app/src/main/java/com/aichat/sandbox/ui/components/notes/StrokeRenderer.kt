@@ -33,31 +33,45 @@ object StrokeRenderer {
 
     /**
      * Configure [paint] for a freshly issued stroke of [tool] with [colorArgb].
-     * Sets cap, color, base alpha, blend, and (for pencil) the shared grain
-     * shader. Per-sample width/alpha are written later by [drawStrokePath]
-     * via [ToolDynamics], so callers don't need to set them.
+     * Sets cap, color, base alpha, blend, and (for pencil / textured tools)
+     * the appropriate shader. Per-sample width/alpha are written later by
+     * [drawStrokePath] via [ToolDynamics], so callers don't need to set them.
+     *
+     * Sub-phase 6.6 — [textureId] resolves to a [TextureRegistry] shader
+     * applied on top of the tool's default paint. `null` / `"smooth"` keeps
+     * the pre-6.6 behaviour intact, so existing notes render identically.
      */
-    fun configureToolPaint(paint: Paint, tool: String?, colorArgb: Int) {
+    fun configureToolPaint(
+        paint: Paint,
+        tool: String?,
+        colorArgb: Int,
+        textureId: String? = null,
+    ) {
         paint.style = Paint.Style.STROKE
         paint.strokeJoin = Paint.Join.ROUND
         paint.strokeCap = Paint.Cap.ROUND
         paint.isAntiAlias = true
         paint.color = colorArgb
+        // Per-tool default texture (sub-phase 6.6): pencil grain stays as
+        // the historical noise tile unless an explicit texture overrides;
+        // pen / highlighter default to smooth, again overridable. Active
+        // preset (6.5) decides which texture lands on freshly-drawn strokes.
+        val resolvedTexture = textureId ?: when (tool) {
+            TOOL_PENCIL -> null  // null falls through to grain shader below
+            else -> TextureRegistry.TEXTURE_SMOOTH
+        }
         when (tool) {
             TOOL_HIGHLIGHTER -> {
                 paint.strokeCap = Paint.Cap.SQUARE
-                paint.shader = null
-                // Base alpha set per-segment by [ToolDynamics.highlighter].
+                paint.shader = TextureRegistry.get(resolvedTexture)
                 paint.alpha = Color.alpha(colorArgb)
             }
             TOOL_PENCIL -> {
-                paint.shader = obtainPencilShader()
-                // Per-segment alpha multiplied in via [ToolDynamics.pencil];
-                // the grain shader provides the rest of the visual noise.
+                paint.shader = TextureRegistry.get(resolvedTexture) ?: obtainPencilShader()
                 paint.alpha = PENCIL_GRAIN_ALPHA
             }
             else -> {
-                paint.shader = null
+                paint.shader = TextureRegistry.get(resolvedTexture)
                 paint.alpha = Color.alpha(colorArgb)
             }
         }

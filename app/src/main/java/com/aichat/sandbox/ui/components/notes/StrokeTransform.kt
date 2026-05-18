@@ -44,6 +44,24 @@ object StrokeTransform {
     }
 
     /**
+     * Apply [m] to every `(x, y)` pair in [points] and return a new buffer.
+     * Used by [ImageItemCodec.transform] for image-corner transforms.
+     */
+    fun applyToPoints(m: FloatArray, points: FloatArray): FloatArray {
+        require(points.size % 2 == 0) { "points length must be even" }
+        val out = FloatArray(points.size)
+        var i = 0
+        while (i < points.size) {
+            val x = points[i]
+            val y = points[i + 1]
+            out[i] = m[0] * x + m[1] * y + m[2]
+            out[i + 1] = m[3] * x + m[4] * y + m[5]
+            i += 2
+        }
+        return out
+    }
+
+    /**
      * Apply [m] to the `(x, y)` of every sample in a packed
      * `[x, y, p, t, …]` buffer and return a new buffer of the same length.
      * Pressure and tilt copy over untouched.
