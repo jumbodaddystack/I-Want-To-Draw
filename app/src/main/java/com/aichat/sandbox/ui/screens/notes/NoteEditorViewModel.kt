@@ -63,10 +63,17 @@ import java.util.UUID
 import javax.inject.Inject
 
 const val NOTE_ID_NEW = "new"
+/** `note/new?source=icon` — seeds icon mode (artboard + grid + AI prompt). */
+const val ENTRY_SOURCE_ICON = "icon"
 private const val DEFAULT_TITLE = "Untitled"
 private const val DEFAULT_BACKGROUND_STYLE = "plain"
 private const val CURRENT_SCHEMA_VERSION = 1
 private const val UNDO_STACK_CAP = 200
+/**
+ * Icon artboard edge in world units. 768 = 24 cells × the 32-unit background
+ * grid spacing, so a "graph" background draws a clean 24×24 icon grid.
+ */
+private const val ICON_ARTBOARD_WORLD = 768f
 
 @HiltViewModel
 class NoteEditorViewModel @Inject constructor(
@@ -78,6 +85,7 @@ class NoteEditorViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val noteExporter: NoteExporter,
     private val noteSvgExporter: NoteSvgExporter,
+    private val noteVectorDrawableExporter: com.aichat.sandbox.data.notes.NoteVectorDrawableExporter,
     private val recentColorsStore: RecentColorsStore,
     private val brushPresets: BrushPresetRepository,
     private val noteImageStore: NoteImageStore,
@@ -467,6 +475,33 @@ class NoteEditorViewModel @Inject constructor(
     ) {
         _frames.value = after
         apply(EditorAction.FrameMutation(description, before, after))
+    }
+
+    /**
+     * Icon mode — mark this note as an icon, switch to a grid background, and
+     * drop a single square artboard frame for the user to draw inside. The
+     * artboard is [ICON_ARTBOARD_WORLD] world units square so it lines up with
+     * the 32-unit background grid (a clean 24×24 icon grid). Seeded directly
+     * into state (no undo entry) since it's the note's initial condition.
+     */
+    private fun seedIconArtboard() {
+        _note.update {
+            it.copy(
+                isIcon = true,
+                backgroundStyle = com.aichat.sandbox.ui.components.notes.BackgroundLayer.STYLE_GRAPH,
+            )
+        }
+        val artboard = NoteFrame(
+            noteId = resolvedNoteId,
+            name = "Artboard",
+            minX = 0f,
+            minY = 0f,
+            maxX = ICON_ARTBOARD_WORLD,
+            maxY = ICON_ARTBOARD_WORLD,
+            ordinal = 0,
+        )
+        _frames.value = listOf(artboard)
+        _currentFrameId.value = artboard.id
     }
 
     /** Returns the world-bounds of the currently-selected frame, or null. */
@@ -922,6 +957,11 @@ class NoteEditorViewModel @Inject constructor(
                 }
                 // Sub-phase 8.1 — frame list comes from its own table.
                 _frames.value = repository.getFrames(routeArg)
+                // Icon mode — preselect the artboard so the VectorDrawable
+                // export uses it as the viewport without a tap first.
+                if (_note.value.isIcon && _currentFrameId.value == null) {
+                    _currentFrameId.value = _frames.value.minByOrNull { it.ordinal }?.id
+                }
                 // Sub-phase 9.1 — if this note belongs to a notebook,
                 // grab the header so the editor can render notebook UI
                 // (page rail, "Add page", pinned page size).
@@ -934,6 +974,7 @@ class NoteEditorViewModel @Inject constructor(
             // Brand-new note: seed a default "Ink" layer so the first stroke
             // has somewhere to land. Layer is persisted at save() time.
             addLayer("Ink")
+            if (entrySource == ENTRY_SOURCE_ICON) seedIconArtboard()
         }
         // Seed the active brush preset once presets stream in.
         viewModelScope.launch {
@@ -1929,6 +1970,7 @@ class NoteEditorViewModel @Inject constructor(
             apiKey = apiKey,
             mode = mode,
             layers = _layers.value,
+            isIcon = _note.value.isIcon,
         )
         try {
             aiService.ask(request).collect { chunk ->
@@ -2139,6 +2181,25 @@ class NoteEditorViewModel @Inject constructor(
         commitTextEdit()
         save()
         return noteSvgExporter.exportSvg(note = _note.value, items = items.toList())
+    }
+
+    /**
+     * Export the drawing as an Android VectorDrawable (`.xml`) at [sizeDp].
+     * Same save-first contract as [shareSvg]. For icon notes the active
+     * artboard frame defines the viewport; otherwise the content bounds do.
+     * Returns the export result (URI + count of skipped, unsupported items).
+     */
+    suspend fun shareVectorXml(
+        sizeDp: Int,
+    ): com.aichat.sandbox.data.notes.NoteVectorDrawableExporter.ExportResult {
+        commitTextEdit()
+        save()
+        return noteVectorDrawableExporter.exportVectorDrawable(
+            note = _note.value,
+            items = items.toList(),
+            sizeDp = sizeDp,
+            frameBounds = currentFrameBounds(),
+        )
     }
 
     /**

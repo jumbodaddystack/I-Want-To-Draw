@@ -17,6 +17,7 @@ import com.aichat.sandbox.data.local.MIGRATION_9_10
 import com.aichat.sandbox.data.local.MIGRATION_10_11
 import com.aichat.sandbox.data.local.MIGRATION_11_12
 import com.aichat.sandbox.data.local.MIGRATION_12_13
+import com.aichat.sandbox.data.local.MIGRATION_13_14
 import com.aichat.sandbox.data.local.NoteAudioDao
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.local.NoteFrameDao
@@ -60,6 +61,7 @@ object AppModule {
             MIGRATION_10_11,
             MIGRATION_11_12,
             MIGRATION_12_13,
+            MIGRATION_13_14,
         ).build()
     }
 

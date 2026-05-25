@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -42,6 +43,7 @@ import java.util.Locale
 fun NotesListScreen(
     onNoteClick: (String) -> Unit,
     onNewNote: () -> Unit,
+    onNewIcon: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     viewModel: NotesListViewModel = hiltViewModel(),
 ) {
@@ -78,6 +80,26 @@ fun NotesListScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
+            Row(
+                modifier = Modifier
+                    .clickable(onClick = onNewIcon)
+                    .padding(end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Draw,
+                    contentDescription = "New icon",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "New icon",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
             IconButton(onClick = onOpenSearch) {
                 Icon(
                     imageVector = Icons.Filled.Search,

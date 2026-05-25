@@ -445,3 +445,14 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_audio_noteId` ON `note_audio` (`noteId`)")
     }
 }
+
+/**
+ * Migration from version 13 to 14:
+ * Icon mode — adds the `isIcon` flag to `notes`. Existing rows default to
+ * `0` (false) so they keep behaving as ordinary notes.
+ */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `notes` ADD COLUMN `isIcon` INTEGER NOT NULL DEFAULT 0")
+    }
+}

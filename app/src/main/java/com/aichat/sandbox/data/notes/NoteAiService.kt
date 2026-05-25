@@ -318,7 +318,8 @@ class NoteAiService @Inject constructor(
         id = SYNTHETIC_CHAT_ID,
         title = "Note Edit",
         model = request.modelId,
-        systemMessage = EditOpsParser.SYSTEM_MESSAGE,
+        systemMessage = if (request.isIcon) EditOpsParser.ICON_SYSTEM_MESSAGE
+        else EditOpsParser.SYSTEM_MESSAGE,
     )
 
     private fun mapEvent(event: StreamEvent): AiChunk = when (event) {

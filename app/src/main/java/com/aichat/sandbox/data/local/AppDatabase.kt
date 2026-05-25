@@ -33,7 +33,7 @@ import com.aichat.sandbox.data.model.Stamp
         Notebook::class,
         NoteAudio::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

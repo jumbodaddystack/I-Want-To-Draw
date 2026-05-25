@@ -32,6 +32,8 @@ data class AskRequest(
     val apiKey: String,
     val mode: AskMode = AskMode.ASK,
     val layers: List<NoteLayer> = emptyList(),
+    /** Icon-mode notes get an icon-design-tuned EDIT system message. */
+    val isIcon: Boolean = false,
 )
 
 /** Top-level dispatch for [NoteAiService] — see [AskRequest.mode]. */

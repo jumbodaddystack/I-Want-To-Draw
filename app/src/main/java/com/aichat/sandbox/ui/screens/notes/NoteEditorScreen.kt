@@ -1,6 +1,7 @@
 package com.aichat.sandbox.ui.screens.notes
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -14,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
@@ -112,6 +114,7 @@ fun NoteEditorScreen(
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
     var pdfDialogVisible by remember { mutableStateOf(false) }
+    var vectorXmlDialogVisible by remember { mutableStateOf(false) }
     var brushSheetOpen by remember { mutableStateOf(false) }
     var saveStampDialogVisible by remember { mutableStateOf(false) }
     var viewportController by remember { mutableStateOf<ViewportController?>(null) }
@@ -314,6 +317,10 @@ fun NoteEditorScreen(
                                         Intent.createChooser(send, "Share note as SVG")
                                     )
                                 }
+                            },
+                            onExportVectorXml = {
+                                menuExpanded = false
+                                vectorXmlDialogVisible = true
                             },
                             onSendToChat = {
                                 menuExpanded = false
@@ -632,6 +639,33 @@ fun NoteEditorScreen(
                 },
             )
         }
+        if (vectorXmlDialogVisible) {
+            ExportVectorXmlDialog(
+                onCancel = { vectorXmlDialogVisible = false },
+                onExport = { sizeDp ->
+                    vectorXmlDialogVisible = false
+                    scope.launch {
+                        val result = viewModel.shareVectorXml(sizeDp)
+                        if (result.skippedCount > 0) {
+                            Toast.makeText(
+                                context,
+                                "${result.skippedCount} text/image item(s) skipped — " +
+                                    "not supported by vector drawables",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/xml"
+                            putExtra(Intent.EXTRA_STREAM, result.uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(
+                            Intent.createChooser(send, "Share icon as XML")
+                        )
+                    }
+                },
+            )
+        }
         // Sub-phase 8.3 — bottom-aligned stamp drawer.
         if (stampDrawerOpen) {
             Box(
@@ -768,6 +802,7 @@ private fun EditorOverflowMenu(
     onSharePng: () -> Unit,
     onSharePdf: () -> Unit,
     onShareSvg: () -> Unit,
+    onExportVectorXml: () -> Unit,
     onSendToChat: () -> Unit,
     onExportFramePng: () -> Unit,
     onExportFrameSvg: () -> Unit,
@@ -829,6 +864,17 @@ private fun EditorOverflowMenu(
                 )
             },
             onClick = onShareSvg,
+        )
+        // Android VectorDrawable XML — imports straight into res/drawable/.
+        DropdownMenuItem(
+            text = { Text("Export as Android XML…") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Filled.Android,
+                    contentDescription = null,
+                )
+            },
+            onClick = onExportVectorXml,
         )
         // Sub-phase 4.3: in-app picker over existing chats. PNG render +
         // OCR snippet handover is done via [PendingDraftStore]; the user

@@ -308,4 +308,30 @@ object EditOpsParser {
             "- Do not target items on locked or hidden layers.\n" +
             "- If you can't fulfil the request, return an empty ops array and explain " +
             "in `summary`. Never reply outside the fenced block."
+
+    /**
+     * Icon-mode variant of [SYSTEM_MESSAGE]. Same `edit-ops` schema and rules,
+     * but guidance tuned for designing a clean vector icon on a square
+     * artboard. Used when [AskRequest.isIcon] is true.
+     */
+    const val ICON_SYSTEM_MESSAGE: String =
+        "You are an assistant that helps the user turn a rough sketch into a " +
+            "clean vector icon. You receive the drawing as both an image and a " +
+            "JSON description of every item by ID. The drawing sits on a square " +
+            "artboard; keep all geometry inside it and aim for a balanced, " +
+            "centred composition. Prefer simple, crisp geometry — straighten " +
+            "wobbly strokes into clean shapes with `replace_with_shape`, align " +
+            "edges, and keep the icon monochrome unless the user asks for " +
+            "colour.\n\n" +
+            "Reply with ONLY a fenced ```edit-ops block matching this schema:\n\n" +
+            "{ \"schema\": 1, \"summary\": \"<one short sentence>\",\n" +
+            "  \"ops\": [ /* operations referencing items by ID */ ] }\n\n" +
+            "Rules:\n" +
+            "- Modify only items that appear in the provided JSON.\n" +
+            "- Do not invent new strokes from scratch. To turn a freehand stroke " +
+            "into a clean shape, use `replace_with_shape` referencing the " +
+            "original ID.\n" +
+            "- Do not target items on locked or hidden layers.\n" +
+            "- If you can't fulfil the request, return an empty ops array and " +
+            "explain in `summary`. Never reply outside the fenced block."
 }

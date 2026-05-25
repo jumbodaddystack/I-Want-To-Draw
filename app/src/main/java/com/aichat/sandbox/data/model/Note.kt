@@ -28,4 +28,8 @@ data class Note(
     // The notes-list excludes rows where this is non-null; the notebooks
     // list owns presentation for those.
     val notebookId: String? = null,
+    // Icon mode — true for notes created as vector icons. Drives the square
+    // artboard seed, the icon-tuned AI edit prompt, and the VectorDrawable
+    // export defaults.
+    val isIcon: Boolean = false,
 )

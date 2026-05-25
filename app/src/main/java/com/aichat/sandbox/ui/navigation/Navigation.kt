@@ -26,6 +26,7 @@ import com.aichat.sandbox.ui.screens.chat.ChatScreen
 import com.aichat.sandbox.ui.screens.chatlist.ChatListScreen
 import com.aichat.sandbox.ui.screens.images.ImagesScreen
 import com.aichat.sandbox.ui.screens.notebooks.NotebooksListScreen
+import com.aichat.sandbox.ui.screens.notes.ENTRY_SOURCE_ICON
 import com.aichat.sandbox.ui.screens.notes.NOTE_ID_NEW
 import com.aichat.sandbox.ui.screens.notes.NoteEditorScreen
 import com.aichat.sandbox.ui.screens.notes.NoteSearchScreen
@@ -170,6 +171,9 @@ fun AppNavigation(
                     },
                     onNewNote = {
                         navController.navigate("note/$NOTE_ID_NEW")
+                    },
+                    onNewIcon = {
+                        navController.navigate("note/$NOTE_ID_NEW?source=$ENTRY_SOURCE_ICON")
                     },
                     onOpenSearch = {
                         navController.navigate("notes_search")
