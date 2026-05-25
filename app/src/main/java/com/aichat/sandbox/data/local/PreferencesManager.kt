@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import com.aichat.sandbox.data.model.ApiProvider
 import com.aichat.sandbox.data.model.ChatSettings
@@ -18,6 +19,9 @@ import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
+/** Base URL + API key resolved for a given model's provider. */
+data class ProviderCredentials(val baseUrl: String, val apiKey: String)
+
 @Singleton
 class PreferencesManager @Inject constructor(
     @ApplicationContext private val context: Context
@@ -27,8 +31,17 @@ class PreferencesManager @Inject constructor(
     companion object {
         private const val TAG = "PreferencesManager"
 
+        // Legacy single-provider credentials. Kept for backward-compat: the
+        // OpenAI slot falls back to these when its per-provider value is unset.
         val API_KEY = stringPreferencesKey("api_key")
         val API_BASE_URL = stringPreferencesKey("api_base_url")
+        // Per-provider credentials (key + editable base URL each).
+        val OPENAI_API_KEY = stringPreferencesKey("openai_api_key")
+        val ANTHROPIC_API_KEY = stringPreferencesKey("anthropic_api_key")
+        val GOOGLE_API_KEY = stringPreferencesKey("google_api_key")
+        val OPENAI_BASE_URL = stringPreferencesKey("openai_base_url")
+        val ANTHROPIC_BASE_URL = stringPreferencesKey("anthropic_base_url")
+        val GOOGLE_BASE_URL = stringPreferencesKey("google_base_url")
         val DEFAULT_MODEL = stringPreferencesKey("default_model")
         val DEFAULT_TEMPERATURE = floatPreferencesKey("default_temperature")
         val DEFAULT_TOP_P = floatPreferencesKey("default_top_p")
@@ -59,6 +72,22 @@ class PreferencesManager @Inject constructor(
 
     val apiKey: Flow<String> = dataStore.data.map { it[API_KEY] ?: "" }
     val apiBaseUrl: Flow<String> = dataStore.data.map { it[API_BASE_URL] ?: ChatSettings.Defaults.API_BASE_URL }
+
+    // Per-provider credential flows for the Settings UI. The OpenAI slot
+    // falls back to the legacy single-provider values so existing installs
+    // keep working without a migration step.
+    val openAiApiKey: Flow<String> = dataStore.data.map { it[OPENAI_API_KEY] ?: it[API_KEY] ?: "" }
+    val anthropicApiKey: Flow<String> = dataStore.data.map { it[ANTHROPIC_API_KEY] ?: "" }
+    val googleApiKey: Flow<String> = dataStore.data.map { it[GOOGLE_API_KEY] ?: "" }
+    val openAiBaseUrl: Flow<String> = dataStore.data.map {
+        it[OPENAI_BASE_URL] ?: it[API_BASE_URL] ?: ApiProvider.OpenAI.baseUrl
+    }
+    val anthropicBaseUrl: Flow<String> = dataStore.data.map {
+        it[ANTHROPIC_BASE_URL] ?: ApiProvider.Anthropic.baseUrl
+    }
+    val googleBaseUrl: Flow<String> = dataStore.data.map {
+        it[GOOGLE_BASE_URL] ?: ApiProvider.Google.baseUrl
+    }
     val defaultModel: Flow<String> = dataStore.data.map { prefs ->
         // Coerce stale persisted defaults (e.g. "gpt-4.1") onto a model
         // that still exists in the registry, plus any user-added custom
@@ -153,6 +182,67 @@ class PreferencesManager @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save API base URL", e)
             false
+        }
+    }
+
+    suspend fun setProviderApiKey(providerName: String, key: String) {
+        val prefKey = apiKeyPrefFor(providerName)
+        try {
+            dataStore.edit { it[prefKey] = key }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save API key for $providerName", e)
+        }
+    }
+
+    suspend fun setProviderBaseUrl(providerName: String, url: String): Boolean {
+        if (!isValidApiBaseUrl(url)) return false
+        val prefKey = baseUrlPrefFor(providerName)
+        return try {
+            dataStore.edit { it[prefKey] = url }
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save base URL for $providerName", e)
+            false
+        }
+    }
+
+    /**
+     * Resolves the base URL + API key to use for [modelId] by mapping the
+     * model to its provider ([ApiProvider.providerNameFor]) and reading that
+     * provider's stored credentials. This is the single source of truth that
+     * lets all three providers be used interchangeably from the model picker.
+     */
+    suspend fun credentialsFor(modelId: String): ProviderCredentials {
+        val prefs = dataStore.data.first()
+        val provider = ApiProvider.providerNameFor(modelId, readCustomModelsMap(prefs))
+        val apiKey = prefs[apiKeyPrefFor(provider)]
+            ?: (if (provider == ApiProvider.OpenAI.name) prefs[API_KEY] else null)
+            ?: ""
+        val baseUrl = prefs[baseUrlPrefFor(provider)]
+            ?: (if (provider == ApiProvider.OpenAI.name) prefs[API_BASE_URL] else null)
+            ?: ApiProvider.defaultBaseUrlFor(provider)
+        return ProviderCredentials(baseUrl = baseUrl, apiKey = apiKey)
+    }
+
+    private fun apiKeyPrefFor(providerName: String) = when (providerName) {
+        ApiProvider.Anthropic.name -> ANTHROPIC_API_KEY
+        ApiProvider.Google.name -> GOOGLE_API_KEY
+        else -> OPENAI_API_KEY
+    }
+
+    private fun baseUrlPrefFor(providerName: String) = when (providerName) {
+        ApiProvider.Anthropic.name -> ANTHROPIC_BASE_URL
+        ApiProvider.Google.name -> GOOGLE_BASE_URL
+        else -> OPENAI_BASE_URL
+    }
+
+    private fun readCustomModelsMap(prefs: Preferences): Map<String, List<String>> {
+        val json = prefs[CUSTOM_MODELS] ?: return emptyMap()
+        return try {
+            val type = object : TypeToken<Map<String, List<String>>>() {}.type
+            gson.fromJson<Map<String, List<String>>>(json, type) ?: emptyMap()
+        } catch (e: Exception) {
+            emptyMap()
         }
     }
 

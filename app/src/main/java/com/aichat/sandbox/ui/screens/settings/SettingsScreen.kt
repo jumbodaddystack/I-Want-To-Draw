@@ -16,6 +16,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.aichat.sandbox.data.model.ApiProvider
 import com.aichat.sandbox.data.model.ChatSettings
 import com.aichat.sandbox.ui.components.ModelSelector
 import com.aichat.sandbox.ui.components.SettingsSlider
@@ -26,7 +27,6 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var showApiKey by remember { mutableStateOf(false) }
     val allModels = viewModel.getAllModels()
     val customModels = viewModel.getCustomModelsFlat()
 
@@ -45,7 +45,9 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 24.dp)
         )
 
-        // API Configuration
+        // API Configuration — one key + base URL per provider. The provider
+        // is auto-selected from the chosen model, so all three can be used
+        // interchangeably from the model picker.
         Text(
             text = "API Configuration",
             style = MaterialTheme.typography.titleMedium,
@@ -54,36 +56,35 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        OutlinedTextField(
-            value = uiState.apiKey,
-            onValueChange = { viewModel.setApiKey(it) },
-            label = { Text("API Key") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            visualTransformation = if (showApiKey) VisualTransformation.None
-                                   else PasswordVisualTransformation(),
-            trailingIcon = {
-                IconButton(onClick = { showApiKey = !showApiKey }) {
-                    Icon(
-                        if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = "Toggle visibility"
-                    )
-                }
-            }
+        ProviderCredentialsSection(
+            providerName = ApiProvider.OpenAI.name,
+            apiKey = uiState.openAiApiKey,
+            onApiKeyChange = { viewModel.setProviderApiKey(ApiProvider.OpenAI.name, it) },
+            baseUrl = uiState.openAiBaseUrl,
+            onBaseUrlChange = { viewModel.setProviderBaseUrl(ApiProvider.OpenAI.name, it) },
+            baseUrlError = uiState.openAiBaseUrlError,
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        OutlinedTextField(
-            value = uiState.apiBaseUrl,
-            onValueChange = { viewModel.setApiBaseUrl(it) },
-            label = { Text("API Base URL") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            isError = uiState.apiBaseUrlError != null,
-            supportingText = uiState.apiBaseUrlError?.let { error ->
-                { Text(error, color = MaterialTheme.colorScheme.error) }
-            }
+        ProviderCredentialsSection(
+            providerName = ApiProvider.Anthropic.name,
+            apiKey = uiState.anthropicApiKey,
+            onApiKeyChange = { viewModel.setProviderApiKey(ApiProvider.Anthropic.name, it) },
+            baseUrl = uiState.anthropicBaseUrl,
+            onBaseUrlChange = { viewModel.setProviderBaseUrl(ApiProvider.Anthropic.name, it) },
+            baseUrlError = uiState.anthropicBaseUrlError,
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        ProviderCredentialsSection(
+            providerName = ApiProvider.Google.name,
+            apiKey = uiState.googleApiKey,
+            onApiKeyChange = { viewModel.setProviderApiKey(ApiProvider.Google.name, it) },
+            baseUrl = uiState.googleBaseUrl,
+            onBaseUrlChange = { viewModel.setProviderBaseUrl(ApiProvider.Google.name, it) },
+            baseUrlError = uiState.googleBaseUrlError,
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -201,5 +202,57 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(32.dp))
     }
+}
+
+@Composable
+private fun ProviderCredentialsSection(
+    providerName: String,
+    apiKey: String,
+    onApiKeyChange: (String) -> Unit,
+    baseUrl: String,
+    onBaseUrlChange: (String) -> Unit,
+    baseUrlError: String?,
+) {
+    var showApiKey by remember { mutableStateOf(false) }
+
+    Text(
+        text = providerName,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 8.dp)
+    )
+
+    OutlinedTextField(
+        value = apiKey,
+        onValueChange = onApiKeyChange,
+        label = { Text("$providerName API Key") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        visualTransformation = if (showApiKey) VisualTransformation.None
+                               else PasswordVisualTransformation(),
+        trailingIcon = {
+            IconButton(onClick = { showApiKey = !showApiKey }) {
+                Icon(
+                    if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    contentDescription = "Toggle visibility"
+                )
+            }
+        }
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    OutlinedTextField(
+        value = baseUrl,
+        onValueChange = onBaseUrlChange,
+        label = { Text("Base URL") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        isError = baseUrlError != null,
+        supportingText = baseUrlError?.let { error ->
+            { Text(error, color = MaterialTheme.colorScheme.error) }
+        }
+    )
 }
 

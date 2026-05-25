@@ -75,7 +75,7 @@ class OpenAiAdapter @Inject constructor() : ProviderAdapter {
         return try {
             val api = buildApi(baseUrl, apiKey)
             val apiMessages = buildApiMessages(chat, messages)
-            val request = ChatCompletionRequest(
+            val request = buildChatRequest(
                 model = chat.model,
                 messages = apiMessages,
                 temperature = chat.temperature,
@@ -84,8 +84,7 @@ class OpenAiAdapter @Inject constructor() : ProviderAdapter {
                 presencePenalty = chat.presencePenalty,
                 frequencyPenalty = chat.frequencyPenalty,
                 stream = false,
-                tools = tools?.ifEmpty { null },
-                toolChoice = if (!tools.isNullOrEmpty()) "auto" else null,
+                tools = tools,
             )
             val response = retryWithBackoff(
                 policy = retryPolicy,
@@ -127,7 +126,7 @@ class OpenAiAdapter @Inject constructor() : ProviderAdapter {
                 extraImageOnLastUserTurn = extraImageOnLastUserTurn,
                 extraSystemSuffix = extraSystemSuffix,
             )
-            val request = ChatCompletionRequest(
+            val request = buildChatRequest(
                 model = chat.model,
                 messages = apiMessages,
                 temperature = chat.temperature,
@@ -136,8 +135,7 @@ class OpenAiAdapter @Inject constructor() : ProviderAdapter {
                 presencePenalty = chat.presencePenalty,
                 frequencyPenalty = chat.frequencyPenalty,
                 stream = true,
-                tools = tools?.ifEmpty { null },
-                toolChoice = if (!tools.isNullOrEmpty()) "auto" else null,
+                tools = tools,
             )
             val response = retryWithBackoff(
                 policy = retryPolicy,
@@ -264,11 +262,17 @@ class OpenAiAdapter @Inject constructor() : ProviderAdapter {
                 ApiMessage(role = "user", content = userMessage),
                 ApiMessage(role = "assistant", content = assistantMessage.take(500)),
             )
-            val request = ChatCompletionRequest(
+            val request = buildChatRequest(
                 model = model,
                 messages = messages,
                 temperature = 0.7f,
-                maxTokens = 20,
+                topP = null,
+                // Reasoning models spend part of this budget on hidden
+                // reasoning tokens, so a 20-token cap can yield an empty
+                // title. 256 leaves headroom for a short title either way.
+                maxTokens = 256,
+                presencePenalty = null,
+                frequencyPenalty = null,
                 stream = false,
             )
             val response = api.createChatCompletion(request)
@@ -279,6 +283,45 @@ class OpenAiAdapter @Inject constructor() : ProviderAdapter {
             Log.w("OpenAiAdapter", "Failed to generate title", e)
             null
         }
+    }
+
+    /**
+     * Builds a [ChatCompletionRequest] shaped for the target model. GPT-5 /
+     * o-series reasoning models reject `max_tokens` (need
+     * `max_completion_tokens`) and reject custom sampling params
+     * (temperature / top_p / penalties), so those are dropped or remapped
+     * based on [ModelCapabilities]. Older models and OpenAI-compatible
+     * proxies keep the legacy `max_tokens` + full sampling params.
+     */
+    private fun buildChatRequest(
+        model: String,
+        messages: List<ApiMessage>,
+        temperature: Float?,
+        topP: Float?,
+        maxTokens: Int?,
+        presencePenalty: Float?,
+        frequencyPenalty: Float?,
+        stream: Boolean,
+        tools: List<ToolDefinition>? = null,
+    ): ChatCompletionRequest {
+        val caps = ModelCapabilities.of(model)
+        val sampling = caps.supportsSamplingParams
+        // GPT-5 caps total output (incl. reasoning tokens) at 128k; clamp to
+        // avoid a "too large" follow-on error, mirroring the Anthropic adapter.
+        val budget = maxTokens?.coerceIn(1, 128_000)
+        return ChatCompletionRequest(
+            model = model,
+            messages = messages,
+            temperature = if (sampling) temperature else null,
+            topP = if (sampling) topP else null,
+            maxTokens = if (caps.usesMaxCompletionTokens) null else budget,
+            maxCompletionTokens = if (caps.usesMaxCompletionTokens) budget else null,
+            presencePenalty = if (sampling) presencePenalty else null,
+            frequencyPenalty = if (sampling) frequencyPenalty else null,
+            stream = stream,
+            tools = tools?.ifEmpty { null },
+            toolChoice = if (!tools.isNullOrEmpty()) "auto" else null,
+        )
     }
 
     private fun buildApiMessages(

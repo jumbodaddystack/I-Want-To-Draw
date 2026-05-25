@@ -10,18 +10,30 @@ object ModelCapabilities {
 
     data class Caps(
         val supportsVision: Boolean,
+        // GPT-5 / o-series ("reasoning") models reject `max_tokens` on the
+        // chat-completions endpoint and require `max_completion_tokens`.
+        val usesMaxCompletionTokens: Boolean = false,
+        // The same models only accept the default temperature and reject
+        // top_p / presence_penalty / frequency_penalty.
+        val supportsSamplingParams: Boolean = true,
         val notes: String = "",
     )
 
+    private val reasoning = Caps(
+        supportsVision = true,
+        usesMaxCompletionTokens = true,
+        supportsSamplingParams = false,
+    )
+
     private val table: Map<String, Caps> = mapOf(
-        // OpenAI GPT-5 series — all vision-capable.
-        "gpt-5.5" to Caps(true),
-        "gpt-5.4" to Caps(true),
-        "gpt-5.4-pro" to Caps(true),
-        "gpt-5.4-mini" to Caps(true),
-        "gpt-5.4-nano" to Caps(true),
-        "gpt-5.2" to Caps(true),
-        "gpt-5.1" to Caps(true),
+        // OpenAI GPT-5 series — all vision-capable, all reasoning models.
+        "gpt-5.5" to reasoning,
+        "gpt-5.4" to reasoning,
+        "gpt-5.4-pro" to reasoning,
+        "gpt-5.4-mini" to reasoning,
+        "gpt-5.4-nano" to reasoning,
+        "gpt-5.2" to reasoning,
+        "gpt-5.1" to reasoning,
 
         // Anthropic Claude 4.x — all vision-capable.
         "claude-opus-4-7" to Caps(true),
@@ -48,7 +60,15 @@ object ModelCapabilities {
             l.contains("claude") ||
             l.contains("gemini") ||
             l.contains("multimodal")
-        return Caps(vision, notes = "inferred")
+        // OpenAI reasoning families use the newer parameter dialect.
+        val reasoningModel = l.contains("gpt-5") ||
+            Regex("""(^|[^a-z])o[1-9]([^a-z]|$)""").containsMatchIn(l)
+        return Caps(
+            supportsVision = vision,
+            usesMaxCompletionTokens = reasoningModel,
+            supportsSamplingParams = !reasoningModel,
+            notes = "inferred",
+        )
     }
 }
 

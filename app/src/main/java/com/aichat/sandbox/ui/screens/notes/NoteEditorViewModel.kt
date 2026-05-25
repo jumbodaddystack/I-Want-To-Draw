@@ -1956,18 +1956,17 @@ class NoteEditorViewModel @Inject constructor(
         mode: AskMode = AskMode.ASK,
         editDescription: String = "AI edit",
     ) {
-        val baseUrl = preferencesManager.apiBaseUrl.first()
-        val apiKey = preferencesManager.apiKey.first()
         val modelId = _aiSheetState.value.activeModelId
             .ifEmpty { preferencesManager.defaultModel.first() }
+        val creds = preferencesManager.credentialsFor(modelId)
         val request = AskRequest(
             note = _note.value,
             allItems = items.toList(),
             selection = selection,
             userPrompt = prompt,
             modelId = modelId,
-            baseUrl = baseUrl,
-            apiKey = apiKey,
+            baseUrl = creds.baseUrl,
+            apiKey = creds.apiKey,
             mode = mode,
             layers = _layers.value,
             isIcon = _note.value.isIcon,

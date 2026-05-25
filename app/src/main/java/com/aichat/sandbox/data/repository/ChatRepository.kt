@@ -90,9 +90,8 @@ class ChatRepository @Inject constructor(
         userMessage: String,
         assistantMessage: String
     ): String? {
-        val apiKey = preferencesManager.apiKey.first()
-        val baseUrl = preferencesManager.apiBaseUrl.first()
-        return apiClient.generateTitle(baseUrl, apiKey, model, userMessage, assistantMessage)
+        val creds = preferencesManager.credentialsFor(model)
+        return apiClient.generateTitle(creds.baseUrl, creds.apiKey, model, userMessage, assistantMessage)
     }
 
     suspend fun isAutoGenerateTitlesEnabled(): Boolean =
@@ -112,9 +111,8 @@ class ChatRepository @Inject constructor(
         onRetryAttempt: ((Int) -> Unit)? = null,
         tools: List<com.aichat.sandbox.data.model.ToolDefinition>? = null
     ): ApiResult<com.aichat.sandbox.data.model.ChatCompletionResponse> {
-        val apiKey = preferencesManager.apiKey.first()
-        val baseUrl = preferencesManager.apiBaseUrl.first()
-        return apiClient.sendMessage(baseUrl, apiKey, chat, messages, onRetryAttempt, tools)
+        val creds = preferencesManager.credentialsFor(chat.model)
+        return apiClient.sendMessage(creds.baseUrl, creds.apiKey, chat, messages, onRetryAttempt, tools)
     }
 
     fun sendMessageStream(
@@ -129,11 +127,10 @@ class ChatRepository @Inject constructor(
         extraSystemSuffix: String? = null,
     ): Flow<StreamEvent> {
         return kotlinx.coroutines.flow.flow {
-            val apiKey = preferencesManager.apiKey.first()
-            val baseUrl = preferencesManager.apiBaseUrl.first()
+            val creds = preferencesManager.credentialsFor(chat.model)
             apiClient.sendMessageStream(
-                baseUrl = baseUrl,
-                apiKey = apiKey,
+                baseUrl = creds.baseUrl,
+                apiKey = creds.apiKey,
                 chat = chat,
                 messages = messages,
                 onRetryAttempt = onRetryAttempt,

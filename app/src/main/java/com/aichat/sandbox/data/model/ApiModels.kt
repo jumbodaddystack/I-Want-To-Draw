@@ -27,6 +27,8 @@ data class ChatCompletionRequest(
     val topP: Float? = null,
     @SerializedName("max_tokens")
     val maxTokens: Int? = null,
+    @SerializedName("max_completion_tokens")
+    val maxCompletionTokens: Int? = null,
     @SerializedName("presence_penalty")
     val presencePenalty: Float? = null,
     @SerializedName("frequency_penalty")

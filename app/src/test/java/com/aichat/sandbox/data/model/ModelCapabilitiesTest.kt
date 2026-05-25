@@ -18,6 +18,37 @@ class ModelCapabilitiesTest {
     }
 
     @Test
+    fun gpt5ModelsUseReasoningParameterDialect() {
+        for (id in listOf("gpt-5.5", "gpt-5.4", "gpt-5.4-pro", "gpt-5.2", "gpt-5.1")) {
+            val caps = ModelCapabilities.of(id)
+            assertTrue("$id should use max_completion_tokens", caps.usesMaxCompletionTokens)
+            assertFalse("$id should not allow sampling params", caps.supportsSamplingParams)
+        }
+    }
+
+    @Test
+    fun unknownReasoningIdsInferNewParameterDialect() {
+        val futureGpt5 = ModelCapabilities.of("gpt-5.9-turbo")
+        assertTrue(futureGpt5.usesMaxCompletionTokens)
+        assertFalse(futureGpt5.supportsSamplingParams)
+        assertEquals("inferred", futureGpt5.notes)
+
+        val oSeries = ModelCapabilities.of("o3-mini")
+        assertTrue(oSeries.usesMaxCompletionTokens)
+        assertFalse(oSeries.supportsSamplingParams)
+    }
+
+    @Test
+    fun nonReasoningModelsKeepLegacyParameterDialect() {
+        // Older OpenAI + non-OpenAI models keep max_tokens + sampling params.
+        for (id in listOf("gpt-4o", "claude-opus-4-7", "gemini-3.1-pro-preview", "acme-llama-70b")) {
+            val caps = ModelCapabilities.of(id)
+            assertFalse("$id should not use max_completion_tokens", caps.usesMaxCompletionTokens)
+            assertTrue("$id should allow sampling params", caps.supportsSamplingParams)
+        }
+    }
+
+    @Test
     fun knownAnthropicModelsHitTable() {
         assertTrue(ModelCapabilities.of("claude-opus-4-7").supportsVision)
         assertTrue(ModelCapabilities.of("claude-sonnet-4-6").supportsVision)

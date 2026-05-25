@@ -11,9 +11,15 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class SettingsUiState(
-    val apiKey: String = "",
-    val apiBaseUrl: String = ChatSettings.Defaults.API_BASE_URL,
-    val apiBaseUrlError: String? = null,
+    val openAiApiKey: String = "",
+    val anthropicApiKey: String = "",
+    val googleApiKey: String = "",
+    val openAiBaseUrl: String = ApiProvider.OpenAI.baseUrl,
+    val anthropicBaseUrl: String = ApiProvider.Anthropic.baseUrl,
+    val googleBaseUrl: String = ApiProvider.Google.baseUrl,
+    val openAiBaseUrlError: String? = null,
+    val anthropicBaseUrlError: String? = null,
+    val googleBaseUrlError: String? = null,
     val defaultModel: String = ChatSettings.Defaults.MODEL,
     val defaultTemperature: Float = ChatSettings.Defaults.TEMPERATURE,
     val defaultTopP: Float = ChatSettings.Defaults.TOP_P,
@@ -35,19 +41,45 @@ class SettingsViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             combine(
-                preferencesManager.apiKey,
-                preferencesManager.apiBaseUrl,
                 preferencesManager.defaultModel,
                 preferencesManager.defaultTemperature,
                 preferencesManager.defaultTopP
-            ) { apiKey, baseUrl, model, temp, topP ->
+            ) { model, temp, topP ->
                 _uiState.update {
                     it.copy(
-                        apiKey = apiKey,
-                        apiBaseUrl = baseUrl,
                         defaultModel = model,
                         defaultTemperature = temp,
                         defaultTopP = topP
+                    )
+                }
+            }.collect()
+        }
+        viewModelScope.launch {
+            combine(
+                preferencesManager.openAiApiKey,
+                preferencesManager.anthropicApiKey,
+                preferencesManager.googleApiKey
+            ) { openAi, anthropic, google ->
+                _uiState.update {
+                    it.copy(
+                        openAiApiKey = openAi,
+                        anthropicApiKey = anthropic,
+                        googleApiKey = google
+                    )
+                }
+            }.collect()
+        }
+        viewModelScope.launch {
+            combine(
+                preferencesManager.openAiBaseUrl,
+                preferencesManager.anthropicBaseUrl,
+                preferencesManager.googleBaseUrl
+            ) { openAi, anthropic, google ->
+                _uiState.update {
+                    it.copy(
+                        openAiBaseUrl = openAi,
+                        anthropicBaseUrl = anthropic,
+                        googleBaseUrl = google
                     )
                 }
             }.collect()
@@ -79,17 +111,39 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setApiKey(key: String) {
-        viewModelScope.launch { preferencesManager.setApiKey(key) }
+    fun setProviderApiKey(providerName: String, key: String) {
+        viewModelScope.launch { preferencesManager.setProviderApiKey(providerName, key) }
     }
 
-    fun setApiBaseUrl(url: String) {
-        _uiState.update { it.copy(apiBaseUrl = url) }
+    fun setProviderBaseUrl(providerName: String, url: String) {
+        // Optimistic local update so the field stays editable, plus inline
+        // validation; only valid URLs are persisted.
+        updateBaseUrlField(providerName, url)
+        val error = if (url.isEmpty() || PreferencesManager.isValidApiBaseUrl(url)) null
+        else "URL must be HTTPS, valid, and end with /"
+        updateBaseUrlError(providerName, error)
         if (PreferencesManager.isValidApiBaseUrl(url)) {
-            _uiState.update { it.copy(apiBaseUrlError = null) }
-            viewModelScope.launch { preferencesManager.setApiBaseUrl(url) }
-        } else if (url.isNotEmpty()) {
-            _uiState.update { it.copy(apiBaseUrlError = "URL must be HTTPS, valid, and end with /") }
+            viewModelScope.launch { preferencesManager.setProviderBaseUrl(providerName, url) }
+        }
+    }
+
+    private fun updateBaseUrlField(providerName: String, url: String) {
+        _uiState.update {
+            when (providerName) {
+                ApiProvider.Anthropic.name -> it.copy(anthropicBaseUrl = url)
+                ApiProvider.Google.name -> it.copy(googleBaseUrl = url)
+                else -> it.copy(openAiBaseUrl = url)
+            }
+        }
+    }
+
+    private fun updateBaseUrlError(providerName: String, error: String?) {
+        _uiState.update {
+            when (providerName) {
+                ApiProvider.Anthropic.name -> it.copy(anthropicBaseUrlError = error)
+                ApiProvider.Google.name -> it.copy(googleBaseUrlError = error)
+                else -> it.copy(openAiBaseUrlError = error)
+            }
         }
     }
 
@@ -121,24 +175,17 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { preferencesManager.setDarkMode(enabled) }
     }
 
+    // Custom models are stored under the OpenAI slot, which is also the
+    // fallback adapter/credentials. Resolution by model id still works for
+    // any custom model an existing install saved under another provider.
     fun addCustomModel(model: String) {
-        // Determine provider from the current base URL
-        val provider = detectProvider(uiState.value.apiBaseUrl)
-        viewModelScope.launch { preferencesManager.addCustomModel(provider, model) }
+        viewModelScope.launch { preferencesManager.addCustomModel(ApiProvider.OpenAI.name, model) }
     }
 
     fun removeCustomModel(model: String) {
-        val provider = detectProvider(uiState.value.apiBaseUrl)
+        val provider = uiState.value.customModels.entries
+            .firstOrNull { model in it.value }?.key ?: ApiProvider.OpenAI.name
         viewModelScope.launch { preferencesManager.removeCustomModel(provider, model) }
-    }
-
-    private fun detectProvider(baseUrl: String): String {
-        return when {
-            baseUrl.contains("openai.com") -> "OpenAI"
-            baseUrl.contains("anthropic.com") -> "Anthropic"
-            baseUrl.contains("googleapis.com") || baseUrl.contains("google") -> "Google"
-            else -> "Custom"
-        }
     }
 
     fun getAllModels(): List<String> {

@@ -69,5 +69,24 @@ data class ApiProvider(
         // to coerce stale persisted defaults onto a model that still
         // exists in the registry.
         val allKnownModels: Set<String> = defaults.flatMap { it.models }.toSet()
+
+        /**
+         * Resolves which provider owns [modelId]. Checks the built-in
+         * registry first, then user-added [customModels] (provider name ->
+         * model ids). Falls back to OpenAI, which is also ApiClient's
+         * fallback adapter for any unrecognized / compatible endpoint.
+         */
+        fun providerNameFor(
+            modelId: String,
+            customModels: Map<String, List<String>> = emptyMap(),
+        ): String {
+            defaults.firstOrNull { modelId in it.models }?.let { return it.name }
+            customModels.entries.firstOrNull { modelId in it.value }?.let { return it.key }
+            return OpenAI.name
+        }
+
+        /** Canonical base URL for a provider name, defaulting to OpenAI's. */
+        fun defaultBaseUrlFor(providerName: String): String =
+            defaults.firstOrNull { it.name == providerName }?.baseUrl ?: OpenAI.baseUrl
     }
 }
