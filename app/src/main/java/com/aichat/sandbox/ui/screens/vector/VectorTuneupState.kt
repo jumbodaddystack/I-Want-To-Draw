@@ -1,6 +1,9 @@
 package com.aichat.sandbox.ui.screens.vector
 
 import com.aichat.sandbox.data.vector.VectorOptimizeOptions
+import com.aichat.sandbox.data.vector.VectorPathCatalogEntry
+import com.aichat.sandbox.data.vector.VectorQualityScores
+import com.aichat.sandbox.data.vector.VectorVersionDiff
 
 /**
  * Immutable UI state for the Vector Art Tune-Up workspace.
@@ -30,6 +33,11 @@ import com.aichat.sandbox.data.vector.VectorOptimizeOptions
  * @property isRedrawRunning True while a semantic redraw request is streaming.
  * @property redrawStatusMessage Friendly status/result line for the redraw panel.
  * @property lastRedrawSummary The scene styleIntent from the most recent redraw, if any.
+ * @property selectedPathIds Path ids the user has selected for manual editing.
+ * @property pathCatalog Per-path catalog for the analyzed source version (Edit tab).
+ * @property qualityScores Deterministic quality scores for the analyzed source version.
+ * @property selectedDiff Structural diff of original vs the analyzed source version.
+ * @property manualEditStatusMessage Friendly status line for the manual-edit controls.
  */
 data class VectorTuneupUiState(
     val inputXml: String = "",
@@ -53,6 +61,11 @@ data class VectorTuneupUiState(
     val isRedrawRunning: Boolean = false,
     val redrawStatusMessage: String? = null,
     val lastRedrawSummary: String? = null,
+    val selectedPathIds: Set<String> = emptySet(),
+    val pathCatalog: List<VectorPathCatalogEntry> = emptyList(),
+    val qualityScores: VectorQualityScores? = null,
+    val selectedDiff: VectorVersionDiff? = null,
+    val manualEditStatusMessage: String? = null,
 ) {
     /** True once the input has been parsed into an [original] version. */
     val hasOriginal: Boolean get() = original != null

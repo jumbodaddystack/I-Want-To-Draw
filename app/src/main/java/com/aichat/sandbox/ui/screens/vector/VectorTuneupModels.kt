@@ -19,6 +19,7 @@ enum class VectorTuneupTab {
     INPUT,
     DIAGNOSTICS,
     COMPARE,
+    EDIT,
     HISTORY,
     EXPORT,
 }
