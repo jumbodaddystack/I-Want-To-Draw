@@ -1,6 +1,12 @@
 package com.aichat.sandbox.ui.screens.vector
 
+import com.aichat.sandbox.data.vector.AndroidVectorDrawableParser
+import com.aichat.sandbox.data.vector.VectorEditPlan
+import com.aichat.sandbox.data.vector.VectorEditPlanApplier
+import com.aichat.sandbox.data.vector.VectorEditOperation
 import com.aichat.sandbox.data.vector.VectorOptimizeOptions
+import com.aichat.sandbox.data.vector.VectorPathTarget
+import com.aichat.sandbox.data.vector.VectorTuneupAiResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -118,6 +124,67 @@ class VectorTuneupViewModelTest {
         assertNull(state.original)
         assertNull(state.candidate)
         assertEquals("", state.inputXml)
+    }
+
+    // ---- Phase 4: AI tune-up reducer logic ----
+
+    private fun aiResult(): VectorTuneupAiResult {
+        val document = AndroidVectorDrawableParser.parse(validXml)
+        val plan = VectorEditPlan(
+            schema = 1,
+            mode = VectorEditPlan.Mode.TUNE_UP,
+            summary = "Recolored strokes.",
+            operations = listOf(
+                VectorEditOperation.RecolorPaths(
+                    target = VectorPathTarget(all = true, strokedOnly = true),
+                    strokeColor = "#000000",
+                    fillColor = null,
+                ),
+            ),
+        )
+        val apply = VectorEditPlanApplier.apply(document, validXml, plan)
+        return VectorTuneupAiResult(plan = plan, applyResult = apply, summaryJson = "{}")
+    }
+
+    @Test
+    fun aiPromptChangeUpdatesState() {
+        val state = reducer.onAiPromptChanged(VectorTuneupUiState(), "make it cleaner")
+        assertEquals("make it cleaner", state.aiPrompt)
+    }
+
+    @Test
+    fun stageAiCandidateReplacesCandidate() {
+        // Start from an optimized candidate, then let AI replace it.
+        val optimized = reducer.optimize(reducer.parseInput(VectorTuneupUiState(inputXml = validXml)))
+        assertEquals("Optimized", optimized.candidate!!.label)
+
+        val staged = reducer.stageAiCandidate(optimized, aiResult())
+        assertEquals("AI Tune-Up", staged.candidate!!.label)
+        assertEquals(VectorTuneupTab.COMPARE, staged.selectedTab)
+        assertFalse(staged.isAiRunning)
+        assertEquals("Recolored strokes.", staged.lastAiSummary)
+        assertNotNull(staged.aiStatusMessage)
+    }
+
+    @Test
+    fun aiFailurePreservesExistingCandidate() {
+        val optimized = reducer.optimize(reducer.parseInput(VectorTuneupUiState(inputXml = validXml)))
+        val running = reducer.startAi(optimized)
+        assertTrue(running.isAiRunning)
+
+        val failed = reducer.aiFailed(running, "AI Tune-Up failed, but your original XML was not changed.")
+        assertFalse(failed.isAiRunning)
+        assertNotNull("existing candidate must be preserved", failed.candidate)
+        assertNotNull(failed.original)
+        assertEquals("AI Tune-Up failed, but your original XML was not changed.", failed.aiStatusMessage)
+    }
+
+    @Test
+    fun blankApiKeyShowsFriendlyMessage() {
+        val parsed = reducer.parseInput(VectorTuneupUiState(inputXml = validXml))
+        val failed = reducer.aiFailed(reducer.startAi(parsed), VectorTuneupReducer.AI_NEED_KEY)
+        assertEquals(VectorTuneupReducer.AI_NEED_KEY, failed.aiStatusMessage)
+        assertFalse(failed.isAiRunning)
     }
 
     @Test

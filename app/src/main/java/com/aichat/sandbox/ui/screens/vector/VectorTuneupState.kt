@@ -17,6 +17,10 @@ import com.aichat.sandbox.data.vector.VectorOptimizeOptions
  * @property isOptimizing True while an optimize pass is running (drives spinners).
  * @property errorMessage Friendly, user-facing error; never a stack trace.
  * @property selectedTab Currently selected workspace section.
+ * @property aiPrompt The user's free-text instruction for the AI tune-up.
+ * @property isAiRunning True while an AI tune-up request is streaming.
+ * @property aiStatusMessage Friendly status/result line for the AI panel (never raw JSON).
+ * @property lastAiSummary The model's plan summary from the most recent run, if any.
  */
 data class VectorTuneupUiState(
     val inputXml: String = "",
@@ -26,10 +30,17 @@ data class VectorTuneupUiState(
     val isOptimizing: Boolean = false,
     val errorMessage: String? = null,
     val selectedTab: VectorTuneupTab = VectorTuneupTab.INPUT,
+    val aiPrompt: String = "Tune this up while preserving the original visual intent.",
+    val isAiRunning: Boolean = false,
+    val aiStatusMessage: String? = null,
+    val lastAiSummary: String? = null,
 ) {
     /** True once the input has been parsed into an [original] version. */
     val hasOriginal: Boolean get() = original != null
 
     /** True once an optimized [candidate] has been produced. */
     val hasCandidate: Boolean get() = candidate != null
+
+    /** True when an optimize or AI pass is in flight (used to gate actions). */
+    val isBusy: Boolean get() = isOptimizing || isAiRunning
 }

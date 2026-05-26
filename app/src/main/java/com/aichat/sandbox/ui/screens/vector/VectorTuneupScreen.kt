@@ -200,7 +200,7 @@ private fun CompareTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
     ) {
         Button(
             onClick = { viewModel.optimize() },
-            enabled = !state.isOptimizing && (state.hasOriginal || state.inputXml.isNotBlank()),
+            enabled = !state.isBusy && (state.hasOriginal || state.inputXml.isNotBlank()),
         ) {
             Text("Optimize")
         }
@@ -220,6 +220,13 @@ private fun CompareTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
             CircularProgressIndicator(modifier = Modifier.padding(start = 4.dp))
         }
     }
+    SectionTitle("AI Tune-Up")
+    VectorAiTuneupPanel(
+        state = state,
+        onPromptChange = viewModel::onAiPromptChanged,
+        onRun = viewModel::runAiTuneup,
+        onCancel = viewModel::cancelAiTuneup,
+    )
     SectionTitle("Compare")
     VectorVersionComparePanel(
         original = state.original,
