@@ -186,7 +186,7 @@ private fun DiagnosticsTab(state: VectorTuneupUiState) {
 
 @Composable
 private fun CompareTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel) {
-    SectionTitle("Optimize")
+    SectionTitle("Local Optimize")
     VectorOptimizeControls(
         options = state.options,
         onOptionsChange = viewModel::updateOptions,
@@ -226,6 +226,13 @@ private fun CompareTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
         onPromptChange = viewModel::onAiPromptChanged,
         onRun = viewModel::runAiTuneup,
         onCancel = viewModel::cancelAiTuneup,
+    )
+    SectionTitle("AI Redraw")
+    VectorSemanticRedrawPanel(
+        state = state,
+        onPromptChange = viewModel::onRedrawPromptChanged,
+        onRun = viewModel::runSemanticRedraw,
+        onCancel = viewModel::cancelSemanticRedraw,
     )
     SectionTitle("Compare")
     VectorVersionComparePanel(

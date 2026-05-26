@@ -11,6 +11,9 @@ import com.aichat.sandbox.data.vector.VectorEditPlanApplyResult
 import com.aichat.sandbox.data.vector.VectorOptimizationReport
 import com.aichat.sandbox.data.vector.VectorOptimizationResult
 import com.aichat.sandbox.data.vector.VectorOptimizeOptions
+import com.aichat.sandbox.data.vector.VectorRedrawAiResult
+import com.aichat.sandbox.data.vector.VectorScene
+import com.aichat.sandbox.data.vector.VectorSceneCompileResult
 import com.aichat.sandbox.data.vector.VectorTuneupAiResult
 import com.aichat.sandbox.data.vector.VectorWarning
 
@@ -189,6 +192,76 @@ class VectorTuneupReducer(
     fun aiFailed(state: VectorTuneupUiState, message: String): VectorTuneupUiState =
         state.copy(isAiRunning = false, aiStatusMessage = message)
 
+    // ---- semantic redraw (Phase 5) ----
+
+    /** Updates the redraw instruction text. Never starts a request. */
+    fun onRedrawPromptChanged(state: VectorTuneupUiState, prompt: String): VectorTuneupUiState =
+        state.copy(redrawPrompt = prompt)
+
+    /** Marks a redraw request as started and clears any stale status/error. */
+    fun startRedraw(state: VectorTuneupUiState): VectorTuneupUiState =
+        state.copy(isRedrawRunning = true, redrawStatusMessage = null, errorMessage = null)
+
+    /**
+     * Stages the compiled redraw result as the single candidate, replacing any
+     * existing one. The candidate carries the compiler warnings plus the scene's
+     * rejected objects (surfaced as warnings) and a style-intent/object report.
+     */
+    fun stageRedrawCandidate(
+        state: VectorTuneupUiState,
+        result: VectorRedrawAiResult,
+    ): VectorTuneupUiState {
+        val compile = result.compileResult
+        val scene = result.scene
+        val rejectedWarnings = scene.rejected.map { rejected ->
+            VectorWarning(
+                VectorWarning.Codes.SCENE_OBJECT_REJECTED,
+                "Rejected object (${rejected.reason})",
+            )
+        }
+        val warnings = (compile.warnings + rejectedWarnings).distinct()
+        val candidate = VectorVersionUi(
+            id = VectorVersionUi.ID_CANDIDATE,
+            label = "AI Redraw",
+            xml = compile.xml,
+            metrics = compile.metrics,
+            warnings = warnings,
+            reportSummary = redrawSummary(scene, compile, warnings.size),
+        )
+        val status = if (scene.objects.isEmpty()) {
+            REDRAW_NO_OBJECTS
+        } else {
+            "AI proposed ${scene.objects.size} object(s)."
+        }
+        return state.copy(
+            candidate = candidate,
+            isRedrawRunning = false,
+            errorMessage = null,
+            redrawStatusMessage = status,
+            lastRedrawSummary = scene.styleIntent.ifBlank { null },
+            selectedTab = VectorTuneupTab.COMPARE,
+        )
+    }
+
+    /**
+     * Records a redraw failure with a friendly [message], preserving the
+     * original and any existing candidate so nothing is lost.
+     */
+    fun redrawFailed(state: VectorTuneupUiState, message: String): VectorTuneupUiState =
+        state.copy(isRedrawRunning = false, redrawStatusMessage = message)
+
+    private fun redrawSummary(
+        scene: VectorScene,
+        compile: VectorSceneCompileResult,
+        warningCount: Int,
+    ): String = buildString {
+        append(scene.styleIntent.ifBlank { "AI redraw" })
+        append('\n')
+        append("Objects: ${scene.objects.size} accepted, ${scene.rejected.size} rejected\n")
+        append("Compiled paths: ${compile.metrics.pathCount}\n")
+        append("Warnings: $warningCount")
+    }
+
     // ---- helpers ----
 
     private fun buildVersion(xml: String, id: String, label: String): VectorVersionUi {
@@ -222,6 +295,10 @@ class VectorTuneupReducer(
         const val AI_NEED_KEY =
             "Add an API key in Settings before using AI Tune-Up."
         const val AI_NO_CHANGES = "No safe changes were proposed."
+
+        const val REDRAW_NEED_KEY =
+            "Add an API key in Settings before using AI Redraw."
+        const val REDRAW_NO_OBJECTS = "No drawable objects were proposed."
 
         /** Human-readable before/after summary for the compare/export panels. */
         fun summarize(report: VectorOptimizationReport): String {

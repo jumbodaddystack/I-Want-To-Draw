@@ -7,6 +7,9 @@ import com.aichat.sandbox.data.local.PreferencesManager
 import com.aichat.sandbox.data.vector.AndroidVectorDrawableParser
 import com.aichat.sandbox.data.vector.VectorMetricsAnalyzer
 import com.aichat.sandbox.data.vector.VectorOptimizeOptions
+import com.aichat.sandbox.data.vector.VectorRedrawAiChunk
+import com.aichat.sandbox.data.vector.VectorRedrawAiRequest
+import com.aichat.sandbox.data.vector.VectorRedrawAiService
 import com.aichat.sandbox.data.vector.VectorTuneupAiChunk
 import com.aichat.sandbox.data.vector.VectorTuneupAiRequest
 import com.aichat.sandbox.data.vector.VectorTuneupAiService
@@ -36,6 +39,7 @@ import javax.inject.Inject
 class VectorTuneupViewModel @Inject constructor(
     private val exporter: VectorTuneupExporter,
     private val aiService: VectorTuneupAiService,
+    private val redrawService: VectorRedrawAiService,
     private val preferencesManager: PreferencesManager,
 ) : ViewModel() {
 
@@ -49,6 +53,9 @@ class VectorTuneupViewModel @Inject constructor(
 
     /** Tracks the in-flight AI request so [cancelAiTuneup] can stop it. */
     private var aiJob: Job? = null
+
+    /** Tracks the in-flight redraw request so [cancelSemanticRedraw] can stop it. */
+    private var redrawJob: Job? = null
 
     fun onXmlChanged(xml: String) {
         _uiState.update { reducer.onXmlChanged(it, xml) }
@@ -91,6 +98,8 @@ class VectorTuneupViewModel @Inject constructor(
     fun reset() {
         aiJob?.cancel()
         aiJob = null
+        redrawJob?.cancel()
+        redrawJob = null
         _uiState.value = reducer.reset()
     }
 
@@ -160,6 +169,74 @@ class VectorTuneupViewModel @Inject constructor(
         aiJob?.cancel()
         aiJob = null
         _uiState.update { it.copy(isAiRunning = false, aiStatusMessage = "AI Tune-Up cancelled.") }
+    }
+
+    fun onRedrawPromptChanged(prompt: String) {
+        _uiState.update { reducer.onRedrawPromptChanged(it, prompt) }
+    }
+
+    /**
+     * Runs a semantic redraw. Parses the current input first if needed, uses the
+     * existing candidate (or the original) as the source, resolves the default
+     * model's credentials, and stages the compiled scene as a new "AI Redraw"
+     * candidate. The original XML is never mutated; failures surface as a
+     * friendly status message, not a crash.
+     */
+    fun runSemanticRedraw() {
+        if (_uiState.value.isBusy) return
+
+        var state = _uiState.value
+        if (!state.hasOriginal) {
+            state = reducer.parseInput(state)
+            _uiState.value = state
+            if (!state.hasOriginal) return // parse error already surfaced
+        }
+        val source = state.candidate ?: state.original ?: return
+        val prompt = state.redrawPrompt
+        if (prompt.isBlank()) return
+
+        _uiState.update { reducer.startRedraw(it) }
+        redrawJob = viewModelScope.launch {
+            val modelId = preferencesManager.defaultModel.first()
+            val credentials = runCatching { preferencesManager.credentialsFor(modelId) }
+                .getOrElse {
+                    Log.w(TAG, "Failed to resolve redraw credentials", it)
+                    _uiState.update { s -> reducer.redrawFailed(s, VectorTuneupReducer.REDRAW_NEED_KEY) }
+                    return@launch
+                }
+            if (credentials.apiKey.isBlank()) {
+                _uiState.update { s -> reducer.redrawFailed(s, VectorTuneupReducer.REDRAW_NEED_KEY) }
+                return@launch
+            }
+
+            val document = AndroidVectorDrawableParser.parse(source.xml)
+            val metrics = VectorMetricsAnalyzer.analyze(document, source.xml)
+            val request = VectorRedrawAiRequest(
+                xml = source.xml,
+                document = document,
+                metrics = metrics,
+                userPrompt = prompt,
+                modelId = modelId,
+                baseUrl = credentials.baseUrl,
+                apiKey = credentials.apiKey,
+            )
+
+            redrawService.redraw(request).collect { chunk ->
+                when (chunk) {
+                    is VectorRedrawAiChunk.Delta -> Unit // raw JSON: spinner only, no display
+                    is VectorRedrawAiChunk.Complete ->
+                        _uiState.update { s -> reducer.stageRedrawCandidate(s, chunk.result) }
+                    is VectorRedrawAiChunk.Error ->
+                        _uiState.update { s -> reducer.redrawFailed(s, chunk.message) }
+                }
+            }
+        }
+    }
+
+    fun cancelSemanticRedraw() {
+        redrawJob?.cancel()
+        redrawJob = null
+        _uiState.update { it.copy(isRedrawRunning = false, redrawStatusMessage = "AI Redraw cancelled.") }
     }
 
     /**

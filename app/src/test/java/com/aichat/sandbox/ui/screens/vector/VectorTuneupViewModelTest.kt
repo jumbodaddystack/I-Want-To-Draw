@@ -6,7 +6,14 @@ import com.aichat.sandbox.data.vector.VectorEditPlanApplier
 import com.aichat.sandbox.data.vector.VectorEditOperation
 import com.aichat.sandbox.data.vector.VectorOptimizeOptions
 import com.aichat.sandbox.data.vector.VectorPathTarget
+import com.aichat.sandbox.data.vector.VectorPoint
+import com.aichat.sandbox.data.vector.VectorRedrawAiResult
+import com.aichat.sandbox.data.vector.VectorScene
+import com.aichat.sandbox.data.vector.VectorSceneCompiler
+import com.aichat.sandbox.data.vector.VectorSceneObject
+import com.aichat.sandbox.data.vector.VectorSceneStyle
 import com.aichat.sandbox.data.vector.VectorTuneupAiResult
+import com.aichat.sandbox.data.vector.VectorViewport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -185,6 +192,85 @@ class VectorTuneupViewModelTest {
         val failed = reducer.aiFailed(reducer.startAi(parsed), VectorTuneupReducer.AI_NEED_KEY)
         assertEquals(VectorTuneupReducer.AI_NEED_KEY, failed.aiStatusMessage)
         assertFalse(failed.isAiRunning)
+    }
+
+    // ---- Phase 5: semantic redraw reducer logic ----
+
+    private fun redrawResult(): VectorRedrawAiResult {
+        val scene = VectorScene(
+            schema = 1,
+            viewport = VectorViewport(24f, 24f, 24f, 24f),
+            styleIntent = "clean icon",
+            objects = listOf(
+                VectorSceneObject.Line(
+                    id = "diag",
+                    x0 = 2f, y0 = 2f, x1 = 20f, y1 = 20f,
+                    style = VectorSceneStyle(strokeColor = "#000000", strokeWidth = 1f),
+                ),
+                VectorSceneObject.Polygon(
+                    id = "tri",
+                    points = listOf(VectorPoint(4f, 4f), VectorPoint(12f, 2f), VectorPoint(20f, 4f)),
+                    closed = true,
+                    style = VectorSceneStyle(strokeColor = "#2D2D2D", fillColor = "#F8F8F8"),
+                ),
+            ),
+        )
+        val compile = VectorSceneCompiler.compile(scene)
+        return VectorRedrawAiResult(scene = scene, compileResult = compile, summaryJson = "{}")
+    }
+
+    @Test
+    fun redrawPromptChangeUpdatesState() {
+        val state = reducer.onRedrawPromptChanged(VectorTuneupUiState(), "make it icon-ready")
+        assertEquals("make it icon-ready", state.redrawPrompt)
+    }
+
+    @Test
+    fun stageRedrawCandidateReplacesCandidate() {
+        val optimized = reducer.optimize(reducer.parseInput(VectorTuneupUiState(inputXml = validXml)))
+        assertEquals("Optimized", optimized.candidate!!.label)
+
+        val staged = reducer.stageRedrawCandidate(optimized, redrawResult())
+        assertEquals("AI Redraw", staged.candidate!!.label)
+        assertEquals(VectorTuneupTab.COMPARE, staged.selectedTab)
+        assertFalse(staged.isRedrawRunning)
+        assertEquals("clean icon", staged.lastRedrawSummary)
+        assertNotNull(staged.redrawStatusMessage)
+        // Candidate carries the compiled scene report.
+        assertTrue(staged.candidate!!.reportSummary!!.contains("Objects: 2 accepted"))
+    }
+
+    @Test
+    fun redrawFailurePreservesExistingCandidate() {
+        val optimized = reducer.optimize(reducer.parseInput(VectorTuneupUiState(inputXml = validXml)))
+        val running = reducer.startRedraw(optimized)
+        assertTrue(running.isRedrawRunning)
+
+        val message = "AI Redraw failed, but your original XML was not changed."
+        val failed = reducer.redrawFailed(running, message)
+        assertFalse(failed.isRedrawRunning)
+        assertNotNull("existing candidate must be preserved", failed.candidate)
+        assertNotNull(failed.original)
+        assertEquals(message, failed.redrawStatusMessage)
+    }
+
+    @Test
+    fun blankApiKeyShowsFriendlyMessageForRedraw() {
+        val parsed = reducer.parseInput(VectorTuneupUiState(inputXml = validXml))
+        val failed = reducer.redrawFailed(reducer.startRedraw(parsed), VectorTuneupReducer.REDRAW_NEED_KEY)
+        assertEquals(VectorTuneupReducer.REDRAW_NEED_KEY, failed.redrawStatusMessage)
+        assertFalse(failed.isRedrawRunning)
+    }
+
+    @Test
+    fun cancelRedrawClearsRunningState() {
+        val parsed = reducer.parseInput(VectorTuneupUiState(inputXml = validXml))
+        val running = reducer.startRedraw(parsed)
+        assertTrue(running.isRedrawRunning)
+        // Mirrors VectorTuneupViewModel.cancelSemanticRedraw().
+        val cancelled = running.copy(isRedrawRunning = false, redrawStatusMessage = "AI Redraw cancelled.")
+        assertFalse(cancelled.isRedrawRunning)
+        assertEquals("AI Redraw cancelled.", cancelled.redrawStatusMessage)
     }
 
     @Test

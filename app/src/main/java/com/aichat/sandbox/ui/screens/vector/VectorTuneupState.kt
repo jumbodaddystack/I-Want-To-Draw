@@ -21,6 +21,10 @@ import com.aichat.sandbox.data.vector.VectorOptimizeOptions
  * @property isAiRunning True while an AI tune-up request is streaming.
  * @property aiStatusMessage Friendly status/result line for the AI panel (never raw JSON).
  * @property lastAiSummary The model's plan summary from the most recent run, if any.
+ * @property redrawPrompt The user's free-text instruction for the semantic redraw.
+ * @property isRedrawRunning True while a semantic redraw request is streaming.
+ * @property redrawStatusMessage Friendly status/result line for the redraw panel.
+ * @property lastRedrawSummary The scene styleIntent from the most recent redraw, if any.
  */
 data class VectorTuneupUiState(
     val inputXml: String = "",
@@ -34,6 +38,11 @@ data class VectorTuneupUiState(
     val isAiRunning: Boolean = false,
     val aiStatusMessage: String? = null,
     val lastAiSummary: String? = null,
+    val redrawPrompt: String =
+        "Redraw this as a clean, polished vector icon while preserving the subject and color palette.",
+    val isRedrawRunning: Boolean = false,
+    val redrawStatusMessage: String? = null,
+    val lastRedrawSummary: String? = null,
 ) {
     /** True once the input has been parsed into an [original] version. */
     val hasOriginal: Boolean get() = original != null
@@ -41,6 +50,6 @@ data class VectorTuneupUiState(
     /** True once an optimized [candidate] has been produced. */
     val hasCandidate: Boolean get() = candidate != null
 
-    /** True when an optimize or AI pass is in flight (used to gate actions). */
-    val isBusy: Boolean get() = isOptimizing || isAiRunning
+    /** True when an optimize, AI tune-up, or redraw pass is in flight (gates actions). */
+    val isBusy: Boolean get() = isOptimizing || isAiRunning || isRedrawRunning
 }
