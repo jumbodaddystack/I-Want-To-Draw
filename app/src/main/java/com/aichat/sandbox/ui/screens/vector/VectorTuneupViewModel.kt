@@ -3,15 +3,23 @@ package com.aichat.sandbox.ui.screens.vector
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aichat.sandbox.data.local.PreferencesManager
+import com.aichat.sandbox.data.vector.AndroidVectorDrawableParser
+import com.aichat.sandbox.data.vector.VectorMetricsAnalyzer
 import com.aichat.sandbox.data.vector.VectorOptimizeOptions
+import com.aichat.sandbox.data.vector.VectorTuneupAiChunk
+import com.aichat.sandbox.data.vector.VectorTuneupAiRequest
+import com.aichat.sandbox.data.vector.VectorTuneupAiService
 import com.aichat.sandbox.data.vector.VectorTuneupExporter
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -27,6 +35,8 @@ import javax.inject.Inject
 @HiltViewModel
 class VectorTuneupViewModel @Inject constructor(
     private val exporter: VectorTuneupExporter,
+    private val aiService: VectorTuneupAiService,
+    private val preferencesManager: PreferencesManager,
 ) : ViewModel() {
 
     private val reducer = VectorTuneupReducer()
@@ -36,6 +46,9 @@ class VectorTuneupViewModel @Inject constructor(
 
     private val _events = MutableSharedFlow<VectorTuneupEvent>(extraBufferCapacity = 4)
     val events: SharedFlow<VectorTuneupEvent> = _events.asSharedFlow()
+
+    /** Tracks the in-flight AI request so [cancelAiTuneup] can stop it. */
+    private var aiJob: Job? = null
 
     fun onXmlChanged(xml: String) {
         _uiState.update { reducer.onXmlChanged(it, xml) }
@@ -76,7 +89,77 @@ class VectorTuneupViewModel @Inject constructor(
     }
 
     fun reset() {
+        aiJob?.cancel()
+        aiJob = null
         _uiState.value = reducer.reset()
+    }
+
+    fun onAiPromptChanged(prompt: String) {
+        _uiState.update { reducer.onAiPromptChanged(it, prompt) }
+    }
+
+    /**
+     * Runs a model-guided tune-up. Parses the current input first if needed,
+     * uses the existing candidate (or the original) as the source, resolves the
+     * default model's credentials, and applies the validated plan as a new
+     * candidate. The original XML is never mutated; failures surface as a
+     * friendly status message, not a crash.
+     */
+    fun runAiTuneup() {
+        if (_uiState.value.isBusy) return
+
+        var state = _uiState.value
+        if (!state.hasOriginal) {
+            state = reducer.parseInput(state)
+            _uiState.value = state
+            if (!state.hasOriginal) return // parse error already surfaced
+        }
+        val source = state.candidate ?: state.original ?: return
+        val prompt = state.aiPrompt
+        if (prompt.isBlank()) return
+
+        _uiState.update { reducer.startAi(it) }
+        aiJob = viewModelScope.launch {
+            val modelId = preferencesManager.defaultModel.first()
+            val credentials = runCatching { preferencesManager.credentialsFor(modelId) }
+                .getOrElse {
+                    Log.w(TAG, "Failed to resolve AI credentials", it)
+                    _uiState.update { s -> reducer.aiFailed(s, VectorTuneupReducer.AI_NEED_KEY) }
+                    return@launch
+                }
+            if (credentials.apiKey.isBlank()) {
+                _uiState.update { s -> reducer.aiFailed(s, VectorTuneupReducer.AI_NEED_KEY) }
+                return@launch
+            }
+
+            val document = AndroidVectorDrawableParser.parse(source.xml)
+            val metrics = VectorMetricsAnalyzer.analyze(document, source.xml)
+            val request = VectorTuneupAiRequest(
+                xml = source.xml,
+                document = document,
+                metrics = metrics,
+                userPrompt = prompt,
+                modelId = modelId,
+                baseUrl = credentials.baseUrl,
+                apiKey = credentials.apiKey,
+            )
+
+            aiService.tuneUp(request).collect { chunk ->
+                when (chunk) {
+                    is VectorTuneupAiChunk.Delta -> Unit // raw JSON: spinner only, no display
+                    is VectorTuneupAiChunk.Complete ->
+                        _uiState.update { s -> reducer.stageAiCandidate(s, chunk.result) }
+                    is VectorTuneupAiChunk.Error ->
+                        _uiState.update { s -> reducer.aiFailed(s, chunk.message) }
+                }
+            }
+        }
+    }
+
+    fun cancelAiTuneup() {
+        aiJob?.cancel()
+        aiJob = null
+        _uiState.update { it.copy(isAiRunning = false, aiStatusMessage = "AI Tune-Up cancelled.") }
     }
 
     /**

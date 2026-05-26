@@ -7,9 +7,11 @@ import com.aichat.sandbox.data.vector.VectorDocumentValidator
 import com.aichat.sandbox.data.vector.VectorDrawableOptimizer
 import com.aichat.sandbox.data.vector.VectorMetrics
 import com.aichat.sandbox.data.vector.VectorMetricsAnalyzer
+import com.aichat.sandbox.data.vector.VectorEditPlanApplyResult
 import com.aichat.sandbox.data.vector.VectorOptimizationReport
 import com.aichat.sandbox.data.vector.VectorOptimizationResult
 import com.aichat.sandbox.data.vector.VectorOptimizeOptions
+import com.aichat.sandbox.data.vector.VectorTuneupAiResult
 import com.aichat.sandbox.data.vector.VectorWarning
 
 /**
@@ -134,6 +136,59 @@ class VectorTuneupReducer(
         )
     }
 
+    // ---- AI tune-up (Phase 4) ----
+
+    /** Updates the AI instruction text. Never starts a request. */
+    fun onAiPromptChanged(state: VectorTuneupUiState, prompt: String): VectorTuneupUiState =
+        state.copy(aiPrompt = prompt)
+
+    /** Marks an AI request as started and clears any stale status/error. */
+    fun startAi(state: VectorTuneupUiState): VectorTuneupUiState =
+        state.copy(isAiRunning = true, aiStatusMessage = null, errorMessage = null)
+
+    /**
+     * Stages the AI-applied result as the single candidate, replacing any
+     * existing one. The candidate carries the apply warnings plus the plan's
+     * rejected operations (surfaced as warnings) and an operation report.
+     */
+    fun stageAiCandidate(
+        state: VectorTuneupUiState,
+        result: VectorTuneupAiResult,
+    ): VectorTuneupUiState {
+        val apply = result.applyResult
+        val rejectedWarnings = result.plan.rejected.map { rejected ->
+            VectorWarning(
+                VectorWarning.Codes.AI_PLAN_SKIPPED_INVALID_OPERATION,
+                "Rejected operation (${rejected.reason})",
+            )
+        }
+        val candidate = VectorVersionUi(
+            id = VectorVersionUi.ID_CANDIDATE,
+            label = "AI Tune-Up",
+            xml = apply.xml,
+            metrics = apply.metrics,
+            warnings = (apply.warnings + rejectedWarnings).distinct(),
+            reportSummary = apply.summary,
+        )
+        val status = if (result.plan.isEmpty) AI_NO_CHANGES
+        else "AI proposed ${result.plan.operations.size} operation(s)."
+        return state.copy(
+            candidate = candidate,
+            isAiRunning = false,
+            errorMessage = null,
+            aiStatusMessage = status,
+            lastAiSummary = result.plan.summary.ifBlank { null },
+            selectedTab = VectorTuneupTab.COMPARE,
+        )
+    }
+
+    /**
+     * Records an AI failure with a friendly [message], preserving the original
+     * and any existing candidate so nothing is lost.
+     */
+    fun aiFailed(state: VectorTuneupUiState, message: String): VectorTuneupUiState =
+        state.copy(isAiRunning = false, aiStatusMessage = message)
+
     // ---- helpers ----
 
     private fun buildVersion(xml: String, id: String, label: String): VectorVersionUi {
@@ -163,6 +218,10 @@ class VectorTuneupReducer(
             "Could not parse this XML. Check that the root element is <vector>."
         const val ERROR_OPTIMIZE =
             "Optimization failed, but your original XML was not changed."
+
+        const val AI_NEED_KEY =
+            "Add an API key in Settings before using AI Tune-Up."
+        const val AI_NO_CHANGES = "No safe changes were proposed."
 
         /** Human-readable before/after summary for the compare/export panels. */
         fun summarize(report: VectorOptimizationReport): String {
