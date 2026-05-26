@@ -86,6 +86,14 @@ fun VectorTuneupScreen(
         }
     }
 
+    // Keep the Edit/Compare analysis (catalog, scores, diff) in sync with the
+    // currently selected source version.
+    LaunchedEffect(state.selectedTab, state.sourceVersion?.id, state.versions.size) {
+        if (state.selectedTab == VectorTuneupTab.EDIT || state.selectedTab == VectorTuneupTab.COMPARE) {
+            if (state.sourceVersion != null) viewModel.refreshSelectedVersionAnalysis()
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -158,6 +166,7 @@ fun VectorTuneupScreen(
                     VectorTuneupTab.INPUT -> InputTab(state, viewModel)
                     VectorTuneupTab.DIAGNOSTICS -> DiagnosticsTab(state)
                     VectorTuneupTab.COMPARE -> CompareTab(state, viewModel)
+                    VectorTuneupTab.EDIT -> EditTab(state, viewModel)
                     VectorTuneupTab.HISTORY -> HistoryTab(state, viewModel)
                     VectorTuneupTab.EXPORT -> ExportTab(state, viewModel)
                 }
@@ -250,11 +259,76 @@ private fun CompareTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
         original = state.original,
         candidate = state.candidate,
     )
+
+    SectionTitle("Quality")
+    VectorQualityPanel(scores = state.qualityScores)
+    SectionTitle("Diff (original → selected)")
+    VectorDiffPanel(diff = state.selectedDiff)
+}
+
+@Composable
+private fun EditTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel) {
+    if (!state.hasOriginal) {
+        Text(
+            text = "Parse or open a vector first, then select any version to edit it.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    state.manualEditStatusMessage?.let { message ->
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+        )
+    }
+
+    SectionTitle("Quality")
+    VectorQualityPanel(scores = state.qualityScores)
+
+    SectionTitle("Paths")
+    VectorPathInspectorPanel(
+        entries = state.pathCatalog,
+        selectedPathIds = state.selectedPathIds,
+        onToggle = viewModel::togglePathSelection,
+        onClearSelection = viewModel::clearPathSelection,
+    )
+
+    SectionTitle("Edit selected")
+    VectorPathEditPanel(
+        selectedCount = state.selectedPathIds.size,
+        enabled = !state.isBusy && state.selectedPathIds.isNotEmpty(),
+        onDelete = viewModel::deleteSelectedPaths,
+        onSimplify = { tolerance, simplifyFills -> viewModel.simplifySelectedPaths(tolerance, simplifyFills) },
+        onRecolor = { stroke, fill -> viewModel.recolorSelectedPaths(stroke, fill) },
+        onRestyle = { width, cap, join -> viewModel.restyleSelectedPaths(width, cap, join) },
+    )
+
+    SectionTitle("Batch restyle")
+    VectorBatchRestylePanel(
+        availableColors = state.pathCatalog
+            .flatMap { listOfNotNull(it.fillColor, it.strokeColor) }
+            .distinct(),
+        enabled = !state.isBusy,
+        onApply = viewModel::applyBatchRestyle,
+    )
 }
 
 @Composable
 private fun HistoryTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel) {
     val projects by viewModel.projects.collectAsState()
+
+    Text(
+        text = "Select any version, then use Compare or Edit to branch from it.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 4.dp),
+    )
 
     SectionTitle("Saved projects")
     if (projects.isEmpty()) {
@@ -351,6 +425,7 @@ private fun tabLabel(tab: VectorTuneupTab): String = when (tab) {
     VectorTuneupTab.INPUT -> "Input"
     VectorTuneupTab.DIAGNOSTICS -> "Diagnostics"
     VectorTuneupTab.COMPARE -> "Compare"
+    VectorTuneupTab.EDIT -> "Edit"
     VectorTuneupTab.HISTORY -> "History"
     VectorTuneupTab.EXPORT -> "Export"
 }

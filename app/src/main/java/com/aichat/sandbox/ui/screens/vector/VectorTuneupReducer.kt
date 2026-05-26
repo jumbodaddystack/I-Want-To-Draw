@@ -14,6 +14,9 @@ import com.aichat.sandbox.data.vector.VectorEditPlanApplyResult
 import com.aichat.sandbox.data.vector.VectorOptimizationReport
 import com.aichat.sandbox.data.vector.VectorOptimizationResult
 import com.aichat.sandbox.data.vector.VectorOptimizeOptions
+import com.aichat.sandbox.data.vector.VectorPathCatalogEntry
+import com.aichat.sandbox.data.vector.VectorQualityScores
+import com.aichat.sandbox.data.vector.VectorVersionDiff
 import com.aichat.sandbox.data.vector.VectorRedrawAiResult
 import com.aichat.sandbox.data.vector.VectorScene
 import com.aichat.sandbox.data.vector.VectorSceneCompileResult
@@ -343,6 +346,66 @@ class VectorTuneupReducer(
             state.selectedVersion ?: state.activeVersion ?: state.candidate ?: state.original
     }
 
+    // ---- advanced editing + quality scoring (Phase 7) ----
+
+    /**
+     * Loads freshly computed analysis (per-path [catalog], quality [scores], and
+     * the original-vs-source [diff]) for the current source version. Pure data
+     * folding — the ViewModel does the parsing/analysis off the main thread.
+     */
+    fun loadAnalysisForSelectedVersion(
+        state: VectorTuneupUiState,
+        catalog: List<VectorPathCatalogEntry>,
+        scores: VectorQualityScores?,
+        diff: VectorVersionDiff?,
+    ): VectorTuneupUiState = state.copy(
+        pathCatalog = catalog,
+        qualityScores = scores,
+        selectedDiff = diff,
+    )
+
+    /** Toggles whether [pathId] is selected for the next manual edit. */
+    fun togglePathSelection(state: VectorTuneupUiState, pathId: String): VectorTuneupUiState {
+        val next = state.selectedPathIds.toMutableSet()
+        if (!next.add(pathId)) next.remove(pathId)
+        return state.copy(selectedPathIds = next)
+    }
+
+    /** Clears the manual-edit path selection. */
+    fun clearPathSelection(state: VectorTuneupUiState): VectorTuneupUiState =
+        state.copy(selectedPathIds = emptySet())
+
+    /** Records a friendly manual-edit failure message; nothing else changes. */
+    fun manualEditFailed(state: VectorTuneupUiState, message: String): VectorTuneupUiState =
+        state.copy(manualEditStatusMessage = message)
+
+    /**
+     * Folds a freshly persisted manual-edit [version] into the state: it becomes
+     * the active + selected version (and compared candidate), the path selection
+     * is cleared, and a friendly status is shown. The user stays on the Edit tab
+     * so they can keep refining. All prior versions are preserved.
+     */
+    fun stageManualEditVersion(
+        state: VectorTuneupUiState,
+        version: VectorTuneupVersion,
+        allVersions: List<VectorTuneupVersion>,
+    ): VectorTuneupUiState {
+        val ui = allVersions.map { it.toUi() }
+        val staged = ui.firstOrNull { it.id == version.id } ?: version.toUi()
+        val original = ui.firstOrNull { it.mode == VectorTuneupMode.ORIGINAL } ?: state.original
+        return state.copy(
+            versions = ui,
+            original = original,
+            candidate = staged.takeIf { it.mode != VectorTuneupMode.ORIGINAL } ?: state.candidate,
+            activeVersionId = version.id,
+            selectedVersionId = version.id,
+            selectedPathIds = emptySet(),
+            manualEditStatusMessage = "Saved \"${version.label}\" as a new version.",
+            errorMessage = null,
+            selectedTab = VectorTuneupTab.EDIT,
+        )
+    }
+
     // ---- helpers ----
 
     private fun buildVersion(xml: String, id: String, label: String): VectorVersionUi {
@@ -388,6 +451,12 @@ class VectorTuneupReducer(
         const val ERROR_RENAME = "Could not rename the project."
         const val ERROR_DELETE = "Could not delete the project."
         const val ERROR_NEED_VECTOR = "Save or parse a vector first."
+
+        // Phase 7 — friendly manual-edit / analysis messages.
+        const val MANUAL_NEED_SELECTION = "Select one or more paths first."
+        const val MANUAL_APPLY_FAILED = "Could not apply manual edit."
+        const val MANUAL_ANALYZE_FAILED = "Could not analyze selected version."
+        const val MANUAL_SAVE_FAILED = "Could not save manual edit."
 
         /** Merged apply + rejected-operation warnings for an AI tune-up result. */
         fun aiCandidateWarnings(result: VectorTuneupAiResult): List<VectorWarning> {

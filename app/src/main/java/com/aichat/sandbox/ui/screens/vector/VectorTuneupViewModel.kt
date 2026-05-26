@@ -8,9 +8,19 @@ import com.aichat.sandbox.data.model.VectorTuneupMode
 import com.aichat.sandbox.data.repository.VectorTuneupProject
 import com.aichat.sandbox.data.repository.VectorTuneupRepository
 import com.aichat.sandbox.data.vector.AndroidVectorDrawableParser
+import com.aichat.sandbox.data.vector.VectorBatchRestyle
+import com.aichat.sandbox.data.vector.VectorBatchRestyleApplier
+import com.aichat.sandbox.data.vector.VectorDocument
 import com.aichat.sandbox.data.vector.VectorDrawableOptimizer
+import com.aichat.sandbox.data.vector.VectorManualEdit
+import com.aichat.sandbox.data.vector.VectorManualEditApplier
+import com.aichat.sandbox.data.vector.VectorManualEditResult
 import com.aichat.sandbox.data.vector.VectorMetricsAnalyzer
 import com.aichat.sandbox.data.vector.VectorOptimizeOptions
+import com.aichat.sandbox.data.vector.VectorPathCatalog
+import com.aichat.sandbox.data.vector.VectorQualityScorer
+import com.aichat.sandbox.data.vector.VectorVersionDiffAnalyzer
+import com.aichat.sandbox.data.vector.VectorVersionQualityInput
 import com.aichat.sandbox.data.vector.VectorRedrawAiChunk
 import com.aichat.sandbox.data.vector.VectorRedrawAiRequest
 import com.aichat.sandbox.data.vector.VectorRedrawAiService
@@ -388,6 +398,144 @@ class VectorTuneupViewModel @Inject constructor(
             } else {
                 emit(VectorTuneupEvent.ShowMessage(VectorTuneupReducer.ERROR_DELETE))
             }
+        }
+    }
+
+    // ---- advanced editing + quality scoring (Phase 7) ----
+
+    fun togglePathSelection(pathId: String) {
+        _uiState.update { reducer.togglePathSelection(it, pathId) }
+    }
+
+    fun clearPathSelection() {
+        _uiState.update { reducer.clearPathSelection(it) }
+    }
+
+    /**
+     * Recomputes the per-path catalog, quality scores, and original-vs-source
+     * diff for the current source version and folds them into state. Pure
+     * deterministic analysis — no AI, no network.
+     */
+    fun refreshSelectedVersionAnalysis() {
+        viewModelScope.launch {
+            val state = _uiState.value
+            val source = state.sourceVersion
+            if (source == null) {
+                _uiState.update { reducer.manualEditFailed(it, VectorTuneupReducer.MANUAL_ANALYZE_FAILED) }
+                return@launch
+            }
+            val analysis = runCatching {
+                val document = AndroidVectorDrawableParser.parse(source.xml)
+                val candidate = VectorVersionQualityInput(
+                    source.xml, document, VectorMetricsAnalyzer.analyze(document, source.xml),
+                )
+                val original = state.original
+                    ?.takeIf { it.id != source.id }
+                    ?.let {
+                        val od = AndroidVectorDrawableParser.parse(it.xml)
+                        VectorVersionQualityInput(it.xml, od, VectorMetricsAnalyzer.analyze(od, it.xml))
+                    }
+                val catalog = VectorPathCatalog.catalog(document)
+                val scores = VectorQualityScorer.score(original, candidate)
+                val diff = original?.let { VectorVersionDiffAnalyzer.diff(it, candidate) }
+                Triple(catalog, scores, diff)
+            }.getOrElse {
+                Log.w(TAG, "Analyze selected version failed", it)
+                _uiState.update { s -> reducer.manualEditFailed(s, VectorTuneupReducer.MANUAL_ANALYZE_FAILED) }
+                return@launch
+            }
+            _uiState.update {
+                reducer.loadAnalysisForSelectedVersion(it, analysis.first, analysis.second, analysis.third)
+            }
+        }
+    }
+
+    fun deleteSelectedPaths() =
+        applySelectedEdit("Delete Paths") { ids -> listOf(VectorManualEdit.DeletePaths(ids)) }
+
+    fun recolorSelectedPaths(strokeColor: String?, fillColor: String?) =
+        applySelectedEdit("Recolor") { ids ->
+            listOf(VectorManualEdit.RecolorPaths(ids, strokeColor = strokeColor, fillColor = fillColor))
+        }
+
+    fun restyleSelectedPaths(strokeWidth: Float?, lineCap: String?, lineJoin: String?) =
+        applySelectedEdit("Restyle") { ids ->
+            listOf(VectorManualEdit.RestylePaths(ids, strokeWidth = strokeWidth, lineCap = lineCap, lineJoin = lineJoin))
+        }
+
+    fun simplifySelectedPaths(tolerance: Float, simplifyFills: Boolean = false) =
+        applySelectedEdit("Simplify") { ids ->
+            listOf(VectorManualEdit.SimplifyPaths(ids, tolerance = tolerance, simplifyFills = simplifyFills))
+        }
+
+    /** Applies a batch restyle (target by color/path group) and persists it. */
+    fun applyBatchRestyle(restyle: VectorBatchRestyle) {
+        if (_uiState.value.isBusy) return
+        persistManualEdit("Batch Restyle") { document, xml ->
+            VectorBatchRestyleApplier.apply(document, xml, restyle)
+        }
+    }
+
+    /** Guards on a non-empty selection, then persists the built edits. */
+    private fun applySelectedEdit(label: String, build: (List<String>) -> List<VectorManualEdit>) {
+        if (_uiState.value.isBusy) return
+        val ids = _uiState.value.selectedPathIds.toList()
+        if (ids.isEmpty()) {
+            _uiState.update { reducer.manualEditFailed(it, VectorTuneupReducer.MANUAL_NEED_SELECTION) }
+            return
+        }
+        persistManualEdit(label) { document, xml ->
+            VectorManualEditApplier.apply(document, xml, build(ids))
+        }
+    }
+
+    /**
+     * Shared manual-edit pipeline: ensure a project, resolve the source version,
+     * run the deterministic [apply], persist a [VectorTuneupMode.MANUAL_EDIT]
+     * child branched from the source, then re-analyze the new version.
+     */
+    private fun persistManualEdit(
+        label: String,
+        apply: (VectorDocument, String) -> VectorManualEditResult,
+    ) {
+        viewModelScope.launch {
+            val projectId = ensureProject()
+            if (projectId == null) {
+                _uiState.update { reducer.manualEditFailed(it, VectorTuneupReducer.ERROR_CREATE_PROJECT) }
+                return@launch
+            }
+            val source = _uiState.value.sourceVersion
+            if (source == null) {
+                _uiState.update { reducer.manualEditFailed(it, VectorTuneupReducer.ERROR_NEED_VECTOR) }
+                return@launch
+            }
+            val result = runCatching {
+                apply(AndroidVectorDrawableParser.parse(source.xml), source.xml)
+            }.getOrElse {
+                Log.w(TAG, "Manual edit failed", it)
+                _uiState.update { s -> reducer.manualEditFailed(s, VectorTuneupReducer.MANUAL_APPLY_FAILED) }
+                return@launch
+            }
+            val version = runCatching {
+                repository.addVersion(
+                    projectId = projectId,
+                    parentId = source.persistedId,
+                    label = label,
+                    instruction = result.summary,
+                    mode = VectorTuneupMode.MANUAL_EDIT,
+                    xml = result.xml,
+                    metrics = result.metrics,
+                    warnings = result.warnings,
+                    reportSummary = result.summary,
+                )
+            }.getOrElse {
+                Log.w(TAG, "Persist manual edit failed", it)
+                _uiState.update { s -> reducer.manualEditFailed(s, VectorTuneupReducer.MANUAL_SAVE_FAILED) }
+                return@launch
+            }
+            val all = repository.getVersions(projectId)
+            _uiState.update { reducer.stageManualEditVersion(it, version, all) }
+            refreshSelectedVersionAnalysis()
         }
     }
 
