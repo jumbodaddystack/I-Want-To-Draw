@@ -19,9 +19,9 @@ import com.aichat.sandbox.data.vector.VectorMetrics
 
 /**
  * Stacked original-vs-candidate comparison cards plus read-only XML inspection.
- * Each card shows the headline metrics; the candidate card also shows the
- * optimizer's before/after report summary. No raster preview is rendered in
- * Phase 3 (see the placeholder note in the screen).
+ * Each card shows a rendered preview (Phase 8) of the parsed version, the
+ * headline metrics, and — for the candidate — the optimizer's before/after
+ * report summary.
  */
 @Composable
 fun VectorVersionComparePanel(
@@ -65,6 +65,12 @@ private fun VersionCard(version: VectorVersionUi, isCandidate: Boolean) {
                 text = version.label,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
+            )
+            VectorPreviewPanel(
+                title = "Preview",
+                version = version,
+                showMetadata = false,
+                modifier = Modifier.padding(top = 8.dp),
             )
             Summary(version.metrics)
             if (version.warnings.isNotEmpty()) {
