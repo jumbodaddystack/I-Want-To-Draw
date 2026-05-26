@@ -33,6 +33,8 @@ import com.aichat.sandbox.ui.screens.notes.NoteSearchScreen
 import com.aichat.sandbox.ui.screens.notes.NotesListScreen
 import com.aichat.sandbox.ui.screens.settings.SettingsScreen
 import com.aichat.sandbox.ui.screens.templates.TemplatesScreen
+import com.aichat.sandbox.ui.screens.vector.ROUTE_VECTOR_TUNEUP
+import com.aichat.sandbox.ui.screens.vector.VectorTuneupScreen
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     data object ChatList : Screen("chat_list", "Chat", Icons.Filled.Chat)
@@ -246,7 +248,17 @@ fun AppNavigation(
                 ImagesScreen()
             }
             composable(Screen.Settings.route) {
-                SettingsScreen()
+                SettingsScreen(
+                    onOpenVectorTuneup = { navController.navigate(ROUTE_VECTOR_TUNEUP) },
+                )
+            }
+            // Vector Art Tune-Up workspace (Phase 3). Reached from Settings →
+            // Tools; lives as its own non-bottom-nav route so it can be opened
+            // from anywhere later without a navigation rewrite.
+            composable(ROUTE_VECTOR_TUNEUP) {
+                VectorTuneupScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                )
             }
         }
     }

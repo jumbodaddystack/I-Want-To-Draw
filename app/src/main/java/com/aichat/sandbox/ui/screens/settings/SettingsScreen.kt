@@ -24,6 +24,7 @@ import com.aichat.sandbox.ui.components.SettingsSlider
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    onOpenVectorTuneup: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -177,6 +178,23 @@ fun SettingsScreen(
                 checked = uiState.darkMode,
                 onCheckedChange = { viewModel.setDarkMode(it) }
             )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Tools
+        Text(
+            text = "Tools",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+        OutlinedButton(
+            onClick = onOpenVectorTuneup,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Vector Tune-Up")
         }
 
         Spacer(modifier = Modifier.height(24.dp))
