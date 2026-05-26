@@ -13,6 +13,8 @@ import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.data.model.Notebook
 import com.aichat.sandbox.data.model.Stamp
+import com.aichat.sandbox.data.model.VectorTuneupProjectEntity
+import com.aichat.sandbox.data.model.VectorTuneupVersionEntity
 
 // Note: `notes_ocr_fts` (Phase 9.3) is intentionally NOT a registered
 // entity. It's a virtual FTS4 table managed entirely by `MIGRATION_11_12`
@@ -32,8 +34,10 @@ import com.aichat.sandbox.data.model.Stamp
         Stamp::class,
         Notebook::class,
         NoteAudio::class,
+        VectorTuneupProjectEntity::class,
+        VectorTuneupVersionEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -45,4 +49,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun notebookDao(): NotebookDao
     abstract fun noteSearchDao(): NoteSearchDao
     abstract fun noteAudioDao(): NoteAudioDao
+    abstract fun vectorTuneupDao(): VectorTuneupDao
 }

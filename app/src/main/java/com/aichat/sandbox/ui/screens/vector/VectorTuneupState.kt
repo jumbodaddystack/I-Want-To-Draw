@@ -13,6 +13,11 @@ import com.aichat.sandbox.data.vector.VectorOptimizeOptions
  * @property inputXml Raw text in the import field.
  * @property original Parsed source version, or null before a successful parse.
  * @property candidate Optimized version, or null before optimizing / after clear.
+ * @property projectId Owning persisted project id, or null while unsaved.
+ * @property projectTitle Display title for the project header.
+ * @property versions Full persisted version history (empty while unsaved).
+ * @property activeVersionId The version marked active in the project.
+ * @property selectedVersionId The version selected in the history panel (drives branching/compare).
  * @property options Current optimizer settings.
  * @property isOptimizing True while an optimize pass is running (drives spinners).
  * @property errorMessage Friendly, user-facing error; never a stack trace.
@@ -30,6 +35,11 @@ data class VectorTuneupUiState(
     val inputXml: String = "",
     val original: VectorVersionUi? = null,
     val candidate: VectorVersionUi? = null,
+    val projectId: String? = null,
+    val projectTitle: String = "Vector Tune-Up",
+    val versions: List<VectorVersionUi> = emptyList(),
+    val activeVersionId: String? = null,
+    val selectedVersionId: String? = null,
     val options: VectorOptimizeOptions = VectorOptimizeOptions(),
     val isOptimizing: Boolean = false,
     val errorMessage: String? = null,
@@ -52,4 +62,20 @@ data class VectorTuneupUiState(
 
     /** True when an optimize, AI tune-up, or redraw pass is in flight (gates actions). */
     val isBusy: Boolean get() = isOptimizing || isAiRunning || isRedrawRunning
+
+    /** True once the workspace has been persisted as a durable project. */
+    val isSaved: Boolean get() = projectId != null
+
+    /** The persisted version selected in the history panel, if any. */
+    val selectedVersion: VectorVersionUi? get() = versions.firstOrNull { it.id == selectedVersionId }
+
+    /** The persisted version currently marked active, if any. */
+    val activeVersion: VectorVersionUi? get() = versions.firstOrNull { it.id == activeVersionId }
+
+    /**
+     * The version a new operation should branch from: an explicitly selected
+     * version wins, then the current candidate, then the original. Returns null
+     * only before anything has been parsed.
+     */
+    val sourceVersion: VectorVersionUi? get() = selectedVersion ?: candidate ?: original
 }

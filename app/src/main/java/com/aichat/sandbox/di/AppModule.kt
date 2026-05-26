@@ -18,17 +18,20 @@ import com.aichat.sandbox.data.local.MIGRATION_10_11
 import com.aichat.sandbox.data.local.MIGRATION_11_12
 import com.aichat.sandbox.data.local.MIGRATION_12_13
 import com.aichat.sandbox.data.local.MIGRATION_13_14
+import com.aichat.sandbox.data.local.MIGRATION_14_15
 import com.aichat.sandbox.data.local.NoteAudioDao
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.local.NoteFrameDao
 import com.aichat.sandbox.data.local.NoteSearchDao
 import com.aichat.sandbox.data.local.NotebookDao
 import com.aichat.sandbox.data.local.StampDao
+import com.aichat.sandbox.data.local.VectorTuneupDao
 import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.NoteAiService
 import com.aichat.sandbox.data.remote.ApiClient
 import com.aichat.sandbox.data.remote.ChatStreamer
 import com.aichat.sandbox.data.repository.NoteRepository
+import com.aichat.sandbox.data.repository.VectorTuneupRepository
 import com.aichat.sandbox.ui.components.MarkwonProvider
 import dagger.Module
 import dagger.Provides
@@ -62,6 +65,7 @@ object AppModule {
             MIGRATION_11_12,
             MIGRATION_12_13,
             MIGRATION_13_14,
+            MIGRATION_14_15,
         ).build()
     }
 
@@ -103,6 +107,20 @@ object AppModule {
     @Provides
     fun provideNoteAudioDao(database: AppDatabase): NoteAudioDao {
         return database.noteAudioDao()
+    }
+
+    @Provides
+    fun provideVectorTuneupDao(database: AppDatabase): VectorTuneupDao {
+        return database.vectorTuneupDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideVectorTuneupRepository(
+        @ApplicationContext context: Context,
+        vectorTuneupDao: VectorTuneupDao,
+    ): VectorTuneupRepository {
+        return VectorTuneupRepository(context, vectorTuneupDao)
     }
 
     @Provides
