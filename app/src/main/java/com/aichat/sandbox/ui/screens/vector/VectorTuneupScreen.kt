@@ -1,6 +1,7 @@
 package com.aichat.sandbox.ui.screens.vector
 
 import android.content.Intent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -116,6 +118,14 @@ fun VectorTuneupScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            VectorProjectHeader(
+                title = state.projectTitle,
+                isSaved = state.isSaved,
+                activeVersionLabel = state.activeVersion?.label,
+                onSave = { viewModel.createProjectFromCurrentInput() },
+                onRename = viewModel::renameProject,
+                onDelete = { viewModel.deleteCurrentProject() },
+            )
             val tabs = VectorTuneupTab.entries
             TabRow(selectedTabIndex = tabs.indexOf(state.selectedTab)) {
                 tabs.forEach { tab ->
@@ -148,6 +158,7 @@ fun VectorTuneupScreen(
                     VectorTuneupTab.INPUT -> InputTab(state, viewModel)
                     VectorTuneupTab.DIAGNOSTICS -> DiagnosticsTab(state)
                     VectorTuneupTab.COMPARE -> CompareTab(state, viewModel)
+                    VectorTuneupTab.HISTORY -> HistoryTab(state, viewModel)
                     VectorTuneupTab.EXPORT -> ExportTab(state, viewModel)
                 }
             }
@@ -242,19 +253,67 @@ private fun CompareTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
 }
 
 @Composable
-private fun ExportTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel) {
-    val candidate = state.candidate
-    if (candidate == null) {
+private fun HistoryTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel) {
+    val projects by viewModel.projects.collectAsState()
+
+    SectionTitle("Saved projects")
+    if (projects.isEmpty()) {
         Text(
-            text = "No optimized candidate yet. Run optimization on the Compare tab " +
-                "to produce one. You can still export the parsed original below.",
+            text = "No saved projects yet. Run an operation or tap \"Save project\" to create one.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    } else {
+        projects.forEach { project ->
+            val isOpen = project.id == state.projectId
+            Surface(
+                color = if (isOpen) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+                    .clickable { viewModel.openProject(project.id) },
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Text(project.title, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = if (isOpen) "Open" else "Tap to open",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+
+    SectionTitle("Version history")
+    VectorVersionHistoryPanel(
+        versions = state.versions,
+        activeVersionId = state.activeVersionId,
+        selectedVersionId = state.selectedVersionId,
+        onSelect = viewModel::selectVersion,
+        onMakeActive = viewModel::setActiveVersion,
+        onExport = viewModel::exportVersion,
+    )
+}
+
+@Composable
+private fun ExportTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel) {
+    val exportVersion = state.selectedVersion ?: state.activeVersion ?: state.candidate ?: state.original
+    if (exportVersion == null) {
+        Text(
+            text = "Parse or save a vector first. You can then export any version from " +
+                "here or from the History tab.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 12.dp),
         )
     } else {
         Text(
-            text = "Candidate ready · ${candidate.metrics.xmlBytes} bytes",
+            text = "Will export: ${exportVersion.label} · ${exportVersion.metrics.xmlBytes} bytes",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(bottom = 12.dp),
@@ -262,9 +321,9 @@ private fun ExportTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMod
     }
     Button(
         onClick = { viewModel.exportCandidate() },
-        enabled = state.hasCandidate || state.hasOriginal,
+        enabled = exportVersion != null,
     ) {
-        Text(if (state.hasCandidate) "Export candidate XML" else "Export original XML")
+        Text("Export selected version")
     }
 }
 
@@ -292,5 +351,6 @@ private fun tabLabel(tab: VectorTuneupTab): String = when (tab) {
     VectorTuneupTab.INPUT -> "Input"
     VectorTuneupTab.DIAGNOSTICS -> "Diagnostics"
     VectorTuneupTab.COMPARE -> "Compare"
+    VectorTuneupTab.HISTORY -> "History"
     VectorTuneupTab.EXPORT -> "Export"
 }

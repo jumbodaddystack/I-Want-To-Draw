@@ -1,5 +1,8 @@
 package com.aichat.sandbox.ui.screens.vector
 
+import com.aichat.sandbox.data.model.VectorTuneupMode
+import com.aichat.sandbox.data.repository.VectorTuneupProject
+import com.aichat.sandbox.data.repository.VectorTuneupVersion
 import com.aichat.sandbox.data.vector.AndroidVectorDrawableParser
 import com.aichat.sandbox.data.vector.AndroidVectorDrawableWriter
 import com.aichat.sandbox.data.vector.VectorDocument
@@ -159,22 +162,16 @@ class VectorTuneupReducer(
         result: VectorTuneupAiResult,
     ): VectorTuneupUiState {
         val apply = result.applyResult
-        val rejectedWarnings = result.plan.rejected.map { rejected ->
-            VectorWarning(
-                VectorWarning.Codes.AI_PLAN_SKIPPED_INVALID_OPERATION,
-                "Rejected operation (${rejected.reason})",
-            )
-        }
         val candidate = VectorVersionUi(
             id = VectorVersionUi.ID_CANDIDATE,
             label = "AI Tune-Up",
             xml = apply.xml,
             metrics = apply.metrics,
-            warnings = (apply.warnings + rejectedWarnings).distinct(),
+            warnings = aiCandidateWarnings(result),
             reportSummary = apply.summary,
+            mode = VectorTuneupMode.AI_TUNE_UP,
         )
-        val status = if (result.plan.isEmpty) AI_NO_CHANGES
-        else "AI proposed ${result.plan.operations.size} operation(s)."
+        val status = aiStatus(result)
         return state.copy(
             candidate = candidate,
             isAiRunning = false,
@@ -213,13 +210,7 @@ class VectorTuneupReducer(
     ): VectorTuneupUiState {
         val compile = result.compileResult
         val scene = result.scene
-        val rejectedWarnings = scene.rejected.map { rejected ->
-            VectorWarning(
-                VectorWarning.Codes.SCENE_OBJECT_REJECTED,
-                "Rejected object (${rejected.reason})",
-            )
-        }
-        val warnings = (compile.warnings + rejectedWarnings).distinct()
+        val warnings = redrawCandidateWarnings(result)
         val candidate = VectorVersionUi(
             id = VectorVersionUi.ID_CANDIDATE,
             label = "AI Redraw",
@@ -227,12 +218,9 @@ class VectorTuneupReducer(
             metrics = compile.metrics,
             warnings = warnings,
             reportSummary = redrawSummary(scene, compile, warnings.size),
+            mode = VectorTuneupMode.AI_REDRAW,
         )
-        val status = if (scene.objects.isEmpty()) {
-            REDRAW_NO_OBJECTS
-        } else {
-            "AI proposed ${scene.objects.size} object(s)."
-        }
+        val status = redrawStatus(scene)
         return state.copy(
             candidate = candidate,
             isRedrawRunning = false,
@@ -250,16 +238,109 @@ class VectorTuneupReducer(
     fun redrawFailed(state: VectorTuneupUiState, message: String): VectorTuneupUiState =
         state.copy(isRedrawRunning = false, redrawStatusMessage = message)
 
-    private fun redrawSummary(
-        scene: VectorScene,
-        compile: VectorSceneCompileResult,
-        warningCount: Int,
-    ): String = buildString {
-        append(scene.styleIntent.ifBlank { "AI redraw" })
-        append('\n')
-        append("Objects: ${scene.objects.size} accepted, ${scene.rejected.size} rejected\n")
-        append("Compiled paths: ${compile.metrics.pathCount}\n")
-        append("Warnings: $warningCount")
+    // ---- project + version history (Phase 6) ----
+
+    /**
+     * Loads a persisted [project] and its [versions] into the workspace,
+     * deriving [VectorTuneupUiState.original] (the [VectorTuneupMode.ORIGINAL]
+     * version), [VectorTuneupUiState.candidate] (the active non-original
+     * version), and selecting the active version. The input field is restored to
+     * the project's exact source XML.
+     */
+    fun loadProject(
+        state: VectorTuneupUiState,
+        project: VectorTuneupProject,
+        versions: List<VectorTuneupVersion>,
+    ): VectorTuneupUiState {
+        val ui = versions.map { it.toUi() }
+        val original = ui.firstOrNull { it.mode == VectorTuneupMode.ORIGINAL }
+        val active = ui.firstOrNull { it.id == project.activeVersionId }
+        val candidate = active?.takeIf { it.mode != VectorTuneupMode.ORIGINAL }
+        return state.copy(
+            projectId = project.id,
+            projectTitle = project.title,
+            versions = ui,
+            activeVersionId = project.activeVersionId,
+            selectedVersionId = project.activeVersionId,
+            original = original ?: state.original,
+            candidate = candidate,
+            inputXml = project.sourceXml,
+            errorMessage = null,
+            selectedTab = if (candidate != null) VectorTuneupTab.COMPARE else VectorTuneupTab.DIAGNOSTICS,
+            isOptimizing = false,
+            isAiRunning = false,
+            isRedrawRunning = false,
+        )
+    }
+
+    /**
+     * Folds a freshly persisted [version] (plus the full reloaded version list)
+     * into the state: it becomes the active + selected version and, when
+     * non-original, the compared candidate. All prior versions are preserved.
+     */
+    fun stagePersistedVersion(
+        state: VectorTuneupUiState,
+        version: VectorTuneupVersion,
+        allVersions: List<VectorTuneupVersion>,
+    ): VectorTuneupUiState {
+        val ui = allVersions.map { it.toUi() }
+        val staged = ui.firstOrNull { it.id == version.id } ?: version.toUi()
+        val original = ui.firstOrNull { it.mode == VectorTuneupMode.ORIGINAL } ?: state.original
+        val candidate = staged.takeIf { it.mode != VectorTuneupMode.ORIGINAL } ?: state.candidate
+        return state.copy(
+            versions = ui,
+            original = original,
+            candidate = candidate,
+            activeVersionId = version.id,
+            selectedVersionId = version.id,
+            errorMessage = null,
+            selectedTab = VectorTuneupTab.COMPARE,
+            isOptimizing = false,
+            isAiRunning = false,
+            isRedrawRunning = false,
+        )
+    }
+
+    /**
+     * Selects a version in the history panel. The selection drives both the
+     * compare view and which version the next operation branches from. Selecting
+     * the original clears the compared candidate.
+     */
+    fun selectVersion(state: VectorTuneupUiState, versionId: String): VectorTuneupUiState {
+        val version = state.versions.firstOrNull { it.id == versionId } ?: return state
+        return state.copy(
+            selectedVersionId = versionId,
+            candidate = version.takeIf { it.mode != VectorTuneupMode.ORIGINAL },
+        )
+    }
+
+    /** Marks a version active (and selected) so it drives compare/export. */
+    fun setActiveVersion(state: VectorTuneupUiState, versionId: String): VectorTuneupUiState {
+        val version = state.versions.firstOrNull { it.id == versionId } ?: return state
+        return state.copy(
+            activeVersionId = versionId,
+            selectedVersionId = versionId,
+            candidate = version.takeIf { it.mode != VectorTuneupMode.ORIGINAL },
+        )
+    }
+
+    /** Updates the in-memory project title. Persistence is the caller's job. */
+    fun renameProject(state: VectorTuneupUiState, title: String): VectorTuneupUiState =
+        if (title.isBlank()) state else state.copy(projectTitle = title.trim())
+
+    /**
+     * Resolves which version an export should use: an explicit [versionId] wins,
+     * otherwise the selected version, then the active version, then the
+     * candidate/original fallback.
+     */
+    fun resolveExportVersion(
+        state: VectorTuneupUiState,
+        versionId: String?,
+    ): VectorVersionUi? = when {
+        versionId != null ->
+            state.versions.firstOrNull { it.id == versionId } ?: state.candidate ?: state.original
+        else ->
+            state.selectedVersion ?: state.activeVersion ?: state.candidate ?: state.original
     }
 
     // ---- helpers ----
@@ -299,6 +380,56 @@ class VectorTuneupReducer(
         const val REDRAW_NEED_KEY =
             "Add an API key in Settings before using AI Redraw."
         const val REDRAW_NO_OBJECTS = "No drawable objects were proposed."
+
+        // Phase 6 — friendly persistence errors (technical detail is logged).
+        const val ERROR_CREATE_PROJECT = "Could not create project from this XML."
+        const val ERROR_LOAD_PROJECT = "Could not load this vector project."
+        const val ERROR_SAVE_VERSION = "Could not save the new version."
+        const val ERROR_RENAME = "Could not rename the project."
+        const val ERROR_DELETE = "Could not delete the project."
+        const val ERROR_NEED_VECTOR = "Save or parse a vector first."
+
+        /** Merged apply + rejected-operation warnings for an AI tune-up result. */
+        fun aiCandidateWarnings(result: VectorTuneupAiResult): List<VectorWarning> {
+            val rejected = result.plan.rejected.map { r ->
+                VectorWarning(
+                    VectorWarning.Codes.AI_PLAN_SKIPPED_INVALID_OPERATION,
+                    "Rejected operation (${r.reason})",
+                )
+            }
+            return (result.applyResult.warnings + rejected).distinct()
+        }
+
+        fun aiStatus(result: VectorTuneupAiResult): String =
+            if (result.plan.isEmpty) AI_NO_CHANGES
+            else "AI proposed ${result.plan.operations.size} operation(s)."
+
+        /** Merged compile + rejected-object warnings for a redraw result. */
+        fun redrawCandidateWarnings(result: VectorRedrawAiResult): List<VectorWarning> {
+            val rejected = result.scene.rejected.map { r ->
+                VectorWarning(
+                    VectorWarning.Codes.SCENE_OBJECT_REJECTED,
+                    "Rejected object (${r.reason})",
+                )
+            }
+            return (result.compileResult.warnings + rejected).distinct()
+        }
+
+        fun redrawStatus(scene: VectorScene): String =
+            if (scene.objects.isEmpty()) REDRAW_NO_OBJECTS
+            else "AI proposed ${scene.objects.size} object(s)."
+
+        fun redrawSummary(
+            scene: VectorScene,
+            compile: VectorSceneCompileResult,
+            warningCount: Int,
+        ): String = buildString {
+            append(scene.styleIntent.ifBlank { "AI redraw" })
+            append('\n')
+            append("Objects: ${scene.objects.size} accepted, ${scene.rejected.size} rejected\n")
+            append("Compiled paths: ${compile.metrics.pathCount}\n")
+            append("Warnings: $warningCount")
+        }
 
         /** Human-readable before/after summary for the compare/export panels. */
         fun summarize(report: VectorOptimizationReport): String {

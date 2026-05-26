@@ -456,3 +456,74 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
         db.execSQL("ALTER TABLE `notes` ADD COLUMN `isIcon` INTEGER NOT NULL DEFAULT 0")
     }
 }
+
+/**
+ * Migration from version 14 to 15:
+ * Phase 6 — persistent Vector Art Tune-Up projects. Adds two additive tables:
+ *   - `vector_tuneup_projects`: one row per saved project, holding the exact
+ *     imported `sourceXml` and a pointer to the active version.
+ *   - `vector_tuneup_versions`: the version tree (original + every generated
+ *     candidate) with `parentId` lineage, cascade-deleted with their project.
+ *
+ * `activeVersionId` deliberately has no foreign key (it would create a circular
+ * project↔version dependency at creation time); app logic maintains it. Index
+ * names match what Room generates for the declared `@Index`es so the schema
+ * identity validates on open.
+ */
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `vector_tuneup_projects` (
+                `id` TEXT NOT NULL,
+                `title` TEXT NOT NULL,
+                `sourceXml` TEXT NOT NULL,
+                `activeVersionId` TEXT,
+                `createdAt` INTEGER NOT NULL,
+                `updatedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_vector_tuneup_projects_updatedAt` " +
+                "ON `vector_tuneup_projects` (`updatedAt`)",
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `vector_tuneup_versions` (
+                `id` TEXT NOT NULL,
+                `projectId` TEXT NOT NULL,
+                `parentId` TEXT,
+                `label` TEXT NOT NULL,
+                `instruction` TEXT NOT NULL,
+                `mode` TEXT NOT NULL,
+                `xml` TEXT NOT NULL,
+                `metricsJson` TEXT NOT NULL,
+                `warningsJson` TEXT NOT NULL,
+                `reportSummary` TEXT,
+                `editPlanJson` TEXT,
+                `sceneJson` TEXT,
+                `previewPngPath` TEXT,
+                `createdAt` INTEGER NOT NULL,
+                PRIMARY KEY(`id`),
+                FOREIGN KEY(`projectId`) REFERENCES `vector_tuneup_projects`(`id`)
+                    ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_vector_tuneup_versions_projectId` " +
+                "ON `vector_tuneup_versions` (`projectId`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_vector_tuneup_versions_parentId` " +
+                "ON `vector_tuneup_versions` (`parentId`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_vector_tuneup_versions_createdAt` " +
+                "ON `vector_tuneup_versions` (`createdAt`)",
+        )
+    }
+}
