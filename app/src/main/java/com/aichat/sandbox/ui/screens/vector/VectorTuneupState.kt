@@ -4,6 +4,7 @@ import com.aichat.sandbox.data.vector.VectorOptimizeOptions
 import com.aichat.sandbox.data.vector.VectorPathCatalogEntry
 import com.aichat.sandbox.data.vector.VectorQualityScores
 import com.aichat.sandbox.data.vector.VectorVersionDiff
+import com.aichat.sandbox.data.vector.VectorWarning
 
 /**
  * Immutable UI state for the Vector Art Tune-Up workspace.
@@ -38,6 +39,8 @@ import com.aichat.sandbox.data.vector.VectorVersionDiff
  * @property qualityScores Deterministic quality scores for the analyzed source version.
  * @property selectedDiff Structural diff of original vs the analyzed source version.
  * @property manualEditStatusMessage Friendly status line for the manual-edit controls.
+ * @property visualDiffMode How the Compare tab's visual diff is presented.
+ * @property previewWarnings Preview-build notes for the current source version (informational only).
  */
 data class VectorTuneupUiState(
     val inputXml: String = "",
@@ -66,6 +69,8 @@ data class VectorTuneupUiState(
     val qualityScores: VectorQualityScores? = null,
     val selectedDiff: VectorVersionDiff? = null,
     val manualEditStatusMessage: String? = null,
+    val visualDiffMode: VectorVisualDiffMode = VectorVisualDiffMode.SIDE_BY_SIDE,
+    val previewWarnings: List<VectorWarning> = emptyList(),
 ) {
     /** True once the input has been parsed into an [original] version. */
     val hasOriginal: Boolean get() = original != null

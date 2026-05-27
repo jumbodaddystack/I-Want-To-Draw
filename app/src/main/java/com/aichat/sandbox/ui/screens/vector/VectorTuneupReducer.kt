@@ -364,6 +364,24 @@ class VectorTuneupReducer(
         selectedDiff = diff,
     )
 
+    // ---- preview + visual diff (Phase 8) ----
+
+    /** Switches the Compare tab's visual-diff presentation mode. */
+    fun setVisualDiffMode(
+        state: VectorTuneupUiState,
+        mode: VectorVisualDiffMode,
+    ): VectorTuneupUiState = state.copy(visualDiffMode = mode)
+
+    /**
+     * Records the preview-build notes for the current source version. Purely
+     * informational — it must never disturb the version/candidate selection or
+     * any other workflow state.
+     */
+    fun setPreviewWarnings(
+        state: VectorTuneupUiState,
+        warnings: List<VectorWarning>,
+    ): VectorTuneupUiState = state.copy(previewWarnings = warnings)
+
     /** Toggles whether [pathId] is selected for the next manual edit. */
     fun togglePathSelection(state: VectorTuneupUiState, pathId: String): VectorTuneupUiState {
         val next = state.selectedPathIds.toMutableSet()

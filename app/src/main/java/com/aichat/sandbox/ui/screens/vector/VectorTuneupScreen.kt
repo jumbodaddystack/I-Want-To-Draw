@@ -197,11 +197,12 @@ private fun DiagnosticsTab(state: VectorTuneupUiState) {
         )
         return
     }
+    SectionTitle("Preview")
+    VectorPreviewPanel(title = "Original (parsed)", version = original)
     SectionTitle("Metrics")
     VectorMetricsPanel(original.metrics)
     SectionTitle("Warnings")
     VectorWarningList(original.warnings)
-    PreviewPlaceholder()
 }
 
 @Composable
@@ -254,6 +255,15 @@ private fun CompareTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
         onRun = viewModel::runSemanticRedraw,
         onCancel = viewModel::cancelSemanticRedraw,
     )
+    SectionTitle("Visual diff")
+    VectorVisualDiffPanel(
+        original = state.original,
+        candidate = state.candidate,
+        mode = state.visualDiffMode,
+        onModeChange = viewModel::setVisualDiffMode,
+        diff = state.selectedDiff,
+    )
+
     SectionTitle("Compare")
     VectorVersionComparePanel(
         original = state.original,
@@ -287,6 +297,13 @@ private fun EditTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel
                 .padding(bottom = 8.dp),
         )
     }
+
+    SectionTitle("Preview")
+    VectorPreviewPanel(
+        title = state.sourceVersion?.label ?: "Selected version",
+        version = state.sourceVersion,
+        highlightPathIds = state.selectedPathIds,
+    )
 
     SectionTitle("Quality")
     VectorQualityPanel(scores = state.qualityScores)
@@ -329,6 +346,12 @@ private fun HistoryTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(bottom = 4.dp),
     )
+
+    val previewVersion = state.selectedVersion ?: state.activeVersion ?: state.candidate ?: state.original
+    if (previewVersion != null) {
+        SectionTitle("Preview selected")
+        VectorPreviewPanel(title = previewVersion.label, version = previewVersion)
+    }
 
     SectionTitle("Saved projects")
     if (projects.isEmpty()) {
@@ -399,16 +422,6 @@ private fun ExportTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMod
     ) {
         Text("Export selected version")
     }
-}
-
-@Composable
-private fun PreviewPlaceholder() {
-    SectionTitle("Preview")
-    Text(
-        text = "Preview rendering coming in a later phase.",
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
 
 @Composable

@@ -401,6 +401,12 @@ class VectorTuneupViewModel @Inject constructor(
         }
     }
 
+    // ---- preview + visual diff (Phase 8) ----
+
+    fun setVisualDiffMode(mode: VectorVisualDiffMode) {
+        _uiState.update { reducer.setVisualDiffMode(it, mode) }
+    }
+
     // ---- advanced editing + quality scoring (Phase 7) ----
 
     fun togglePathSelection(pathId: String) {
