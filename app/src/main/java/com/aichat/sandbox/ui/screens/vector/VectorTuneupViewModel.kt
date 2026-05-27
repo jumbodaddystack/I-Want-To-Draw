@@ -1,5 +1,6 @@
 package com.aichat.sandbox.ui.screens.vector
 
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,6 +14,7 @@ import com.aichat.sandbox.data.vector.VectorBatchRestyleApplier
 import com.aichat.sandbox.data.vector.VectorDocument
 import com.aichat.sandbox.data.vector.VectorDrawableOptimizer
 import com.aichat.sandbox.data.vector.VectorExportFormat
+import com.aichat.sandbox.data.vector.VectorInputLimits
 import com.aichat.sandbox.data.vector.VectorManualEdit
 import com.aichat.sandbox.data.vector.VectorManualEditApplier
 import com.aichat.sandbox.data.vector.VectorManualEditResult
@@ -30,6 +32,7 @@ import com.aichat.sandbox.data.vector.VectorTuneupAiChunk
 import com.aichat.sandbox.data.vector.VectorTuneupAiRequest
 import com.aichat.sandbox.data.vector.VectorTuneupAiService
 import com.aichat.sandbox.data.vector.VectorTuneupExporter
+import com.aichat.sandbox.data.vector.VectorTuneupFileReader
 import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -63,6 +66,7 @@ class VectorTuneupViewModel @Inject constructor(
     private val redrawService: VectorRedrawAiService,
     private val preferencesManager: PreferencesManager,
     private val repository: VectorTuneupRepository,
+    private val fileReader: VectorTuneupFileReader,
 ) : ViewModel() {
 
     private val reducer = VectorTuneupReducer()
@@ -176,6 +180,10 @@ class VectorTuneupViewModel @Inject constructor(
         if (_uiState.value.isBusy) return
         val prompt = _uiState.value.aiPrompt
         if (prompt.isBlank()) return
+        if (_uiState.value.expensiveAiBlocked) {
+            _uiState.update { reducer.aiFailed(it, expensiveBlockMessage(it)) }
+            return
+        }
 
         _uiState.update { reducer.startAi(it) }
         aiJob = viewModelScope.launch {
@@ -264,6 +272,10 @@ class VectorTuneupViewModel @Inject constructor(
         if (_uiState.value.isBusy) return
         val prompt = _uiState.value.redrawPrompt
         if (prompt.isBlank()) return
+        if (_uiState.value.expensiveAiBlocked) {
+            _uiState.update { reducer.redrawFailed(it, expensiveBlockMessage(it)) }
+            return
+        }
 
         _uiState.update { reducer.startRedraw(it) }
         redrawJob = viewModelScope.launch {
@@ -649,6 +661,71 @@ class VectorTuneupViewModel @Inject constructor(
             }
         }
     }
+
+    // ---- file import + large-input safety (Phase 11) ----
+
+    /** Opt the user in/out of running expensive AI on large (EXTREME) input. */
+    fun setAllowExpensiveOnLargeInput(allow: Boolean) {
+        _uiState.update { reducer.setAllowExpensiveOnLargeInput(it, allow) }
+    }
+
+    /**
+     * Reads a picked vector file (XML/SVG/bundle JSON) and routes it: a bundle is
+     * imported as a new project, anything else is placed in the input and parsed.
+     * Oversized/unreadable files surface a friendly status and change nothing.
+     */
+    fun importVectorFileFromUri(uri: Uri, displayName: String? = null) {
+        readThen(uri) { text -> importVectorTextFromFile(displayName, text) }
+    }
+
+    /** Reads a picked file and imports it as a project bundle (History tab). */
+    fun importBundleFileFromUri(uri: Uri, displayName: String? = null) {
+        readThen(uri) { text -> importBundleTextFromFile(displayName, text) }
+    }
+
+    /**
+     * Routes already-read import text. Oversized text is rejected; a project bundle
+     * is sent to bundle import; everything else is placed in the input and parsed.
+     */
+    fun importVectorTextFromFile(displayName: String?, text: String) {
+        when (reducer.classifyImportText(text)) {
+            VectorTuneupReducer.ImportRoute.TOO_LARGE ->
+                _uiState.update { reducer.fileImportFailed(it, VectorTuneupReducer.FILE_TOO_LARGE) }
+            VectorTuneupReducer.ImportRoute.BUNDLE -> importBundleTextFromFile(displayName, text)
+            VectorTuneupReducer.ImportRoute.VECTOR ->
+                _uiState.update { reducer.importVectorText(it, displayName, text) }
+        }
+    }
+
+    /** Stages already-read bundle JSON and imports it as a new project. */
+    fun importBundleTextFromFile(displayName: String?, text: String) {
+        if (text.length > VectorInputLimits.MAX_PASTE_CHARS) {
+            _uiState.update { reducer.fileImportFailed(it, VectorTuneupReducer.FILE_TOO_LARGE) }
+            return
+        }
+        _uiState.update { reducer.onBundleImportTextChanged(it, text) }
+        importBundleFromText()
+    }
+
+    /** Reads [uri] via the file-reader seam, then hands the text to [onText]. */
+    private fun readThen(uri: Uri, onText: (String) -> Unit) {
+        viewModelScope.launch {
+            val result = fileReader.readText(uri, VectorInputLimits.MAX_IMPORT_BYTES)
+            val text = result.getOrElse { t ->
+                val message = when ((t as? VectorTuneupFileReader.FileReadException)?.error) {
+                    VectorTuneupFileReader.ReadError.TOO_LARGE -> VectorTuneupReducer.FILE_TOO_LARGE
+                    else -> VectorTuneupReducer.FILE_UNREADABLE
+                }
+                _uiState.update { reducer.fileImportFailed(it, message) }
+                return@launch
+            }
+            onText(text)
+        }
+    }
+
+    private fun expensiveBlockMessage(state: VectorTuneupUiState): String =
+        if (state.isInputUnsafe) VectorTuneupReducer.AI_BLOCKED_UNSAFE
+        else VectorTuneupReducer.AI_BLOCKED_EXTREME
 
     // ---- export ----
 

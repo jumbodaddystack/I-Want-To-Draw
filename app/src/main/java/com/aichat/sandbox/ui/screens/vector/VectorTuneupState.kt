@@ -2,6 +2,8 @@ package com.aichat.sandbox.ui.screens.vector
 
 import com.aichat.sandbox.data.vector.VectorExportFormat
 import com.aichat.sandbox.data.vector.VectorImportFormat
+import com.aichat.sandbox.data.vector.VectorInputHealth
+import com.aichat.sandbox.data.vector.VectorLargeInputGuard
 import com.aichat.sandbox.data.vector.VectorOptimizeOptions
 import com.aichat.sandbox.data.vector.VectorPathCatalogEntry
 import com.aichat.sandbox.data.vector.VectorQualityScores
@@ -80,6 +82,9 @@ data class VectorTuneupUiState(
     val bundleImportText: String = "",
     val bundleImportStatusMessage: String? = null,
     val isImportingBundle: Boolean = false,
+    val inputHealth: VectorInputHealth = VectorLargeInputGuard.SAFE,
+    val allowExpensiveOnLargeInput: Boolean = false,
+    val fileImportStatusMessage: String? = null,
 ) {
     /** True once the input has been parsed into an [original] version. */
     val hasOriginal: Boolean get() = original != null
@@ -105,4 +110,17 @@ data class VectorTuneupUiState(
      * only before anything has been parsed.
      */
     val sourceVersion: VectorVersionUi? get() = selectedVersion ?: candidate ?: original
+
+    /** True when the current input is too large to run expensive (AI) operations on. */
+    val isInputUnsafe: Boolean
+        get() = inputHealth.severity == VectorInputHealth.Severity.UNSAFE
+
+    /**
+     * True when expensive AI operations should be held back for this input: always
+     * for UNSAFE input, and for EXTREME input until the user explicitly opts in via
+     * [allowExpensiveOnLargeInput].
+     */
+    val expensiveAiBlocked: Boolean
+        get() = isInputUnsafe ||
+            (inputHealth.severity == VectorInputHealth.Severity.EXTREME && !allowExpensiveOnLargeInput)
 }

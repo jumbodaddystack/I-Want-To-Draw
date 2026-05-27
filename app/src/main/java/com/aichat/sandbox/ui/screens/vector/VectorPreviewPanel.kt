@@ -13,6 +13,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.aichat.sandbox.data.vector.AndroidVectorDrawableParser
 import com.aichat.sandbox.data.vector.VectorPreviewBuilder
@@ -84,7 +86,11 @@ fun VectorPreviewPanel(
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(previewAspect(model)),
+                    .aspectRatio(previewAspect(model))
+                    .semantics {
+                        contentDescription =
+                            "$title preview: ${build.pathCount} paths, ${build.commandCount} commands."
+                    },
             ) {
                 VectorPreviewCanvas(
                     model = model,

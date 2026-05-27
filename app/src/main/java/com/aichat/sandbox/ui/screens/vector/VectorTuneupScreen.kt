@@ -164,7 +164,7 @@ fun VectorTuneupScreen(
             ) {
                 when (state.selectedTab) {
                     VectorTuneupTab.INPUT -> InputTab(state, viewModel)
-                    VectorTuneupTab.DIAGNOSTICS -> DiagnosticsTab(state)
+                    VectorTuneupTab.DIAGNOSTICS -> DiagnosticsTab(state, viewModel)
                     VectorTuneupTab.COMPARE -> CompareTab(state, viewModel)
                     VectorTuneupTab.EDIT -> EditTab(state, viewModel)
                     VectorTuneupTab.HISTORY -> HistoryTab(state, viewModel)
@@ -177,6 +177,26 @@ fun VectorTuneupScreen(
 
 @Composable
 private fun InputTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel) {
+    VectorTuneupHelpPanel()
+    SectionTitle("Import from a file")
+    VectorFileImportPanel(
+        buttonLabel = "Import file",
+        helpText = "Import an Android VectorDrawable .xml, an .svg, or a project bundle .json. " +
+            "Bundles open as a new project; XML/SVG land in the field below.",
+        mimeTypes = VECTOR_IMPORT_MIME_TYPES,
+        onFilePicked = { uri -> viewModel.importVectorFileFromUri(uri) },
+    )
+    state.fileImportStatusMessage?.let { message ->
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+        )
+    }
+    SectionTitle("Paste")
     VectorXmlInputPanel(
         inputXml = state.inputXml,
         detectedFormat = state.detectedImportFormat,
@@ -188,7 +208,7 @@ private fun InputTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMode
 }
 
 @Composable
-private fun DiagnosticsTab(state: VectorTuneupUiState) {
+private fun DiagnosticsTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel) {
     val original = state.original
     if (original == null) {
         Text(
@@ -203,6 +223,12 @@ private fun DiagnosticsTab(state: VectorTuneupUiState) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(bottom = 4.dp),
+    )
+    SectionTitle("Health")
+    VectorProjectHealthPanel(
+        health = com.aichat.sandbox.data.vector.VectorTuneupAudit.assessMetrics(original.metrics),
+        allowExpensive = state.allowExpensiveOnLargeInput,
+        onAllowExpensiveChange = viewModel::setAllowExpensiveOnLargeInput,
     )
     SectionTitle("Preview")
     VectorPreviewPanel(title = "Original (parsed)", version = original)
@@ -255,6 +281,20 @@ private fun CompareTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
         if (state.isOptimizing) {
             CircularProgressIndicator(modifier = Modifier.padding(start = 4.dp))
         }
+    }
+    if (state.expensiveAiBlocked) {
+        Text(
+            text = if (state.isInputUnsafe) {
+                "AI is disabled for this large vector. Optimize it locally first or import a smaller file."
+            } else {
+                "This vector is large. Enable \"Run AI on large input\" in Diagnostics before using AI."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+        )
     }
     SectionTitle("AI Tune-Up")
     VectorAiTuneupPanel(
@@ -420,6 +460,13 @@ private fun HistoryTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
     )
 
     SectionTitle("Import project bundle")
+    VectorFileImportPanel(
+        buttonLabel = "Import bundle file",
+        helpText = "Import a Vector Tune-Up project bundle .json file as a new project.",
+        mimeTypes = BUNDLE_IMPORT_MIME_TYPES,
+        onFilePicked = { uri -> viewModel.importBundleFileFromUri(uri) },
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
     VectorBundleImportPanel(
         bundleText = state.bundleImportText,
         statusMessage = state.bundleImportStatusMessage,

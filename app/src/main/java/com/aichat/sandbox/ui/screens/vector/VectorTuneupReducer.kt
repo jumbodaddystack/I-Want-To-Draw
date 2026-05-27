@@ -11,6 +11,8 @@ import com.aichat.sandbox.data.vector.VectorDrawableOptimizer
 import com.aichat.sandbox.data.vector.VectorExportFormat
 import com.aichat.sandbox.data.vector.VectorImportDetector
 import com.aichat.sandbox.data.vector.VectorImportFormat
+import com.aichat.sandbox.data.vector.VectorInputLimits
+import com.aichat.sandbox.data.vector.VectorLargeInputGuard
 import com.aichat.sandbox.data.vector.VectorMetrics
 import com.aichat.sandbox.data.vector.VectorMetricsAnalyzer
 import com.aichat.sandbox.data.vector.VectorEditPlanApplyResult
@@ -58,6 +60,7 @@ class VectorTuneupReducer(
         state.copy(
             inputXml = xml,
             detectedImportFormat = VectorImportDetector.detect(xml),
+            inputHealth = VectorLargeInputGuard.assessInputText(xml),
             errorMessage = null,
         )
 
@@ -300,6 +303,7 @@ class VectorTuneupReducer(
             candidate = candidate,
             inputXml = project.sourceXml,
             detectedImportFormat = VectorImportDetector.detect(project.sourceXml),
+            inputHealth = VectorLargeInputGuard.assessInputText(project.sourceXml),
             errorMessage = null,
             selectedTab = if (candidate != null) VectorTuneupTab.COMPARE else VectorTuneupTab.DIAGNOSTICS,
             isOptimizing = false,
@@ -502,6 +506,50 @@ class VectorTuneupReducer(
     fun versionGraphActionFailed(state: VectorTuneupUiState, message: String): VectorTuneupUiState =
         state.copy(bundleImportStatusMessage = message)
 
+    // ---- file import + large-input safety (Phase 11) ----
+
+    /** How an imported blob of text should be routed once it has been read. */
+    enum class ImportRoute { TOO_LARGE, BUNDLE, VECTOR }
+
+    /**
+     * Classifies imported text without parsing it: oversized text is rejected,
+     * a project bundle is routed to bundle import, and anything else is treated as
+     * a vector to place in the input field. Pure and crash-proof.
+     */
+    fun classifyImportText(text: String): ImportRoute = when {
+        text.length > VectorInputLimits.MAX_PASTE_CHARS -> ImportRoute.TOO_LARGE
+        VectorImportDetector.detect(text) == VectorImportFormat.PROJECT_BUNDLE -> ImportRoute.BUNDLE
+        else -> ImportRoute.VECTOR
+    }
+
+    /** Records a friendly file-import failure; nothing else changes. */
+    fun fileImportFailed(state: VectorTuneupUiState, message: String): VectorTuneupUiState =
+        state.copy(fileImportStatusMessage = message)
+
+    /**
+     * Places imported vector text (XML/SVG) into the input field and parses it,
+     * mirroring the manual paste-then-parse flow. A friendly status names the
+     * imported file. Oversized text is rejected by the caller via [classifyImportText].
+     */
+    fun importVectorText(
+        state: VectorTuneupUiState,
+        displayName: String?,
+        text: String,
+    ): VectorTuneupUiState {
+        val parsed = parseInput(onXmlChanged(state, text))
+        val status = if (parsed.errorMessage == null) importedStatus(displayName) else null
+        return parsed.copy(fileImportStatusMessage = status)
+    }
+
+    /** Toggles the user's opt-in to run expensive AI on large (EXTREME) input. */
+    fun setAllowExpensiveOnLargeInput(
+        state: VectorTuneupUiState,
+        allow: Boolean,
+    ): VectorTuneupUiState = state.copy(allowExpensiveOnLargeInput = allow)
+
+    private fun importedStatus(displayName: String?): String =
+        if (displayName.isNullOrBlank()) "Imported file." else "Imported \"$displayName\"."
+
     // ---- helpers ----
 
     private fun buildVersion(input: String, id: String, label: String): VectorVersionUi {
@@ -569,6 +617,15 @@ class VectorTuneupReducer(
         const val MANUAL_APPLY_FAILED = "Could not apply manual edit."
         const val MANUAL_ANALYZE_FAILED = "Could not analyze selected version."
         const val MANUAL_SAVE_FAILED = "Could not save manual edit."
+
+        // Phase 11 — file import + large-input safety messages.
+        const val FILE_TOO_LARGE = "This file is too large to import."
+        const val FILE_UNREADABLE = "Could not read this file."
+        const val FILE_UNSUPPORTED = "This file type is not supported here."
+        const val AI_BLOCKED_UNSAFE =
+            "This vector is too large for AI. Run a local Optimize first or import a smaller file."
+        const val AI_BLOCKED_EXTREME =
+            "This vector is large. Enable \"Run AI on large input\" in Diagnostics to proceed, or Optimize first."
 
         // Phase 10 — friendly bundle-import / version-graph messages.
         const val BUNDLE_IMPORT_BLANK = "Paste a Vector Tune-Up project bundle JSON first."
