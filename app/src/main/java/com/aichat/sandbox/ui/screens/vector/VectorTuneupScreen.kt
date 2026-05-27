@@ -216,6 +216,7 @@ private fun importFormatLabel(format: com.aichat.sandbox.data.vector.VectorImpor
     when (format) {
         com.aichat.sandbox.data.vector.VectorImportFormat.ANDROID_VECTOR -> "Android VectorDrawable"
         com.aichat.sandbox.data.vector.VectorImportFormat.SVG -> "SVG (converted to Android XML)"
+        com.aichat.sandbox.data.vector.VectorImportFormat.PROJECT_BUNDLE -> "Project bundle JSON"
         com.aichat.sandbox.data.vector.VectorImportFormat.UNKNOWN -> "Unknown"
     }
 
@@ -409,6 +410,23 @@ private fun HistoryTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
         onMakeActive = viewModel::setActiveVersion,
         onExport = viewModel::exportVersion,
     )
+
+    SectionTitle("Selected version actions")
+    VectorVersionGraphActionsPanel(
+        selected = state.selectedVersion,
+        enabled = !state.isBusy && state.isSaved,
+        onDuplicate = viewModel::duplicateSelectedVersion,
+        onDelete = viewModel::deleteSelectedVersion,
+    )
+
+    SectionTitle("Import project bundle")
+    VectorBundleImportPanel(
+        bundleText = state.bundleImportText,
+        statusMessage = state.bundleImportStatusMessage,
+        isImporting = state.isImportingBundle,
+        onTextChanged = viewModel::onBundleImportTextChanged,
+        onImport = viewModel::importBundleFromText,
+    )
 }
 
 @Composable
@@ -434,6 +452,12 @@ private fun ExportTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMod
     VectorExportOptionsPanel(
         selected = state.exportFormat,
         onSelect = viewModel::setExportFormat,
+    )
+    Text(
+        text = "Project bundle JSON can be imported back into Vector Tune-Up from the History tab.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 8.dp),
     )
     Button(
         onClick = { viewModel.exportSelectedVersion() },

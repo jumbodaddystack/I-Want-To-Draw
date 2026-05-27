@@ -50,6 +50,21 @@ interface VectorTuneupDao {
     @Query("SELECT * FROM vector_tuneup_versions WHERE id = :versionId")
     suspend fun getVersion(versionId: String): VectorTuneupVersionEntity?
 
+    /** Number of versions that branch directly off [versionId] (Phase 10 leaf-delete guard). */
+    @Query("SELECT COUNT(*) FROM vector_tuneup_versions WHERE parentId = :versionId")
+    suspend fun childCount(versionId: String): Int
+
+    /** The project's [com.aichat.sandbox.data.model.VectorTuneupMode.ORIGINAL] root, if any. */
+    @Query(
+        """
+        SELECT * FROM vector_tuneup_versions
+        WHERE projectId = :projectId AND mode = 'ORIGINAL'
+        ORDER BY createdAt ASC
+        LIMIT 1
+        """,
+    )
+    suspend fun getOriginalVersion(projectId: String): VectorTuneupVersionEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertProject(project: VectorTuneupProjectEntity)
 

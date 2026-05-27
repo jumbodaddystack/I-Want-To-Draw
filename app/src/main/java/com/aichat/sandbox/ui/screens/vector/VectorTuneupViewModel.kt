@@ -547,6 +547,109 @@ class VectorTuneupViewModel @Inject constructor(
         }
     }
 
+    // ---- portable bundle import + version graph (Phase 10) ----
+
+    fun onBundleImportTextChanged(text: String) {
+        _uiState.update { reducer.onBundleImportTextChanged(it, text) }
+    }
+
+    /**
+     * Imports a pasted portable project bundle as a brand-new local project,
+     * then opens it. A blank field or an unimportable bundle leaves the current
+     * project untouched and shows a friendly status.
+     */
+    fun importBundleFromText() {
+        if (_uiState.value.isBusy) return
+        val text = _uiState.value.bundleImportText
+        if (text.isBlank()) {
+            _uiState.update { reducer.bundleImportFailed(it, VectorTuneupReducer.BUNDLE_IMPORT_BLANK) }
+            return
+        }
+        _uiState.update { reducer.startBundleImport(it) }
+        viewModelScope.launch {
+            val result = runCatching { repository.importBundle(text) }.getOrElse {
+                Log.w(TAG, "Bundle import failed", it)
+                null
+            }
+            if (result?.project == null) {
+                _uiState.update { reducer.bundleImportFailed(it, VectorTuneupReducer.BUNDLE_IMPORT_FAILED) }
+                return@launch
+            }
+            val project = result.project
+            val versions = repository.getVersions(project.id)
+            _uiState.update { reducer.bundleImportSucceeded(it, project, versions, result.warnings) }
+        }
+    }
+
+    /**
+     * Duplicates the selected/source version as a new manual-edit child and
+     * stages it as active. Requires a saved project and a persisted source.
+     */
+    fun duplicateSelectedVersion() {
+        if (_uiState.value.isBusy) return
+        val state = _uiState.value
+        val projectId = state.projectId
+        val sourceId = state.sourceVersion?.persistedId
+        if (projectId == null || sourceId == null) {
+            _uiState.update { reducer.versionGraphActionFailed(it, VectorTuneupReducer.VERSION_DUPLICATE_FAILED) }
+            return
+        }
+        viewModelScope.launch {
+            val version = runCatching {
+                repository.duplicateVersion(projectId, sourceId)
+            }.getOrElse {
+                Log.w(TAG, "Duplicate version failed", it)
+                _uiState.update { reducer.versionGraphActionFailed(it, VectorTuneupReducer.VERSION_DUPLICATE_FAILED) }
+                return@launch
+            }
+            val all = repository.getVersions(projectId)
+            _uiState.update {
+                reducer.stagePersistedVersion(it, version, all).copy(selectedTab = VectorTuneupTab.HISTORY)
+            }
+        }
+    }
+
+    /**
+     * Deletes the selected version when it is a safe leaf. The original and
+     * versions with children are blocked with a friendly message; a successful
+     * delete reloads the project and re-selects the active version.
+     */
+    fun deleteSelectedVersion() {
+        if (_uiState.value.isBusy) return
+        val state = _uiState.value
+        val projectId = state.projectId
+        val selected = state.selectedVersion
+        val versionId = selected?.persistedId
+        if (projectId == null || selected == null || versionId == null) {
+            _uiState.update { reducer.versionGraphActionFailed(it, VectorTuneupReducer.VERSION_DELETE_FAILED) }
+            return
+        }
+        if (selected.mode == VectorTuneupMode.ORIGINAL) {
+            _uiState.update { reducer.versionGraphActionFailed(it, VectorTuneupReducer.VERSION_DELETE_ORIGINAL) }
+            return
+        }
+        viewModelScope.launch {
+            val deleted = runCatching {
+                repository.deleteLeafVersion(projectId, versionId)
+            }.getOrElse {
+                Log.w(TAG, "Delete version failed", it)
+                _uiState.update { reducer.versionGraphActionFailed(it, VectorTuneupReducer.VERSION_DELETE_FAILED) }
+                return@launch
+            }
+            if (!deleted) {
+                _uiState.update { reducer.versionGraphActionFailed(it, VectorTuneupReducer.VERSION_DELETE_HAS_CHILDREN) }
+                return@launch
+            }
+            val project = runCatching { repository.getProject(projectId) }.getOrNull()
+            val all = repository.getVersions(projectId)
+            if (project != null) {
+                _uiState.update {
+                    reducer.loadProject(it, project, all).copy(selectedTab = VectorTuneupTab.HISTORY)
+                }
+            }
+        }
+    }
+
     // ---- export ----
 
     /** Updates the portable export format used by the Export tab. */

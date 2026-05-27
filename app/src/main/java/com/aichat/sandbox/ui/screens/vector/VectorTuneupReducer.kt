@@ -111,6 +111,14 @@ class VectorTuneupReducer(
                 candidate = null,
             )
         }
+        // A pasted project bundle is not a vector to parse — point users to import.
+        if (VectorImportDetector.detect(xml) == VectorImportFormat.PROJECT_BUNDLE) {
+            return state.copy(
+                errorMessage = ERROR_BUNDLE_INPUT,
+                original = null,
+                candidate = null,
+            )
+        }
         val parsed = runCatching { buildVersion(xml, VectorVersionUi.ID_ORIGINAL, "Original") }
             .getOrNull()
 
@@ -448,6 +456,52 @@ class VectorTuneupReducer(
         )
     }
 
+    // ---- portable bundle import + version graph (Phase 10) ----
+
+    /** Updates the pasted bundle-import text and clears any stale import status. */
+    fun onBundleImportTextChanged(state: VectorTuneupUiState, text: String): VectorTuneupUiState =
+        state.copy(bundleImportText = text, bundleImportStatusMessage = null)
+
+    /** Marks a bundle import as started, clearing stale status/error. */
+    fun startBundleImport(state: VectorTuneupUiState): VectorTuneupUiState =
+        state.copy(isImportingBundle = true, bundleImportStatusMessage = null, errorMessage = null)
+
+    /**
+     * Records a bundle-import failure with a friendly [message]. The currently
+     * open project (if any) is preserved — a failed import never clobbers state.
+     */
+    fun bundleImportFailed(state: VectorTuneupUiState, message: String): VectorTuneupUiState =
+        state.copy(isImportingBundle = false, bundleImportStatusMessage = message)
+
+    /**
+     * Loads a freshly imported [project] and its [versions] into the workspace
+     * (reusing [loadProject]), lands on the History tab so the new project tree
+     * is visible, clears the import text, and shows a status reflecting how many
+     * [warnings] the import produced.
+     */
+    fun bundleImportSucceeded(
+        state: VectorTuneupUiState,
+        project: VectorTuneupProject,
+        versions: List<VectorTuneupVersion>,
+        warnings: List<VectorWarning>,
+    ): VectorTuneupUiState {
+        val message = if (warnings.isEmpty()) {
+            "Imported \"${project.title}\"."
+        } else {
+            "Imported project with ${warnings.size} warning(s)."
+        }
+        return loadProject(state, project, versions).copy(
+            isImportingBundle = false,
+            bundleImportText = "",
+            bundleImportStatusMessage = message,
+            selectedTab = VectorTuneupTab.HISTORY,
+        )
+    }
+
+    /** Records a friendly version-graph action failure (duplicate/delete) on the History status line. */
+    fun versionGraphActionFailed(state: VectorTuneupUiState, message: String): VectorTuneupUiState =
+        state.copy(bundleImportStatusMessage = message)
+
     // ---- helpers ----
 
     private fun buildVersion(input: String, id: String, label: String): VectorVersionUi {
@@ -489,6 +543,8 @@ class VectorTuneupReducer(
         const val ERROR_BLANK = "Paste Android VectorDrawable XML or SVG first."
         const val ERROR_PARSE =
             "Could not parse this input. Check that it is valid Android VectorDrawable XML or SVG."
+        const val ERROR_BUNDLE_INPUT =
+            "Detected a project bundle JSON. Use History → Import project bundle."
         const val ERROR_OPTIMIZE =
             "Optimization failed, but your original XML was not changed."
 
@@ -513,6 +569,15 @@ class VectorTuneupReducer(
         const val MANUAL_APPLY_FAILED = "Could not apply manual edit."
         const val MANUAL_ANALYZE_FAILED = "Could not analyze selected version."
         const val MANUAL_SAVE_FAILED = "Could not save manual edit."
+
+        // Phase 10 — friendly bundle-import / version-graph messages.
+        const val BUNDLE_IMPORT_BLANK = "Paste a Vector Tune-Up project bundle JSON first."
+        const val BUNDLE_IMPORT_FAILED = "Could not import this project bundle."
+        const val VERSION_DUPLICATE_FAILED = "Could not duplicate this version."
+        const val VERSION_DELETE_HAS_CHILDREN =
+            "This version has child versions, so it was not deleted."
+        const val VERSION_DELETE_ORIGINAL = "The original version cannot be deleted."
+        const val VERSION_DELETE_FAILED = "Could not delete this version."
 
         /** Merged apply + rejected-operation warnings for an AI tune-up result. */
         fun aiCandidateWarnings(result: VectorTuneupAiResult): List<VectorWarning> {

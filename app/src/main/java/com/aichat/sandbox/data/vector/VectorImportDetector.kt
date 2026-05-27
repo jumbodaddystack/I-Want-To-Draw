@@ -4,6 +4,7 @@ package com.aichat.sandbox.data.vector
 enum class VectorImportFormat {
     ANDROID_VECTOR,
     SVG,
+    PROJECT_BUNDLE,
     UNKNOWN,
 }
 
@@ -17,7 +18,15 @@ enum class VectorImportFormat {
  */
 object VectorImportDetector {
 
+    /** Whitespace-tolerant marker for a Phase 9/10 portable project bundle JSON. */
+    private val BUNDLE_KIND = Regex("\"kind\"\\s*:\\s*\"vector_tuneup_project\"")
+
     fun detect(input: String): VectorImportFormat {
+        // A portable project bundle is JSON, not XML — sniff it before tag parsing.
+        val trimmed = input.removePrefix("﻿").trimStart()
+        if (trimmed.startsWith("{") && BUNDLE_KIND.containsMatchIn(trimmed)) {
+            return VectorImportFormat.PROJECT_BUNDLE
+        }
         val root = firstElementName(input) ?: return VectorImportFormat.UNKNOWN
         return when (root) {
             "vector" -> VectorImportFormat.ANDROID_VECTOR

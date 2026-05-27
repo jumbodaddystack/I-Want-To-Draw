@@ -7,12 +7,16 @@ import com.aichat.sandbox.data.model.VectorTuneupMode
 import com.aichat.sandbox.data.model.VectorTuneupProjectEntity
 import com.aichat.sandbox.data.model.VectorTuneupVersionEntity
 import com.aichat.sandbox.data.vector.AndroidVectorDrawableWriter
+import com.aichat.sandbox.data.vector.VectorBundleImportPlan
 import com.aichat.sandbox.data.vector.VectorDocumentImporter
 import com.aichat.sandbox.data.vector.VectorDocumentValidator
 import com.aichat.sandbox.data.vector.VectorImportDetector
 import com.aichat.sandbox.data.vector.VectorImportFormat
 import com.aichat.sandbox.data.vector.VectorMetrics
 import com.aichat.sandbox.data.vector.VectorMetricsAnalyzer
+import com.aichat.sandbox.data.vector.VectorPortableBundleImportReport
+import com.aichat.sandbox.data.vector.VectorPortableBundleParser
+import com.aichat.sandbox.data.vector.VectorPortableBundleValidator
 import com.aichat.sandbox.data.vector.VectorWarning
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -52,6 +56,17 @@ data class VectorTuneupVersion(
     val sceneJson: String?,
     val previewPngPath: String?,
     val createdAt: Long,
+)
+
+/**
+ * Outcome of [VectorTuneupRepository.importBundle]. [project] is non-null only on
+ * a successful import (a bundle that parsed, validated, and produced at least one
+ * version); [warnings] carries parse + validation notes worth surfacing whether
+ * or not the import succeeded.
+ */
+data class VectorBundleImportResult(
+    val project: VectorTuneupProject?,
+    val warnings: List<VectorWarning>,
 )
 
 // ---- Entity <-> domain mappers (pure; unit-tested directly) ----
@@ -105,6 +120,26 @@ internal fun VectorTuneupVersion.toEntity(): VectorTuneupVersionEntity = VectorT
     editPlanJson = editPlanJson,
     sceneJson = sceneJson,
     previewPngPath = previewPngPath,
+    createdAt = createdAt,
+)
+
+/** Maps a validated [VectorBundleImportPlan.PlannedVersion] onto a domain version for a new project. */
+internal fun VectorBundleImportPlan.PlannedVersion.toDomainVersion(
+    projectId: String,
+): VectorTuneupVersion = VectorTuneupVersion(
+    id = newId,
+    projectId = projectId,
+    parentId = newParentId,
+    label = label,
+    instruction = instruction,
+    mode = mode,
+    xml = xml,
+    metrics = metrics,
+    warnings = warnings,
+    reportSummary = reportSummary,
+    editPlanJson = null,
+    sceneJson = null,
+    previewPngPath = null,
     createdAt = createdAt,
 )
 
@@ -217,6 +252,124 @@ class VectorTuneupRepository @Inject constructor(
         dao.setActiveVersion(projectId, original.id, now)
 
         project.copy(activeVersionId = original.id).toDomain()
+    }
+
+    /**
+     * Phase 10 — imports a portable project bundle (the JSON produced by the
+     * Phase 9 export) as a brand-new local project. Never overwrites an existing
+     * project: a fresh project id is generated and every bundle version is
+     * re-keyed to a new id with its parent lineage remapped onto those ids.
+     *
+     * Returns a [VectorBundleImportResult] rather than throwing: a malformed
+     * bundle, wrong kind/schema, or a bundle with no importable versions yields
+     * `project = null` plus explanatory warnings. On success the new project's
+     * active version is the declared active version (none in schema 1), else the
+     * last imported version, else the original.
+     */
+    suspend fun importBundle(bundleJson: String): VectorBundleImportResult =
+        withContext(Dispatchers.IO) {
+            val parsed = VectorPortableBundleParser.parse(bundleJson)
+            val bundle = parsed.bundle
+                ?: return@withContext VectorBundleImportResult(null, parsed.warnings)
+
+            val now = System.currentTimeMillis()
+            val plan = VectorPortableBundleValidator.buildImportPlan(bundle, now)
+            if (plan.versions.isEmpty()) {
+                return@withContext VectorBundleImportResult(null, parsed.warnings + plan.warnings)
+            }
+
+            val projectId = UUID.randomUUID().toString()
+            val project = VectorTuneupProjectEntity(
+                id = projectId,
+                title = plan.projectTitle.ifBlank { DEFAULT_TITLE },
+                sourceXml = plan.sourceXml,
+                activeVersionId = null,
+                createdAt = now,
+                updatedAt = now,
+            )
+            dao.upsertProject(project)
+
+            for (planned in plan.versions) {
+                dao.upsertVersion(planned.toDomainVersion(projectId).toEntity())
+            }
+
+            val activeId = plan.activeVersionNewId
+                ?: plan.versions.lastOrNull()?.newId
+                ?: plan.versions.first { it.mode == VectorTuneupMode.ORIGINAL }.newId
+            dao.setActiveVersion(projectId, activeId, now)
+
+            val report = VectorPortableBundleImportReport.from(plan)
+            Log.i(TAG, "Imported bundle: $report")
+
+            VectorBundleImportResult(
+                project = project.copy(activeVersionId = activeId).toDomain(),
+                warnings = parsed.warnings + plan.warnings,
+            )
+        }
+
+    /**
+     * Phase 10 — duplicates [versionId] as a new [VectorTuneupMode.MANUAL_EDIT]
+     * child of itself, copying its XML/metrics/warnings, and makes the duplicate
+     * active. The source must exist.
+     */
+    suspend fun duplicateVersion(
+        projectId: String,
+        versionId: String,
+        label: String = "Duplicate",
+    ): VectorTuneupVersion = withContext(Dispatchers.IO) {
+        val source = dao.getVersion(versionId)?.toDomain()
+            ?: error("duplicateVersion: version $versionId not found")
+        val now = System.currentTimeMillis()
+        val duplicate = VectorTuneupVersion(
+            id = UUID.randomUUID().toString(),
+            projectId = projectId,
+            parentId = source.id,
+            label = label,
+            instruction = "Duplicated version",
+            mode = VectorTuneupMode.MANUAL_EDIT,
+            xml = source.xml,
+            metrics = source.metrics,
+            warnings = source.warnings,
+            reportSummary = "Duplicated from ${source.label}",
+            editPlanJson = null,
+            sceneJson = null,
+            previewPngPath = null,
+            createdAt = now,
+        )
+        dao.upsertVersion(duplicate.toEntity())
+        dao.setActiveVersion(projectId, duplicate.id, now)
+        duplicate
+    }
+
+    /**
+     * Phase 10 — safely deletes a leaf [versionId]. Refuses (returns `false`) to
+     * delete the [VectorTuneupMode.ORIGINAL] root or any version that still has
+     * children; it never cascades. When the deleted version was active, the
+     * active pointer moves to its parent (if one exists) else the original. Any
+     * preview file the version owned is removed. Returns `true` once deleted.
+     */
+    suspend fun deleteLeafVersion(
+        projectId: String,
+        versionId: String,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val target = dao.getVersion(versionId)?.toDomain() ?: return@withContext false
+        if (target.mode == VectorTuneupMode.ORIGINAL) return@withContext false
+        if (dao.childCount(versionId) > 0) return@withContext false
+
+        val now = System.currentTimeMillis()
+        val project = dao.getProject(projectId)
+        if (project?.activeVersionId == versionId) {
+            val parentStillExists = target.parentId?.let { dao.getVersion(it) != null } ?: false
+            val fallback = if (parentStillExists) target.parentId else dao.getOriginalVersion(projectId)?.id
+            if (fallback != null) dao.setActiveVersion(projectId, fallback, now)
+        }
+
+        target.previewPngPath?.let { path ->
+            runCatching { File(path).takeIf(File::exists)?.delete() }
+                .onFailure { Log.w(TAG, "Failed to delete preview $path", it) }
+        }
+        dao.deleteVersion(versionId)
+        true
     }
 
     /** Inserts a new child [VectorTuneupVersion] and (by default) makes it active. */

@@ -77,6 +77,9 @@ data class VectorTuneupUiState(
     val previewWarnings: List<VectorWarning> = emptyList(),
     val detectedImportFormat: VectorImportFormat = VectorImportFormat.UNKNOWN,
     val exportFormat: VectorExportFormat = VectorExportFormat.ANDROID_VECTOR_XML,
+    val bundleImportText: String = "",
+    val bundleImportStatusMessage: String? = null,
+    val isImportingBundle: Boolean = false,
 ) {
     /** True once the input has been parsed into an [original] version. */
     val hasOriginal: Boolean get() = original != null
@@ -84,8 +87,8 @@ data class VectorTuneupUiState(
     /** True once an optimized [candidate] has been produced. */
     val hasCandidate: Boolean get() = candidate != null
 
-    /** True when an optimize, AI tune-up, or redraw pass is in flight (gates actions). */
-    val isBusy: Boolean get() = isOptimizing || isAiRunning || isRedrawRunning
+    /** True when an optimize, AI tune-up, redraw, or bundle import is in flight (gates actions). */
+    val isBusy: Boolean get() = isOptimizing || isAiRunning || isRedrawRunning || isImportingBundle
 
     /** True once the workspace has been persisted as a durable project. */
     val isSaved: Boolean get() = projectId != null

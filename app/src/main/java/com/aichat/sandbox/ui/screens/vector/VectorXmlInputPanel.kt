@@ -68,6 +68,15 @@ fun VectorXmlInputPanel(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
+            if (detectedFormat == VectorImportFormat.PROJECT_BUNDLE) {
+                Text(
+                    text = "This is a project bundle. Use History → Import project bundle " +
+                        "to load it as a new project.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
         Row(
             modifier = Modifier
@@ -91,5 +100,6 @@ fun VectorXmlInputPanel(
 private fun detectedFormatLabel(format: VectorImportFormat): String = when (format) {
     VectorImportFormat.ANDROID_VECTOR -> "Android VectorDrawable"
     VectorImportFormat.SVG -> "SVG"
+    VectorImportFormat.PROJECT_BUNDLE -> "Project bundle JSON"
     VectorImportFormat.UNKNOWN -> "Unknown"
 }
