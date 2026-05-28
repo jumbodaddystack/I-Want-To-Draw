@@ -1,6 +1,7 @@
 package com.aichat.sandbox.ui.navigation
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.calculateBottomPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Chat
@@ -12,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -97,10 +99,16 @@ fun AppNavigation(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing.only(
+            WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+        ),
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    windowInsets = WindowInsets.navigationBars.only(
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
+                    )
                 ) {
                     bottomNavItems.forEach { screen ->
                         NavigationBarItem(
@@ -129,10 +137,15 @@ fun AppNavigation(
             }
         }
     ) { padding ->
+        val navHostPadding = if (showBottomBar) {
+            padding.copy(bottom = 0.dp)
+        } else {
+            padding
+        }
         NavHost(
             navController = navController,
             startDestination = Screen.ChatList.route,
-            modifier = Modifier.padding(padding)
+            modifier = Modifier.padding(navHostPadding)
         ) {
             composable(Screen.ChatList.route) {
                 ChatListScreen(
