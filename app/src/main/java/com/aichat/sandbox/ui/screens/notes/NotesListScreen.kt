@@ -2,7 +2,6 @@ package com.aichat.sandbox.ui.screens.notes
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,7 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -33,6 +31,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.aichat.sandbox.data.model.Note
+import com.aichat.sandbox.ui.components.AppScreenScaffold
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -43,73 +42,27 @@ import java.util.Locale
 fun NotesListScreen(
     onNoteClick: (String) -> Unit,
     onNewNote: () -> Unit,
-    onNewIcon: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     viewModel: NotesListViewModel = hiltViewModel(),
 ) {
     val notes by viewModel.notes.collectAsState()
     var pendingDelete by remember { mutableStateOf<Note?>(null) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(onClick = onNewNote),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "New note",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "New note",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            Row(
-                modifier = Modifier
-                    .clickable(onClick = onNewIcon)
-                    .padding(end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Draw,
-                    contentDescription = "New icon",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(24.dp),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "New icon",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
+    AppScreenScaffold(
+        title = "Notes",
+        actions = {
             IconButton(onClick = onOpenSearch) {
-                Icon(
-                    imageVector = Icons.Filled.Search,
-                    contentDescription = "Search notes",
-                )
+                Icon(Icons.Filled.Search, contentDescription = "Search notes")
             }
-        }
-
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = onNewNote,
+                text = { Text("New note") },
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+            )
+        },
+    ) {
         if (notes.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),

@@ -61,6 +61,9 @@ class NoteRepository @Inject constructor(
 
     fun observeNotes(): Flow<List<Note>> = noteDao.observeNotes()
 
+    /** Icons for the dedicated Icons destination (notes with `isIcon = true`). */
+    fun observeIcons(): Flow<List<Note>> = noteDao.observeIcons()
+
     fun observeNote(noteId: String): Flow<Note?> = noteDao.observeNote(noteId)
 
     suspend fun getNote(noteId: String): Note? = withContext(Dispatchers.IO) {

@@ -14,10 +14,18 @@ import kotlinx.coroutines.flow.Flow
 interface NoteDao {
     /**
      * Standalone notes only — notebook pages (rows with non-null
-     * `notebookId`) belong to the notebooks list (Phase 9.1).
+     * `notebookId`) belong to the notebooks list (Phase 9.1), and icons
+     * (`isIcon = 1`) belong to the Icons list.
      */
-    @Query("SELECT * FROM notes WHERE notebookId IS NULL ORDER BY updatedAt DESC")
+    @Query("SELECT * FROM notes WHERE notebookId IS NULL AND isIcon = 0 ORDER BY updatedAt DESC")
     fun observeNotes(): Flow<List<Note>>
+
+    /**
+     * Standalone icons only — the dedicated Icons destination. Mirrors
+     * [observeNotes] but selects the icon rows it now excludes.
+     */
+    @Query("SELECT * FROM notes WHERE notebookId IS NULL AND isIcon = 1 ORDER BY updatedAt DESC")
+    fun observeIcons(): Flow<List<Note>>
 
     /** Pages owned by a single notebook, ordered for display. */
     @Query("SELECT * FROM notes WHERE notebookId = :notebookId ORDER BY createdAt ASC")

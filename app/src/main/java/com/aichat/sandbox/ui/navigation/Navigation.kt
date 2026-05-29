@@ -12,8 +12,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -35,7 +35,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.aichat.sandbox.ui.screens.chat.ChatScreen
 import com.aichat.sandbox.ui.screens.chatlist.ChatListScreen
-import com.aichat.sandbox.ui.screens.images.ImagesScreen
+import com.aichat.sandbox.ui.screens.icons.IconsListScreen
 import com.aichat.sandbox.ui.screens.notebooks.NotebooksListScreen
 import com.aichat.sandbox.ui.screens.notes.ENTRY_SOURCE_ICON
 import com.aichat.sandbox.ui.screens.notes.NOTE_ID_NEW
@@ -49,18 +49,17 @@ import com.aichat.sandbox.ui.screens.vector.VectorTuneupScreen
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     data object ChatList : Screen("chat_list", "Chat", Icons.Filled.Chat)
     data object Notes : Screen("notes", "Notes", Icons.Filled.EditNote)
+    data object IconsTab : Screen("icons", "Icons", Icons.Filled.Draw)
     data object Notebooks : Screen("notebooks", "Notebooks", Icons.Filled.AutoStories)
     data object VectorTuneup : Screen(ROUTE_VECTOR_TUNEUP, "Vector", Icons.Filled.Tune)
-    data object Images : Screen("images", "Images", Icons.Filled.Image)
     data object Settings : Screen("settings", "Settings", Icons.Filled.Settings)
 }
 
 val bottomNavItems = listOf(
     Screen.ChatList,
     Screen.Notes,
+    Screen.IconsTab,
     Screen.Notebooks,
-    Screen.VectorTuneup,
-    Screen.Images,
     Screen.Settings
 )
 
@@ -209,11 +208,18 @@ fun AppNavigation(
                     onNewNote = {
                         navController.navigate("note/$NOTE_ID_NEW")
                     },
-                    onNewIcon = {
-                        navController.navigate("note/$NOTE_ID_NEW?source=$ENTRY_SOURCE_ICON")
-                    },
                     onOpenSearch = {
                         navController.navigate("notes_search")
+                    },
+                )
+            }
+            composable(Screen.IconsTab.route) {
+                IconsListScreen(
+                    onIconClick = { noteId ->
+                        navController.navigate("note/$noteId")
+                    },
+                    onNewIcon = {
+                        navController.navigate("note/$NOTE_ID_NEW?source=$ENTRY_SOURCE_ICON")
                     },
                 )
             }
@@ -275,9 +281,6 @@ fun AppNavigation(
                         navController.navigate("note/$noteId")
                     },
                 )
-            }
-            composable(Screen.Images.route) {
-                ImagesScreen()
             }
             composable(Screen.Settings.route) {
                 SettingsScreen()
