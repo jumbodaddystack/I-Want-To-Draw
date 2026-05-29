@@ -1,0 +1,4 @@
+interface:
+  display_name: "Adaptive UI Design Studio"
+  short_description: "Run an interactive anti-template design studio for adaptive UI systems."
+  icon: "🎛️"
