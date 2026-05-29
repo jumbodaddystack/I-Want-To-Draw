@@ -175,6 +175,23 @@ private fun StampManageDialog(
     onDismiss: () -> Unit,
 ) {
     var text by remember { mutableStateOf(initial) }
+    var confirmingDelete by remember { mutableStateOf(false) }
+
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete stamp?") },
+            text = { Text("\"${initial.ifBlank { "Stamp" }}\" will be removed from your library. This can't be undone.") },
+            confirmButton = {
+                TextButton(onClick = onDelete) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = false }) { Text("Cancel") }
+            },
+        )
+        return
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Stamp") },
@@ -191,7 +208,7 @@ private fun StampManageDialog(
         },
         dismissButton = {
             Row {
-                TextButton(onClick = onDelete) { Text("Delete") }
+                TextButton(onClick = { confirmingDelete = true }) { Text("Delete") }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         },

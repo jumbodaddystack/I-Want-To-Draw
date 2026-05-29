@@ -53,8 +53,11 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -691,6 +694,12 @@ class NoteEditorViewModel @Inject constructor(
      * [com.aichat.sandbox.data.notes.VectorCanvasJson]. Fire-and-forget;
      * the drawer's [stamps] flow surfaces the new entry once persisted.
      */
+    // One-shot UI events for transient feedback (e.g. "Stamp saved"). A
+    // SharedFlow keeps these from re-firing on recomposition/rotation the way a
+    // StateFlow would.
+    private val _stampSaved = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val stampSaved: SharedFlow<String> = _stampSaved.asSharedFlow()
+
     fun saveSelectionAsStamp(name: String) {
         val ids = _selection.value
         if (ids.isEmpty()) return
@@ -715,6 +724,7 @@ class NoteEditorViewModel @Inject constructor(
                     thumbnail = thumbnail,
                     payloadJson = payloadJson,
                 )
+                _stampSaved.tryEmit(name)
             } finally {
                 thumbnail.recycle()
             }

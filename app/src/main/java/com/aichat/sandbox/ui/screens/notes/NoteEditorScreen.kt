@@ -181,12 +181,20 @@ fun NoteEditorScreen(
         }
     }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) {
+        viewModel.stampSaved.collect { name ->
+            snackbarHostState.showSnackbar("Saved \"$name\" to stamps")
+        }
+    }
+
     Scaffold(
         // We handle the navigation-bar inset ourselves on the bottom palette
         // Surface so its tonal background bleeds to the screen edge instead
         // of stopping above the system nav bar (which used to leave a visible
         // empty strip below the width slider).
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 navigationIcon = {
