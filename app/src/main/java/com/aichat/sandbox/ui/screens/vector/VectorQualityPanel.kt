@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aichat.sandbox.data.vector.VectorQualityScores
@@ -81,11 +82,25 @@ private fun ScoreRow(label: String, score: Float?, emphasized: Boolean = false) 
             )
         }
         @Suppress("DEPRECATION")
-        LinearProgressIndicator(
-            progress = score ?: 0f,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 2.dp),
-        )
+        if (score != null) {
+            LinearProgressIndicator(
+                progress = score,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+            )
+        } else {
+            // No data to score against (e.g. faithfulness with no original):
+            // render a muted, empty track so it reads as "N/A" rather than a
+            // broken 0% bar.
+            LinearProgressIndicator(
+                progress = 0f,
+                color = Color.Transparent,
+                trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+            )
+        }
     }
 }

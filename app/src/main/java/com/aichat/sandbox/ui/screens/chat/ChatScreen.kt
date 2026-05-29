@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -885,6 +886,13 @@ private fun ChatInputBar(
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
+            // Top divider so the composer is clearly delimited from the
+            // content above it (surface/background are near-identical on the
+            // dark theme, making the bar otherwise blend in).
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+            )
             // Image attachment preview strip
             if (attachedImages.isNotEmpty()) {
                 Row(
@@ -1126,6 +1134,8 @@ private fun ChatSettingsPanel(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
                 .padding(horizontal = 24.dp, vertical = 8.dp)
                 .padding(bottom = 32.dp)
         ) {

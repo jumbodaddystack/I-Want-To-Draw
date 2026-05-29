@@ -53,7 +53,7 @@ data class VectorTuneupUiState(
     val original: VectorVersionUi? = null,
     val candidate: VectorVersionUi? = null,
     val projectId: String? = null,
-    val projectTitle: String = "Vector Tune-Up",
+    val projectTitle: String = "Untitled project",
     val versions: List<VectorVersionUi> = emptyList(),
     val activeVersionId: String? = null,
     val selectedVersionId: String? = null,

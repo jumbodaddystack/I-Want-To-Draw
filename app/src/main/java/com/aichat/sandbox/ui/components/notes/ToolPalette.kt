@@ -322,14 +322,15 @@ private fun ColorSwatch(
 ) {
     val color = Color(colorArgb)
     val ring = MaterialTheme.colorScheme.primary
+    val idleOutline = MaterialTheme.colorScheme.outline
     Box(
         modifier = Modifier
             .size(28.dp)
             .clip(CircleShape)
             .background(color)
             .border(
-                width = if (selected) 2.dp else 0.5.dp,
-                color = if (selected) ring else Color.Black.copy(alpha = 0.25f),
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) ring else idleOutline,
                 shape = CircleShape,
             )
             .pointerInput(colorArgb) {
@@ -348,6 +349,7 @@ private fun CustomColorTile(
     onClick: () -> Unit,
 ) {
     val ring = MaterialTheme.colorScheme.primary
+    val idleOutline = MaterialTheme.colorScheme.outline
     Box(
         modifier = Modifier
             .size(28.dp)
@@ -357,8 +359,8 @@ private fun CustomColorTile(
                 else MaterialTheme.colorScheme.surfaceVariant
             )
             .border(
-                width = if (showingCustom) 2.dp else 0.5.dp,
-                color = if (showingCustom) ring else Color.Black.copy(alpha = 0.25f),
+                width = if (showingCustom) 2.dp else 1.dp,
+                color = if (showingCustom) ring else idleOutline,
                 shape = CircleShape,
             )
             .clickable(onClick = onClick),

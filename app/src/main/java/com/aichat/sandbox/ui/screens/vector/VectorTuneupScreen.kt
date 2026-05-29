@@ -26,11 +26,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -142,12 +142,21 @@ fun VectorTuneupScreen(
                 onDelete = { viewModel.deleteCurrentProject() },
             )
             val tabs = VectorTuneupTab.entries
-            TabRow(selectedTabIndex = tabs.indexOf(state.selectedTab)) {
+            ScrollableTabRow(
+                selectedTabIndex = tabs.indexOf(state.selectedTab),
+                edgePadding = 8.dp,
+            ) {
                 tabs.forEach { tab ->
                     Tab(
                         selected = state.selectedTab == tab,
                         onClick = { viewModel.selectTab(tab) },
-                        text = { Text(tabLabel(tab)) },
+                        text = {
+                            Text(
+                                text = tabLabel(tab),
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        },
                     )
                 }
             }

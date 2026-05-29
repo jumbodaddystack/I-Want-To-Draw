@@ -92,7 +92,7 @@ private fun FavoritesSlotTile(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val ring = if (isActive) MaterialTheme.colorScheme.primary
-    else Color.Black.copy(alpha = 0.18f)
+    else MaterialTheme.colorScheme.outline
     Box {
         Box(
             modifier = Modifier
@@ -105,7 +105,7 @@ private fun FavoritesSlotTile(
                     }
                 )
                 .border(
-                    width = if (isActive) 2.dp else 0.5.dp,
+                    width = if (isActive) 2.dp else 1.dp,
                     color = ring,
                     shape = CircleShape,
                 )
