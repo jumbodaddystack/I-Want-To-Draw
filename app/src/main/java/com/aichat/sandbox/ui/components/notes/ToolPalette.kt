@@ -121,6 +121,15 @@ private fun ToolChip(
     enabled: Boolean,
     onSelect: () -> Unit,
 ) {
+    // Studio Bench signature moment: the active tool fills with the electric
+    // accent ("glowing active-tool state"), so you feel which tool is live
+    // rather than reading it. Pulled from the Studio tokens directly because
+    // the white drawing canvas is intentionally not wrapped in StudioTheme.
+    val studio = if (androidx.compose.foundation.isSystemInDarkTheme()) {
+        com.aichat.sandbox.ui.theme.studio.StudioDarkColors
+    } else {
+        com.aichat.sandbox.ui.theme.studio.StudioLightColors
+    }
     FilterChip(
         selected = selected,
         enabled = enabled,
@@ -132,7 +141,17 @@ private fun ToolChip(
                 contentDescription = tool.displayName,
             )
         },
-        colors = FilterChipDefaults.filterChipColors(),
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = studio.accentSignature,
+            selectedLabelColor = studio.onAccent,
+            selectedLeadingIconColor = studio.onAccent,
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = enabled,
+            selected = selected,
+            borderColor = studio.hairline,
+            selectedBorderColor = studio.accentSignature,
+        ),
     )
 }
 
@@ -306,10 +325,19 @@ private fun SnapChipRow(snapMask: Int, onToggle: (Int) -> Unit) {
 
 @Composable
 private fun SnapToggleChip(label: String, on: Boolean, onClick: () -> Unit) {
+    val studio = if (androidx.compose.foundation.isSystemInDarkTheme()) {
+        com.aichat.sandbox.ui.theme.studio.StudioDarkColors
+    } else {
+        com.aichat.sandbox.ui.theme.studio.StudioLightColors
+    }
     FilterChip(
         selected = on,
         onClick = onClick,
         label = { Text(label) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = studio.accentSignature,
+            selectedLabelColor = studio.onAccent,
+        ),
     )
 }
 

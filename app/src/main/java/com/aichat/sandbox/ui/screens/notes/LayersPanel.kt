@@ -1,6 +1,7 @@
 package com.aichat.sandbox.ui.screens.notes
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,13 +67,23 @@ fun LayersPanel(
 ) {
     // Top-of-list = highest ordinal = renders on top.
     val sorted = layers.sortedByDescending { it.ordinal }
+    // Studio Bench: the layers panel is a dark "instrument" surface that
+    // orbits the white artboard. Sharp inner edge (no rounded card), hairline
+    // border, accent reserved for the active layer.
+    val studio = com.aichat.sandbox.ui.theme.studio.StudioDarkColors
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .widthIn(max = 320.dp),
-        tonalElevation = 4.dp,
+            .widthIn(max = 320.dp)
+            .border(
+                width = 1.dp,
+                color = studio.hairline,
+                shape = RoundedCornerShape(topStart = 6.dp, bottomStart = 6.dp),
+            ),
+        color = studio.surfaceRail,
+        contentColor = studio.inkDefault,
         shadowElevation = 8.dp,
-        shape = RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp),
+        shape = RoundedCornerShape(topStart = 6.dp, bottomStart = 6.dp),
     ) {
         Column(
             modifier = Modifier
@@ -85,15 +96,16 @@ fun LayersPanel(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Layers",
-                    style = MaterialTheme.typography.titleMedium,
+                    text = "LAYERS",
+                    style = com.aichat.sandbox.ui.theme.studio.StudioTypographyDefault.section,
+                    color = studio.inkMuted,
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = onAddLayer) {
-                    Icon(Icons.Filled.Add, contentDescription = "Add layer")
+                    Icon(Icons.Filled.Add, contentDescription = "Add layer", tint = studio.inkDefault)
                 }
                 IconButton(onClick = onClose) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close")
+                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = studio.inkDefault)
                 }
             }
             LazyColumn(
@@ -132,13 +144,18 @@ private fun LayerRow(
     onDelete: () -> Unit,
     canDelete: Boolean,
 ) {
-    val bg = if (isActive) MaterialTheme.colorScheme.primaryContainer
-    else MaterialTheme.colorScheme.surfaceVariant
+    val studio = com.aichat.sandbox.ui.theme.studio.StudioDarkColors
+    val bg = if (isActive) studio.accentGhost else studio.canvasSunken
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(4.dp))
             .background(bg)
+            .border(
+                width = if (isActive) 1.dp else 0.5.dp,
+                color = if (isActive) studio.accentSignature else studio.hairline,
+                shape = RoundedCornerShape(4.dp),
+            )
             .padding(8.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -159,10 +176,9 @@ private fun LayerRow(
                 Text(
                     text = layer.name,
                     style = MaterialTheme.typography.bodyMedium,
+                    color = studio.inkStrong,
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(if (isActive) MaterialTheme.colorScheme.primaryContainer else bg)
                         .padding(horizontal = 4.dp, vertical = 2.dp),
                 )
                 IconButton(
@@ -173,6 +189,7 @@ private fun LayerRow(
                     Text(
                         text = if (isActive) "•" else " ",
                         style = MaterialTheme.typography.bodyLarge,
+                        color = studio.accentSignature,
                     )
                 }
             }

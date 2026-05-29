@@ -62,16 +62,27 @@ fun BrushSheet(
 ) {
     if (activePreset == null) return
     var saveDialogOpen by remember { mutableStateOf(false) }
+    // Studio Bench: hairline-topped shell (flat, not a shadowed card) so the
+    // brush sheet reads as part of the same instrument tray as the tool palette.
+    val studio = if (androidx.compose.foundation.isSystemInDarkTheme()) {
+        com.aichat.sandbox.ui.theme.studio.StudioDarkColors
+    } else {
+        com.aichat.sandbox.ui.theme.studio.StudioLightColors
+    }
     Surface(
         modifier = modifier.fillMaxWidth(),
         tonalElevation = 2.dp,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
         ) {
+            com.aichat.sandbox.ui.components.studio.StudioHairlineRaw(color = studio.hairline)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -80,8 +91,9 @@ fun BrushSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Presets",
-                    style = MaterialTheme.typography.labelMedium,
+                    text = "PRESETS",
+                    style = com.aichat.sandbox.ui.theme.studio.StudioTypographyDefault.section,
+                    color = studio.inkMuted,
                 )
                 presets
                     .filter { it.tool == activePreset.tool }
@@ -106,6 +118,7 @@ fun BrushSheet(
                 activeTexture = activePreset.textureId,
                 onPick = onTextureChange,
             )
+            }
         }
     }
 
@@ -122,6 +135,20 @@ fun BrushSheet(
 }
 
 @Composable
+private fun studioChipColors(): androidx.compose.material3.SelectableChipColors {
+    val studio = if (androidx.compose.foundation.isSystemInDarkTheme()) {
+        com.aichat.sandbox.ui.theme.studio.StudioDarkColors
+    } else {
+        com.aichat.sandbox.ui.theme.studio.StudioLightColors
+    }
+    return androidx.compose.material3.FilterChipDefaults.filterChipColors(
+        selectedContainerColor = studio.accentSignature,
+        selectedLabelColor = studio.onAccent,
+        selectedLeadingIconColor = studio.onAccent,
+    )
+}
+
+@Composable
 private fun PresetChip(
     preset: BrushPreset,
     active: Boolean,
@@ -130,6 +157,7 @@ private fun PresetChip(
     FilterChip(
         selected = active,
         onClick = onClick,
+        colors = studioChipColors(),
         label = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -232,6 +260,7 @@ private fun TextureRow(
             FilterChip(
                 selected = id == activeTexture,
                 onClick = { onPick(id) },
+                colors = studioChipColors(),
                 label = { Text(id.replaceFirstChar { it.uppercase() }) },
             )
         }

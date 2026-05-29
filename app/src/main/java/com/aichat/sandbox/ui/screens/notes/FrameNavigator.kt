@@ -58,12 +58,20 @@ fun FrameNavigator(
     modifier: Modifier = Modifier,
 ) {
     var renameTarget by remember { mutableStateOf<NoteFrame?>(null) }
+    // Studio Bench: dark instrument rail orbiting the white artboard.
+    val studio = com.aichat.sandbox.ui.theme.studio.StudioDarkColors
     Surface(
         modifier = modifier
             .fillMaxHeight()
-            .width(112.dp),
-        shape = RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp),
-        tonalElevation = 4.dp,
+            .width(112.dp)
+            .border(
+                width = 1.dp,
+                color = studio.hairline,
+                shape = RoundedCornerShape(topEnd = 6.dp, bottomEnd = 6.dp),
+            ),
+        shape = RoundedCornerShape(topEnd = 6.dp, bottomEnd = 6.dp),
+        color = studio.surfaceRail,
+        contentColor = studio.inkDefault,
         shadowElevation = 8.dp,
     ) {
         Column(modifier = Modifier.fillMaxHeight()) {
@@ -75,18 +83,19 @@ fun FrameNavigator(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Frames",
-                    style = MaterialTheme.typography.titleSmall,
+                    text = "FRAMES",
+                    style = com.aichat.sandbox.ui.theme.studio.StudioTypographyDefault.section,
+                    color = studio.inkMuted,
                 )
                 TextButton(onClick = onClose, contentPadding = PaddingValues(0.dp)) {
-                    Text("Close", style = MaterialTheme.typography.labelSmall)
+                    Text("Close", style = MaterialTheme.typography.labelSmall, color = studio.accentSignature)
                 }
             }
             if (frames.isEmpty()) {
                 Text(
                     text = "Use the Frame tool to carve out a region.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = studio.inkMuted,
                     modifier = Modifier.padding(8.dp),
                 )
             } else {
@@ -148,17 +157,17 @@ private fun FrameNavigatorCell(
     ) {
         value = thumbnailRenderer.thumbnailFor(frame, items)
     }
+    val studio = com.aichat.sandbox.ui.theme.studio.StudioDarkColors
     Surface(
-        shape = RoundedCornerShape(8.dp),
-        tonalElevation = if (isCurrent) 4.dp else 0.dp,
-        color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(4.dp),
+        color = if (isCurrent) studio.accentGhost else studio.canvasSunken,
+        contentColor = studio.inkDefault,
         modifier = Modifier
             .fillMaxWidth()
             .border(
-                width = if (isCurrent) 2.dp else 0.5.dp,
-                color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Transparent,
-                shape = RoundedCornerShape(8.dp),
+                width = if (isCurrent) 1.dp else 0.5.dp,
+                color = if (isCurrent) studio.accentSignature else studio.hairline,
+                shape = RoundedCornerShape(4.dp),
             )
             .pointerInput(frame.id) {
                 detectTapGestures(
@@ -188,7 +197,7 @@ private fun FrameNavigatorCell(
             Text(
                 text = frame.name,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = studio.inkDefault,
                 maxLines = 1,
                 modifier = Modifier.padding(top = 4.dp),
             )
