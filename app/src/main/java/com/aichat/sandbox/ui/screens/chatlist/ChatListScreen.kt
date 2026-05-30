@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aichat.sandbox.data.model.Chat
+import com.aichat.sandbox.ui.components.AppScreenScaffold
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -36,25 +37,48 @@ fun ChatListScreen(
     val chats by viewModel.chats.collectAsState()
     val searchState by searchViewModel.uiState.collectAsState()
     var isSearchActive by remember { mutableStateOf(false) }
+    // The search field is collapsed by default — tapping the header icon
+    // expands it inline (replaces the old always-on full-width pill that
+    // wasted space at the top of the screen).
+    var searchExpanded by remember { mutableStateOf(false) }
 
+    AppScreenScaffold(
+        title = "Chat",
+        actions = {
+            IconButton(onClick = {
+                searchExpanded = !searchExpanded
+                if (!searchExpanded) {
+                    isSearchActive = false
+                    searchViewModel.clearSearch()
+                }
+            }) {
+                Icon(
+                    imageVector = if (searchExpanded) Icons.Default.Close else Icons.Default.Search,
+                    contentDescription = if (searchExpanded) "Close search" else "Search conversations",
+                )
+            }
+        },
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Search bar
-        SearchBarSection(
-            query = searchState.query,
-            isActive = isSearchActive,
-            onQueryChange = { query ->
-                isSearchActive = query.isNotEmpty()
-                searchViewModel.search(query)
-            },
-            onClear = {
-                isSearchActive = false
-                searchViewModel.clearSearch()
-            }
-        )
+        // Inline search field — only visible once the header icon is tapped.
+        if (searchExpanded) {
+            SearchBarSection(
+                query = searchState.query,
+                isActive = isSearchActive,
+                onQueryChange = { query ->
+                    isSearchActive = query.isNotEmpty()
+                    searchViewModel.search(query)
+                },
+                onClear = {
+                    isSearchActive = false
+                    searchViewModel.clearSearch()
+                }
+            )
+        }
 
         // New Chat button
         if (!isSearchActive) {
@@ -182,6 +206,7 @@ fun ChatListScreen(
                 }
             }
         }
+    }
     }
 }
 

@@ -16,7 +16,12 @@ fun SettingsSlider(
     onValueChange: (Float) -> Unit,
     displayFormat: (Float) -> String
 ) {
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+    // Compact layout: label + current value on one row, the slider tucked
+    // directly beneath with negative spacing to trim the Slider's built-in
+    // vertical touch-target padding. The min/max range labels were dropped to
+    // keep the Default Parameters block tight (the live value already shows
+    // where the thumb sits).
+    Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
@@ -36,25 +41,11 @@ fun SettingsSlider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
+            modifier = Modifier.padding(top = 2.dp),
             colors = SliderDefaults.colors(
                 thumbColor = MaterialTheme.colorScheme.primary,
                 activeTrackColor = MaterialTheme.colorScheme.primary
             )
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = displayFormat(valueRange.start),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = displayFormat(valueRange.endInclusive),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
     }
 }

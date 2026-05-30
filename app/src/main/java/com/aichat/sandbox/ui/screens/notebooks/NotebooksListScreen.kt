@@ -1,7 +1,6 @@
 package com.aichat.sandbox.ui.screens.notebooks
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -20,11 +19,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -41,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aichat.sandbox.data.model.Notebook
+import com.aichat.sandbox.ui.components.AppScreenScaffold
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,16 +62,12 @@ fun NotebooksListScreen(
         onOpenNotebook(target)
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Notebooks") },
-                actions = {
-                    IconButton(onClick = onOpenSearch) {
-                        Icon(Icons.Filled.Search, contentDescription = "Search notebooks")
-                    }
-                },
-            )
+    AppScreenScaffold(
+        title = "Notebooks",
+        actions = {
+            IconButton(onClick = onOpenSearch) {
+                Icon(Icons.Filled.Search, contentDescription = "Search notebooks")
+            }
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
@@ -82,12 +76,9 @@ fun NotebooksListScreen(
                 icon = { Icon(Icons.Filled.Add, contentDescription = null) },
             )
         },
-    ) { padding ->
+    ) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(MaterialTheme.colorScheme.background),
+            modifier = Modifier.fillMaxSize(),
         ) {
             if (notebooks.isEmpty()) {
                 Column(

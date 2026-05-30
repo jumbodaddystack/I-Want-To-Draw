@@ -11,16 +11,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -123,13 +119,15 @@ fun IconsListScreen(
             }
 
             // Primary action — the single accent element, pinned bottom-end.
+            // The NavHost box is already inset above the bottom nav bar, so this
+            // just needs a margin (no window-inset padding, which would push it
+            // up by the nav-bar inset a second time and previously hid it).
             StudioPrimaryAction(
                 label = "New icon",
                 icon = Icons.Filled.Draw,
                 onClick = onNewIcon,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .padding(spacing.l),
             )
         }
@@ -160,24 +158,25 @@ fun IconsListScreen(
 private fun IconsHeader(count: Int) {
     val colors = StudioTheme.colors
     val spacing = StudioTheme.spacing
+    // Tightened header (the user flagged "wasted space" up top). The outer
+    // Scaffold already supplies the status-bar inset, so no statusBarsPadding
+    // here; trimmed top padding + spacers keep the Studio identity but compact.
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(colors.canvasBase)
-            .statusBarsPadding()
             .padding(
-                PaddingValues(start = spacing.l, end = spacing.l, top = spacing.l, bottom = spacing.m)
+                PaddingValues(start = spacing.l, end = spacing.l, top = spacing.s, bottom = spacing.s)
             ),
     ) {
         StudioText(text = "Icons", style = StudioTheme.type.display, color = colors.inkStrong)
-        Spacer(Modifier.height(spacing.hair))
         // Live mono readout — instrument voice, not a generic subtitle.
         StudioText(
             text = if (count == 0) "EMPTY BENCH" else "$count ON THE BENCH",
             style = StudioTheme.type.section,
             color = colors.inkMuted,
         )
-        Spacer(Modifier.height(spacing.m))
+        Spacer(Modifier.height(spacing.s))
         com.aichat.sandbox.ui.components.studio.StudioHairline()
     }
 }

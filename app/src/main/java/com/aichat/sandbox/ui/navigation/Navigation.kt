@@ -1,14 +1,18 @@
 package com.aichat.sandbox.ui.navigation
 
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.calculateEndPadding
-import androidx.compose.foundation.layout.calculateStartPadding
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Chat
@@ -20,9 +24,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -112,62 +118,34 @@ fun AppNavigation(
         ),
         bottomBar = {
             if (showBottomBar) {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    windowInsets = WindowInsets.navigationBars.only(
-                        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
-                    )
-                ) {
-                    bottomNavItems.forEach { screen ->
-                        NavigationBarItem(
-                            icon = { Icon(screen.icon, contentDescription = screen.label) },
-                            label = {
-                                Text(
-                                    text = screen.label,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
-                            selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
-                            onClick = {
-                                navController.navigate(screen.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                            )
-                        )
-                    }
-                }
+                CompactBottomBar(
+                    items = bottomNavItems,
+                    isSelected = { screen ->
+                        currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                    },
+                    onSelect = { screen ->
+                        navController.navigate(screen.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
             }
         }
     ) { padding ->
-        val layoutDirection = LocalLayoutDirection.current
-        val navHostPadding = if (showBottomBar) {
-            PaddingValues(
-                start = padding.calculateStartPadding(layoutDirection),
-                top = padding.calculateTopPadding(),
-                end = padding.calculateEndPadding(layoutDirection),
-                bottom = 0.dp,
-            )
-        } else {
-            padding
-        }
+        // The outer Scaffold owns all window insets: the status-bar inset is
+        // carried in `padding` on top, and the compact bottom bar's measured
+        // height (incl. its navigation-bar inset) is carried on the bottom.
+        // Passing the full `padding` keeps every tab's content — and its FAB —
+        // above the bar (previously the bottom was zeroed, hiding the create
+        // buttons and the Settings "About" section behind the nav bar).
         NavHost(
             navController = navController,
             startDestination = Screen.ChatList.route,
-            modifier = Modifier.padding(navHostPadding)
+            modifier = Modifier.padding(padding)
         ) {
             composable(Screen.ChatList.route) {
                 ChatListScreen(
@@ -292,6 +270,70 @@ fun AppNavigation(
                 VectorTuneupScreen(
                     onNavigateBack = { navController.popBackStack() },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Compact bottom navigation bar — replaces the stock Material [NavigationBar]
+ * (80dp) with a shorter (~56dp) custom row to reclaim vertical space the user
+ * flagged as "too tall". Keeps the same accent/selection colours and routing
+ * behaviour; applies the system navigation-bar inset itself so the Scaffold
+ * reports its full height into the content padding.
+ */
+@Composable
+private fun CompactBottomBar(
+    items: List<Screen>,
+    isSelected: (Screen) -> Boolean,
+    onSelect: (Screen) -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .heightIn(min = 56.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items.forEach { screen ->
+                val selected = isSelected(screen)
+                val tint = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .selectable(
+                            selected = selected,
+                            role = Role.Tab,
+                            onClick = { onSelect(screen) },
+                        )
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        screen.icon,
+                        contentDescription = screen.label,
+                        tint = tint,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Text(
+                        text = screen.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = tint,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
         }
     }

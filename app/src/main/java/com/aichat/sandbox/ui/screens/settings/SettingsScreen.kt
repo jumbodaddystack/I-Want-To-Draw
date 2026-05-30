@@ -31,6 +31,10 @@ fun SettingsScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        // The outer Scaffold in AppNavigation owns the window insets (status bar
+        // on top, bottom nav bar below), so this inner Scaffold consumes none —
+        // the scroll content now ends above the nav bar and "About" is reachable.
+        contentWindowInsets = WindowInsets(0),
         containerColor = MaterialTheme.colorScheme.background,
     ) { contentPadding ->
         Column(
