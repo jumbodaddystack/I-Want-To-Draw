@@ -242,10 +242,20 @@ fun NoteEditorScreen(
                 },
                 actions = {
                     OcrIndicatorBadge(state = ocrIndicator)
-                    IconButton(onClick = { viewModel.openAiSheet(selection = null) }) {
+                    // Hero AI action. Accented (filled-tonal) so it stands out
+                    // from the monochrome toolbar icons — the user said AI
+                    // should be easy to reach. Icons open the sheet edit-first;
+                    // notes open it ask-first (the VM picks the default).
+                    FilledTonalIconButton(
+                        onClick = { viewModel.openAiSheet(selection = null) },
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    ) {
                         Icon(
                             imageVector = Icons.Filled.AutoAwesome,
-                            contentDescription = "Ask about this note",
+                            contentDescription = if (note.isIcon) "Edit icon with AI" else "Ask AI about this note",
                         )
                     }
                     // Sub-phase 8.2 — frame navigator toggle.
@@ -821,10 +831,12 @@ fun NoteEditorScreen(
             modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars),
             state = aiSheetState,
             onInputChanged = viewModel::onAiInputChanged,
-            onSubmit = viewModel::submitAiPrompt,
+            onSubmit = viewModel::submitAiFooter,
             onCancel = viewModel::cancelAiStreaming,
             onClose = viewModel::closeAiSheet,
             onCannedPrompt = viewModel::submitCannedPrompt,
+            onIconQuickAction = viewModel::submitIconQuickAction,
+            onFooterModeChanged = viewModel::setAiFooterMode,
             onClearScope = viewModel::clearAiSheetScope,
             onInsertConvertResult = viewModel::insertConvertResultAsTextBox,
             onInsertReply = { turnId ->

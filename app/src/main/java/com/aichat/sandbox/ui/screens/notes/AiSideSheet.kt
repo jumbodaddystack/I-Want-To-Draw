@@ -86,6 +86,8 @@ fun AiSideSheet(
     onCancel: () -> Unit,
     onClose: () -> Unit,
     onCannedPrompt: (CannedPrompt) -> Unit,
+    onIconQuickAction: (IconQuickAction) -> Unit,
+    onFooterModeChanged: (AiFooterMode) -> Unit,
     onClearScope: () -> Unit,
     onInsertConvertResult: (turnId: String) -> Unit,
     onInsertReply: (turnId: String) -> Unit,
@@ -158,6 +160,8 @@ fun AiSideSheet(
                     onCancel = onCancel,
                     onClose = onClose,
                     onCannedPrompt = onCannedPrompt,
+                    onIconQuickAction = onIconQuickAction,
+                    onFooterModeChanged = onFooterModeChanged,
                     onClearScope = onClearScope,
                     onInsertConvertResult = onInsertConvertResult,
                     onInsertReply = onInsertReply,
@@ -179,6 +183,8 @@ private fun SheetContent(
     onCancel: () -> Unit,
     onClose: () -> Unit,
     onCannedPrompt: (CannedPrompt) -> Unit,
+    onIconQuickAction: (IconQuickAction) -> Unit,
+    onFooterModeChanged: (AiFooterMode) -> Unit,
     onClearScope: () -> Unit,
     onInsertConvertResult: (turnId: String) -> Unit,
     onInsertReply: (turnId: String) -> Unit,
@@ -189,6 +195,7 @@ private fun SheetContent(
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         SheetHeader(
+            title = if (state.isIcon) "AI for this icon" else "Ask about this note",
             modelId = state.activeModelId,
             availableModels = availableModels,
             customModels = customModels,
@@ -207,15 +214,19 @@ private fun SheetContent(
         ScopeAndCannedPromptRow(
             scopeLabel = state.scopeLabel,
             hasSelection = state.pendingSelection != null,
+            isIcon = state.isIcon,
             convertEnabled = state.pendingSelection != null && !state.isStreaming,
             isStreaming = state.isStreaming,
             onCannedPrompt = onCannedPrompt,
+            onIconQuickAction = onIconQuickAction,
             onClearScope = onClearScope,
         )
         SheetFooter(
             inputText = state.inputText,
+            footerMode = state.footerMode,
             isStreaming = state.isStreaming,
             onInputChanged = onInputChanged,
+            onFooterModeChanged = onFooterModeChanged,
             onSubmit = onSubmit,
             onCancel = onCancel,
         )
@@ -224,6 +235,7 @@ private fun SheetContent(
 
 @Composable
 private fun SheetHeader(
+    title: String,
     modelId: String,
     availableModels: List<String>,
     customModels: List<String>,
@@ -237,7 +249,7 @@ private fun SheetHeader(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "Ask about this note",
+                text = title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
@@ -516,9 +528,11 @@ private fun TypingIndicator() {
 private fun ScopeAndCannedPromptRow(
     scopeLabel: String,
     hasSelection: Boolean,
+    isIcon: Boolean,
     convertEnabled: Boolean,
     isStreaming: Boolean,
     onCannedPrompt: (CannedPrompt) -> Unit,
+    onIconQuickAction: (IconQuickAction) -> Unit,
     onClearScope: () -> Unit,
 ) {
     Column(
@@ -537,23 +551,38 @@ private fun ScopeAndCannedPromptRow(
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(CannedPrompt.ASK_PROMPTS, key = { it.name }) { prompt ->
-                AssistChip(
-                    onClick = { onCannedPrompt(prompt) },
-                    enabled = !isStreaming,
-                    label = { Text(prompt.label) },
-                    colors = AssistChipDefaults.assistChipColors(),
-                )
-            }
-            // Convert-to-text last so the order matches the lasso menu and
-            // it visually trails the ask prompts as the "different kind" one.
-            items(listOf(CannedPrompt.CONVERT_TO_TEXT), key = { it.name }) { prompt ->
-                AssistChip(
-                    onClick = { onCannedPrompt(prompt) },
-                    enabled = convertEnabled,
-                    label = { Text(prompt.label) },
-                    colors = AssistChipDefaults.assistChipColors(),
-                )
+            if (isIcon) {
+                // Icons get design-oriented edit actions instead of the
+                // note-centric ask prompts. Convert-to-text is dropped — it's
+                // meaningless for an icon. Each action routes through the
+                // model-backed EDIT pipeline (Recolor opens the colour picker).
+                items(IconQuickAction.entries, key = { it.name }) { action ->
+                    AssistChip(
+                        onClick = { onIconQuickAction(action) },
+                        enabled = !isStreaming,
+                        label = { Text(action.label) },
+                        colors = AssistChipDefaults.assistChipColors(),
+                    )
+                }
+            } else {
+                items(CannedPrompt.ASK_PROMPTS, key = { it.name }) { prompt ->
+                    AssistChip(
+                        onClick = { onCannedPrompt(prompt) },
+                        enabled = !isStreaming,
+                        label = { Text(prompt.label) },
+                        colors = AssistChipDefaults.assistChipColors(),
+                    )
+                }
+                // Convert-to-text last so the order matches the lasso menu and
+                // it visually trails the ask prompts as the "different kind" one.
+                items(listOf(CannedPrompt.CONVERT_TO_TEXT), key = { it.name }) { prompt ->
+                    AssistChip(
+                        onClick = { onCannedPrompt(prompt) },
+                        enabled = convertEnabled,
+                        label = { Text(prompt.label) },
+                        colors = AssistChipDefaults.assistChipColors(),
+                    )
+                }
             }
         }
     }
@@ -562,21 +591,51 @@ private fun ScopeAndCannedPromptRow(
 @Composable
 private fun SheetFooter(
     inputText: String,
+    footerMode: AiFooterMode,
     isStreaming: Boolean,
     onInputChanged: (String) -> Unit,
+    onFooterModeChanged: (AiFooterMode) -> Unit,
     onSubmit: () -> Unit,
     onCancel: () -> Unit,
 ) {
+  Column(
+      modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 12.dp, vertical = 8.dp),
+  ) {
+    // Ask | Edit toggle. ASK returns a prose reply; EDIT stages a preview the
+    // user accepts or rejects. Two FilterChips keep the affordance compact and
+    // avoid depending on the SegmentedButton API version.
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FilterChip(
+            selected = footerMode == AiFooterMode.ASK,
+            onClick = { onFooterModeChanged(AiFooterMode.ASK) },
+            label = { Text("Ask") },
+            enabled = !isStreaming,
+            colors = FilterChipDefaults.filterChipColors(),
+        )
+        FilterChip(
+            selected = footerMode == AiFooterMode.EDIT,
+            onClick = { onFooterModeChanged(AiFooterMode.EDIT) },
+            label = { Text("Edit") },
+            enabled = !isStreaming,
+            colors = FilterChipDefaults.filterChipColors(),
+        )
+    }
+    Spacer(modifier = Modifier.height(6.dp))
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Bottom,
     ) {
         OutlinedTextField(
             value = inputText,
             onValueChange = onInputChanged,
-            placeholder = { Text("Ask anything…") },
+            placeholder = {
+                Text(
+                    if (footerMode == AiFooterMode.EDIT) "Describe an edit…"
+                    else "Ask anything…"
+                )
+            },
             modifier = Modifier.weight(1f),
             shape = RoundedCornerShape(20.dp),
             maxLines = 5,
@@ -619,6 +678,7 @@ private fun SheetFooter(
             }
         }
     }
+  }
 }
 
 private const val SHEET_WIDTH_FRACTION: Float = 0.7f

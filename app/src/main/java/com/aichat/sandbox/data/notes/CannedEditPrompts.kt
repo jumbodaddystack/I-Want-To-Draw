@@ -61,6 +61,32 @@ enum class CannedEditAction(
         prompt = "Extend the visible repeating pattern in the selection. Use `replace_with_shape` to substitute the trailing strokes with a polyline that carries the pattern forward by one cycle. Do not add new strokes from scratch.",
         local = false,
     ),
+
+    /**
+     * Icon design action — reduce the artwork to its essential strokes.
+     * Op-oriented so the model substitutes/smooths rather than inventing
+     * detail (which Phase 7's edit schema can't add from scratch).
+     */
+    SIMPLIFY(
+        label = "Simplify",
+        undoDescription = "Simplify",
+        prompt = "Simplify the selected icon to its essential strokes. Use `replace_with_shape` to swap busy freehand strokes for clean geometric shapes and `smooth` to tidy the rest. Preserve the subject and its colours; remove only redundant or noisy strokes.",
+        local = false,
+    ),
+    /** Icon design action — restyle into a clean flat-design icon. */
+    FLAT_STYLE(
+        label = "Flat style",
+        undoDescription = "Flat style",
+        prompt = "Restyle the selected strokes into a clean flat-design icon: even stroke weights, simple geometric shapes via `replace_with_shape`, and smoothed contours via `smooth`. Keep the subject and palette; do not add new elements from scratch.",
+        local = false,
+    ),
+    /** Icon design action — sharpen readable detail without adding clutter. */
+    ADD_DETAIL(
+        label = "Add detail",
+        undoDescription = "Add detail",
+        prompt = "Sharpen the selected icon's existing detail so it reads well at small sizes. Use `replace_with_shape` to crisp-up shape-like strokes and `smooth` to refine others. Keep it minimal — do not add new strokes from scratch.",
+        local = false,
+    ),
 }
 
 /**

@@ -57,6 +57,31 @@ class AiSideSheetStateTest {
     }
 
     @Test
+    fun scopeLabelIsWholeIconForIconWithoutSelection() {
+        assertEquals("Whole icon", AiSideSheetState(isIcon = true).scopeLabel)
+    }
+
+    @Test
+    fun scopeLabelPrefersSelectionOverIconLabel() {
+        val state = AiSideSheetState(isIcon = true, pendingSelection = listOf(item("a", "stroke")))
+        assertEquals("1 stroke selected", state.scopeLabel)
+    }
+
+    @Test
+    fun defaultFooterModeIsAsk() {
+        assertEquals(AiFooterMode.ASK, AiSideSheetState().footerMode)
+    }
+
+    @Test
+    fun iconQuickActionsCoverDesignActionsNotConvert() {
+        val labels = IconQuickAction.entries.map { it.label }
+        assertTrue(labels.contains("Simplify"))
+        assertTrue(labels.contains("Recolor"))
+        assertTrue(labels.contains("Auto-shape"))
+        assertFalse(labels.contains("Convert to text"))
+    }
+
+    @Test
     fun scopeLabelSingularStroke() {
         val state = AiSideSheetState(pendingSelection = listOf(item("a", "stroke")))
         assertEquals("1 stroke selected", state.scopeLabel)
