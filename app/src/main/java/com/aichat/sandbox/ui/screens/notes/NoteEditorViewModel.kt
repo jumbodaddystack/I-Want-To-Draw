@@ -286,6 +286,14 @@ class NoteEditorViewModel @Inject constructor(
     val colorPickerOpen: StateFlow<Boolean> = _colorPickerOpen.asStateFlow()
 
     /**
+     * When the colour picker was opened by the AI side sheet's "Recolor"
+     * quick action, this holds the items to recolor. Non-null routes the next
+     * [confirmColorPick] to [applyAiRecolor] instead of changing the ink tool;
+     * cleared on confirm or dismiss.
+     */
+    private val _pendingAiRecolorScope = MutableStateFlow<List<NoteItem>?>(null)
+
+    /**
      * Phase 6.3 — snap toggle bitmask. Bit 0 = angle (15°), bit 1 = grid,
      * bit 2 = endpoint. Editor surfaces this through a chip; default is
      * angle + endpoint on, grid off (matches Concepts).
@@ -979,6 +987,28 @@ class NoteEditorViewModel @Inject constructor(
                 else current
             }
         }
+        // Keep the AI sheet's `isIcon` in sync with the note. The note loads
+        // asynchronously for existing notes, so reading it once at sheet-open
+        // time would race; collecting here guarantees the chip set and the
+        // edit-first default are correct before the user can interact. Icons
+        // default the footer to EDIT (they are design surfaces); only flip the
+        // default while the user hasn't typed anything yet so we never stomp an
+        // in-progress ask.
+        viewModelScope.launch {
+            _note.collect { note ->
+                _aiSheetState.update { current ->
+                    if (current.isIcon == note.isIcon) current
+                    else current.copy(
+                        isIcon = note.isIcon,
+                        footerMode = if (note.isIcon && current.turns.isEmpty() && current.inputText.isEmpty()) {
+                            AiFooterMode.EDIT
+                        } else {
+                            current.footerMode
+                        },
+                    )
+                }
+            }
+        }
         if (routeArg != NOTE_ID_NEW) {
             viewModelScope.launch {
                 val loadedNote = repository.getNote(routeArg)
@@ -1055,6 +1085,7 @@ class NoteEditorViewModel @Inject constructor(
 
     fun dismissColorPicker() {
         _colorPickerOpen.value = false
+        _pendingAiRecolorScope.value = null
     }
 
     /**
@@ -1065,6 +1096,16 @@ class NoteEditorViewModel @Inject constructor(
      * next time.
      */
     fun confirmColorPick(colorArgb: Int) {
+        // AI recolor path — the picker was opened from the AI sheet's Recolor
+        // quick action, so apply the colour to the staged scope as a model
+        // edit rather than changing the active ink tool.
+        val recolorScope = _pendingAiRecolorScope.value
+        if (recolorScope != null) {
+            _pendingAiRecolorScope.value = null
+            _colorPickerOpen.value = false
+            applyAiRecolor(colorArgb, recolorScope)
+            return
+        }
         palette.setColor(palette.lastInkTool, colorArgb)
         _colorPickerOpen.value = false
         viewModelScope.launch {
@@ -1438,7 +1479,66 @@ class NoteEditorViewModel @Inject constructor(
             current.copy(
                 isOpen = true,
                 pendingSelection = selection?.toList(),
+                isIcon = _note.value.isIcon,
             )
+        }
+    }
+
+    /** Footer Ask|Edit toggle. */
+    fun setAiFooterMode(mode: AiFooterMode) {
+        _aiSheetState.update { it.copy(footerMode = mode) }
+    }
+
+    /**
+     * Single Send entry point for the footer text box. Routes by
+     * [AiSideSheetState.footerMode]: ASK produces a prose reply via
+     * [submitAiPrompt]; EDIT produces a staged preview via [submitAiEdit]. In
+     * EDIT we pass the frozen scope explicitly — a null selection deliberately
+     * edits the whole note/icon (the EDIT pipeline falls back to all items)
+     * rather than grabbing whatever happens to be lasso-selected on the canvas.
+     */
+    fun submitAiFooter() {
+        val snapshot = _aiSheetState.value
+        if (snapshot.inputText.isBlank() || snapshot.isStreaming) return
+        when (snapshot.footerMode) {
+            AiFooterMode.ASK -> submitAiPrompt()
+            AiFooterMode.EDIT -> submitAiEdit(
+                description = "AI edit",
+                userPrompt = snapshot.inputText.trim(),
+                selection = snapshot.pendingSelection,
+            )
+        }
+    }
+
+    /**
+     * One-tap icon design action. The first four route through the model-backed
+     * EDIT pipeline ([submitAiEdit]); [IconQuickAction.RECOLOR] opens the colour
+     * picker and applies an AI recolor with the chosen colour (see
+     * [_pendingAiRecolorScope]). All operate on the frozen scope, falling back
+     * to the whole icon when nothing is selected.
+     */
+    fun submitIconQuickAction(action: IconQuickAction) {
+        if (_aiSheetState.value.isStreaming) return
+        val scope = _aiSheetState.value.pendingSelection
+        when (action) {
+            IconQuickAction.SIMPLIFY -> submitAiEdit(
+                CannedEditAction.SIMPLIFY.undoDescription, CannedEditAction.SIMPLIFY.prompt, scope,
+            )
+            IconQuickAction.FLAT_STYLE -> submitAiEdit(
+                CannedEditAction.FLAT_STYLE.undoDescription, CannedEditAction.FLAT_STYLE.prompt, scope,
+            )
+            IconQuickAction.ADD_DETAIL -> submitAiEdit(
+                CannedEditAction.ADD_DETAIL.undoDescription, CannedEditAction.ADD_DETAIL.prompt, scope,
+            )
+            IconQuickAction.AUTO_SHAPE -> submitAiEdit(
+                CannedEditAction.AUTO_SHAPE.undoDescription, CannedEditAction.AUTO_SHAPE.prompt, scope,
+            )
+            IconQuickAction.RECOLOR -> {
+                // Open the picker without the ink-tool side effect of
+                // `openColorPicker` — this pick feeds an AI recolor, not the pen.
+                _pendingAiRecolorScope.value = scope ?: items.toList()
+                _colorPickerOpen.value = true
+            }
         }
     }
 
@@ -1899,9 +1999,16 @@ class NoteEditorViewModel @Inject constructor(
         when (action) {
             CannedEditAction.CLEAN_UP -> applyLocalCleanUp(target)
             CannedEditAction.STRAIGHTEN -> applyLocalStraighten(target)
+            // Everything else is a model-backed EDIT: smoothing, shape
+            // detection, pattern continuation, and the icon design actions
+            // (Simplify / Flat style / Add detail) all share the same
+            // description + prompt → preview path.
             CannedEditAction.AI_CLEAN_UP,
             CannedEditAction.AUTO_SHAPE,
-            CannedEditAction.CONTINUE -> submitAiEdit(
+            CannedEditAction.CONTINUE,
+            CannedEditAction.SIMPLIFY,
+            CannedEditAction.FLAT_STYLE,
+            CannedEditAction.ADD_DETAIL -> submitAiEdit(
                 description = action.undoDescription,
                 userPrompt = action.prompt,
                 selection = target,

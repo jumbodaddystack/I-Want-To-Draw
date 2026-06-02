@@ -27,16 +27,48 @@ data class AiSideSheetState(
     val turns: List<AskTurn> = emptyList(),
     val inputText: String = "",
     val activeModelId: String = "",
+    /**
+     * Whether the footer's text box submits a question (ASK, prose reply) or
+     * an edit instruction (EDIT, staged preview). Icons default to EDIT since
+     * they are design surfaces; notes default to ASK.
+     */
+    val footerMode: AiFooterMode = AiFooterMode.ASK,
+    /**
+     * True when the edited resource is an icon (`Note.isIcon`). Selects the
+     * design-oriented quick actions and edit-first copy instead of the
+     * note-centric ask prompts. Kept in sync with the note in the view model.
+     */
+    val isIcon: Boolean = false,
 ) {
     /** True while any turn is in flight. Drives the Send / Cancel buttons. */
     val isStreaming: Boolean get() = turns.any { it.state is TurnState.Streaming }
 
     /**
      * Human-readable scope description rendered above the canned-prompt row
-     * (sub-phase 2.7). Either the frozen selection summary or "Whole note".
+     * (sub-phase 2.7). Either the frozen selection summary, "Whole note", or
+     * "Whole icon" for icon resources.
      */
     val scopeLabel: String
-        get() = pendingSelection?.let { summarizeSelectionForScope(it) } ?: "Whole note"
+        get() = pendingSelection?.let { summarizeSelectionForScope(it) }
+            ?: if (isIcon) "Whole icon" else "Whole note"
+}
+
+/** Footer submit mode for the AI side sheet — see [AiSideSheetState.footerMode]. */
+enum class AiFooterMode { ASK, EDIT }
+
+/**
+ * One-tap design actions shown in the icon variant of the canned-action row.
+ * Each maps to an edit in the view model: the first four route through the
+ * model-backed EDIT pipeline (see [com.aichat.sandbox.data.notes.CannedEditAction]);
+ * [RECOLOR] opens the colour picker and applies an AI recolor with the chosen
+ * colour.
+ */
+enum class IconQuickAction(val label: String) {
+    SIMPLIFY("Simplify"),
+    FLAT_STYLE("Flat style"),
+    ADD_DETAIL("Add detail"),
+    AUTO_SHAPE("Auto-shape"),
+    RECOLOR("Recolor"),
 }
 
 data class AskTurn(
