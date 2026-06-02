@@ -188,6 +188,27 @@ fun NoteEditorScreen(
         }
     }
 
+    // Frame the artboard when an icon first becomes visible. Without this the
+    // viewport stays at the origin / 100%, so a reopened icon's box and strokes
+    // sit off-screen and the saved work looks lost. Runs once per note (the
+    // artboard frame loads asynchronously, so we wait for it), then leaves pan
+    // and zoom entirely to the user.
+    var didInitialIconFit by remember(note.id) { mutableStateOf(false) }
+    LaunchedEffect(note.id, note.isIcon, frames, currentFrameId, viewportController, canvasSize) {
+        if (didInitialIconFit || !note.isIcon) return@LaunchedEffect
+        val vp = viewportController ?: return@LaunchedEffect
+        if (canvasSize == IntSize.Zero) return@LaunchedEffect
+        val bounds = viewModel.iconOpenBounds() ?: return@LaunchedEffect
+        vp.flyTo(
+            bounds = bounds,
+            canvasSize = floatArrayOf(
+                canvasSize.width.toFloat(),
+                canvasSize.height.toFloat(),
+            ),
+        )
+        didInitialIconFit = true
+    }
+
     Scaffold(
         // We handle the navigation-bar inset ourselves on the bottom palette
         // Surface so its tonal background bleeds to the screen edge instead

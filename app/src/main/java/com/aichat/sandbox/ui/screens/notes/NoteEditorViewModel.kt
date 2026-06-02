@@ -536,6 +536,26 @@ class NoteEditorViewModel @Inject constructor(
         return frame.bounds()
     }
 
+    /**
+     * Bounds to frame when an icon is first shown. The viewport is otherwise
+     * left at its default (origin, 100%), which leaves a reopened icon's
+     * artboard and strokes off-screen — the work looks lost even though it's
+     * loaded. We return the artboard rect unioned with any drawn content so
+     * the whole saved icon is guaranteed visible on open. Null when this note
+     * has no artboard frame (i.e. it isn't an icon).
+     */
+    fun iconOpenBounds(): FloatArray? {
+        val frame = currentFrameBounds() ?: _frames.value.firstOrNull()?.bounds() ?: return null
+        val content = com.aichat.sandbox.data.notes.NoteRasterizer.computeBounds(items.toList())
+            ?: return frame
+        return floatArrayOf(
+            minOf(frame[0], content[0]),
+            minOf(frame[1], content[1]),
+            maxOf(frame[2], content[2]),
+            maxOf(frame[3], content[3]),
+        )
+    }
+
     /** Edge of the current icon artboard in world units, or null if absent. */
     fun iconArtboardWorld(): Float? {
         val b = currentFrameBounds() ?: return null
@@ -2338,10 +2358,19 @@ class NoteEditorViewModel @Inject constructor(
         // wind up empty we store `null` so a never-edited note doesn't carry
         // an empty `{schema:1,past:[],future:[]}` blob forever.
         val undoJson = EditorActionCodec.encode(past.toList(), future.toList())
+        // Persist the geometry bounds the Note model reserves for thumbnails /
+        // the icon list's size readout. These were never written, so reopened
+        // icons showed a blank "—" dimension. Fall back to the existing values
+        // (rather than collapsing to 0,0,0,0) when the note has no geometry.
+        val contentBounds = com.aichat.sandbox.data.notes.NoteRasterizer.computeBounds(items.toList())
         val toPersist = current.copy(
             title = sanitizedTitle,
             updatedAt = System.currentTimeMillis(),
             undoLogJson = undoJson,
+            minX = contentBounds?.get(0) ?: current.minX,
+            minY = contentBounds?.get(1) ?: current.minY,
+            maxX = contentBounds?.get(2) ?: current.maxX,
+            maxY = contentBounds?.get(3) ?: current.maxY,
         )
         // Sub-phase 6.4 — flush the layer list atomically with items so the
         // FK invariants stay sound across the save.
