@@ -40,10 +40,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -83,7 +85,16 @@ private fun VectorTuneupScreenContent(
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Drop any active text-field focus whenever the stage changes. Each tab
+    // renders a different subtree (the `when` below), so switching away while
+    // an input is focused — e.g. a colour field on the Edit stage — would tear
+    // down the focused node mid-composition, which intermittently crashes.
+    LaunchedEffect(state.selectedTab) {
+        focusManager.clearFocus(force = true)
+    }
 
     // Drain one-shot events: export-ready share intents and transient messages.
     LaunchedEffect(Unit) {
@@ -121,6 +132,11 @@ private fun VectorTuneupScreenContent(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
+                // The bottom-nav Scaffold (AppNavigation) already insets this
+                // screen below the status bar via its content padding. The
+                // default TopAppBar insets would add that status-bar height a
+                // second time, making the bar look too tall — so consume none.
+                windowInsets = WindowInsets(0, 0, 0, 0),
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
                     containerColor = com.aichat.sandbox.ui.theme.studio.LocalStudioColors.current.canvasBase,
                     titleContentColor = com.aichat.sandbox.ui.theme.studio.LocalStudioColors.current.inkStrong,
@@ -201,19 +217,24 @@ private fun VectorTuneupScreenContent(
                 )
             }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-            ) {
-                when (state.selectedTab) {
-                    VectorTuneupTab.INPUT -> InputTab(state, viewModel)
-                    VectorTuneupTab.DIAGNOSTICS -> DiagnosticsTab(state, viewModel)
-                    VectorTuneupTab.COMPARE -> CompareTab(state, viewModel)
-                    VectorTuneupTab.EDIT -> EditTab(state, viewModel)
-                    VectorTuneupTab.HISTORY -> HistoryTab(state, viewModel)
-                    VectorTuneupTab.EXPORT -> ExportTab(state, viewModel)
+            // Key the scrollable content on the active stage so each tab keeps
+            // its own scroll state and swaps as a clean subtree on switch,
+            // rather than carrying a stale scroll offset between tabs.
+            key(state.selectedTab) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                ) {
+                    when (state.selectedTab) {
+                        VectorTuneupTab.INPUT -> InputTab(state, viewModel)
+                        VectorTuneupTab.DIAGNOSTICS -> DiagnosticsTab(state, viewModel)
+                        VectorTuneupTab.COMPARE -> CompareTab(state, viewModel)
+                        VectorTuneupTab.EDIT -> EditTab(state, viewModel)
+                        VectorTuneupTab.HISTORY -> HistoryTab(state, viewModel)
+                        VectorTuneupTab.EXPORT -> ExportTab(state, viewModel)
+                    }
                 }
             }
         }
