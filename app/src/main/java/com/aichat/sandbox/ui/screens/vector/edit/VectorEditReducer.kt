@@ -10,7 +10,7 @@ import com.aichat.sandbox.data.vector.edit.EditSubpath
 import com.aichat.sandbox.data.vector.edit.EditablePath
 import com.aichat.sandbox.data.vector.edit.EditablePathFactory
 import com.aichat.sandbox.data.vector.edit.EditablePathSerializer
-import com.aichat.sandbox.data.vector.replacePath
+import com.aichat.sandbox.data.vector.upsertPath
 import com.aichat.sandbox.ui.components.notes.Snap
 import kotlin.math.hypot
 
@@ -109,8 +109,14 @@ class VectorEditReducer {
         val subpathId = "$pathId.s$index"
         val anchors = draft.anchors.mapIndexed { j, a -> a.copy(id = "$subpathId.a$j") }
         val subpath = EditSubpath(id = subpathId, anchors = anchors, closed = false)
+        // A brand-new path (drawn with no path under edit) needs a visible default
+        // style — an all-null VectorStyle renders nothing once written back/exported.
         val newEditing = editing?.copy(subpaths = editing.subpaths + subpath)
-            ?: EditablePath(pathId = pathId, subpaths = listOf(subpath), style = VectorStyle())
+            ?: EditablePath(
+                pathId = pathId,
+                subpaths = listOf(subpath),
+                style = VectorStyle(fillColor = NEW_PATH_FILL_COLOR),
+            )
         return state.pushingUndo().copy(
             editing = newEditing,
             pendingPen = null,
@@ -321,7 +327,9 @@ class VectorEditReducer {
     private fun applyToDocument(state: VectorEditState): VectorEditState {
         val editing = state.editing ?: return state
         val newPath = EditablePathSerializer.toVectorPath(editing)
-        return state.copy(document = state.document.replacePath(editing.pathId, newPath))
+        // upsert (not replace): a path drawn from scratch isn't in the document yet,
+        // so it must be appended rather than dropped.
+        return state.copy(document = state.document.upsertPath(editing.pathId, newPath))
     }
 
     // ---- snapping ----
@@ -478,6 +486,9 @@ class VectorEditReducer {
 
         /** Id given to a brand-new path created by drawing with no path under edit. */
         const val NEW_PATH_ID = "edit-path"
+
+        /** Default fill for a brand-new pen path, so it's visible once written back. */
+        const val NEW_PATH_FILL_COLOR = "#000000"
 
         /** World-space radius for endpoint snapping while drawing. */
         const val ENDPOINT_RADIUS_WORLD = 8f

@@ -437,6 +437,27 @@ class VectorEditReducerTest {
         assertEquals(PathCommand.MoveTo(2f, 3f), written.commands!!.first())
     }
 
+    @Test
+    fun applyToDocumentAppendsABrandNewPenPath() {
+        // No path under edit: draw a fresh triangle with the pen and write it back.
+        // It must be *appended* (upsert), not dropped, with a visible default fill.
+        val drawnFresh = reduce(
+            stateOn(path("M0,0 L1,0")),
+            VectorEditAction.StartPath,
+            VectorEditAction.PlaceAnchor(0f, 0f),
+            VectorEditAction.PlaceAnchor(10f, 0f),
+            VectorEditAction.PlaceAnchor(10f, 10f),
+            VectorEditAction.CommitPath,
+            VectorEditAction.ApplyToDocument,
+        )
+        assertEquals(
+            listOf("p", VectorEditReducer.NEW_PATH_ID),
+            drawnFresh.document.allPaths().map { it.id },
+        )
+        val newPath = drawnFresh.document.allPaths().single { it.id == VectorEditReducer.NEW_PATH_ID }
+        assertEquals(VectorEditReducer.NEW_PATH_FILL_COLOR, newPath.style.fillColor)
+    }
+
     // ---- undo / redo ----
 
     @Test

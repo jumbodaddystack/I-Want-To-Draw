@@ -9,6 +9,7 @@ import com.aichat.sandbox.data.vector.VectorStyle
 import com.aichat.sandbox.data.vector.VectorViewport
 import com.aichat.sandbox.data.vector.allPaths
 import com.aichat.sandbox.data.vector.replacePath
+import com.aichat.sandbox.data.vector.upsertPath
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -62,5 +63,23 @@ class VectorDocumentReplacePathTest {
         val doc = docWithNestedPaths()
         val updated = doc.replacePath("does-not-exist", path("z", "M0,0"))
         assertEquals(doc, updated)
+    }
+
+    @Test
+    fun upsertReplacesExistingPathInPlace() {
+        val doc = docWithNestedPaths()
+        val updated = doc.upsertPath("b", path("b", "M0,0 C1,1 2,2 3,3"))
+        // Same tree position + sibling order as a plain replace; no new path added.
+        assertEquals(listOf("c", "a", "b"), updated.allPaths().map { it.id })
+        assertEquals("M0,0 C1,1 2,2 3,3", updated.allPaths().first { it.id == "b" }.pathData)
+    }
+
+    @Test
+    fun upsertAppendsNewPathToRootWhenIdAbsent() {
+        val doc = docWithNestedPaths()
+        val updated = doc.upsertPath("edit-path", path("edit-path", "M0,0 L4,4"))
+        // The new path lands at the end of the root group; existing paths untouched.
+        assertEquals(listOf("c", "a", "b", "edit-path"), updated.allPaths().map { it.id })
+        assertEquals("M0,0 L4,4", updated.allPaths().first { it.id == "edit-path" }.pathData)
     }
 }

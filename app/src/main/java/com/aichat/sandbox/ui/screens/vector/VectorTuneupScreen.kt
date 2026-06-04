@@ -41,7 +41,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -87,6 +89,23 @@ private fun VectorTuneupScreenContent(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Full-screen node editor (Phase 1f). While a target is set the editor takes
+    // over the whole workspace (it needs the full surface for pan/zoom/drag, which
+    // would fight the scrolling tab). On Done it persists the edited document as a
+    // new version through the same pipeline the path-level edits use.
+    val editVm: com.aichat.sandbox.ui.screens.vector.edit.VectorEditViewModel = hiltViewModel()
+    var nodeEditTarget by remember { mutableStateOf<NodeEditTarget?>(null) }
+    nodeEditTarget?.let { target ->
+        NodeEditorHost(
+            target = target,
+            sourceXml = state.sourceVersion?.xml,
+            editVm = editVm,
+            tuneupViewModel = viewModel,
+            onClose = { nodeEditTarget = null },
+        )
+        return
+    }
 
     // Drop any active text-field focus whenever the stage changes. Each tab
     // renders a different subtree (the `when` below), so switching away while
@@ -231,7 +250,12 @@ private fun VectorTuneupScreenContent(
                         VectorTuneupTab.INPUT -> InputTab(state, viewModel)
                         VectorTuneupTab.DIAGNOSTICS -> DiagnosticsTab(state, viewModel)
                         VectorTuneupTab.COMPARE -> CompareTab(state, viewModel)
-                        VectorTuneupTab.EDIT -> EditTab(state, viewModel)
+                        VectorTuneupTab.EDIT -> EditTab(
+                            state = state,
+                            viewModel = viewModel,
+                            onEditNodes = { pathId -> nodeEditTarget = NodeEditTarget.ExistingPath(pathId) },
+                            onDrawNewPath = { nodeEditTarget = NodeEditTarget.NewPath },
+                        )
                         VectorTuneupTab.HISTORY -> HistoryTab(state, viewModel)
                         VectorTuneupTab.EXPORT -> ExportTab(state, viewModel)
                     }
@@ -397,7 +421,12 @@ private fun CompareTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewMo
 }
 
 @Composable
-private fun EditTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel) {
+private fun EditTab(
+    state: VectorTuneupUiState,
+    viewModel: VectorTuneupViewModel,
+    onEditNodes: (String) -> Unit = {},
+    onDrawNewPath: () -> Unit = {},
+) {
     if (!state.hasOriginal) {
         StudioEmptyHint(
             marker = "Nothing on the bench",
@@ -444,6 +473,31 @@ private fun EditTab(state: VectorTuneupUiState, viewModel: VectorTuneupViewModel
         onRecolor = { stroke, fill -> viewModel.recolorSelectedPaths(stroke, fill) },
         onRestyle = { width, cap, join -> viewModel.restyleSelectedPaths(width, cap, join) },
     )
+
+    SectionTitle("Node editor")
+    Text(
+        text = "Edit a single path's anchors and curves on a full-screen canvas, or " +
+            "draw a brand-new path with the pen tool. Done saves the result as a new version.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            onClick = { state.selectedPathIds.singleOrNull()?.let(onEditNodes) },
+            enabled = !state.isBusy && state.selectedPathIds.size == 1,
+        ) {
+            Text("Edit nodes")
+        }
+        OutlinedButton(
+            onClick = onDrawNewPath,
+            enabled = !state.isBusy,
+        ) {
+            Text("Draw new path")
+        }
+    }
 
     SectionTitle("Batch restyle")
     VectorBatchRestylePanel(
@@ -617,4 +671,47 @@ private fun tabLabel(tab: VectorTuneupTab): String = when (tab) {
     VectorTuneupTab.EDIT -> "Edit"
     VectorTuneupTab.HISTORY -> "History"
     VectorTuneupTab.EXPORT -> "Export"
+}
+
+/** What the node editor was opened to do (Phase 1f). */
+private sealed interface NodeEditTarget {
+    /** Node-edit the single existing path [pathId]. */
+    data class ExistingPath(val pathId: String) : NodeEditTarget
+
+    /** Draw a brand-new path with the pen tool. */
+    data object NewPath : NodeEditTarget
+}
+
+/**
+ * Hosts the full-screen node editor over the Tune-Up workspace. Opens the editor's
+ * own ViewModel on the current source version's document (parsed from its XML) and,
+ * on Done, hands the edited document back to the Tune-Up ViewModel to persist as a
+ * new version. Cancel/back just discards. Persisting is skipped when nothing was
+ * edited (`canUndo` is false) so a glance-and-leave doesn't spawn a no-op version.
+ */
+@Composable
+private fun NodeEditorHost(
+    target: NodeEditTarget,
+    sourceXml: String?,
+    editVm: com.aichat.sandbox.ui.screens.vector.edit.VectorEditViewModel,
+    tuneupViewModel: VectorTuneupViewModel,
+    onClose: () -> Unit,
+) {
+    androidx.compose.runtime.LaunchedEffect(target, sourceXml) {
+        val document = com.aichat.sandbox.data.vector.AndroidVectorDrawableParser.parse(sourceXml ?: "")
+        when (target) {
+            is NodeEditTarget.ExistingPath -> editVm.open(document, target.pathId)
+            NodeEditTarget.NewPath -> editVm.openForNewPath(document)
+        }
+    }
+    com.aichat.sandbox.ui.screens.vector.edit.VectorEditScreen(
+        viewModel = editVm,
+        onNavigateBack = onClose,
+        onDone = {
+            if (editVm.state.value.canUndo) {
+                tuneupViewModel.persistNodeEdit(editVm.state.value.document)
+            }
+            onClose()
+        },
+    )
 }

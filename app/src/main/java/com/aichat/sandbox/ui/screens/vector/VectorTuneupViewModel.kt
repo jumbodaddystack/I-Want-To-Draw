@@ -9,6 +9,7 @@ import com.aichat.sandbox.data.model.VectorTuneupMode
 import com.aichat.sandbox.data.repository.VectorTuneupProject
 import com.aichat.sandbox.data.repository.VectorTuneupRepository
 import com.aichat.sandbox.data.vector.AndroidVectorDrawableParser
+import com.aichat.sandbox.data.vector.AndroidVectorDrawableWriter
 import com.aichat.sandbox.data.vector.VectorBatchRestyle
 import com.aichat.sandbox.data.vector.VectorBatchRestyleApplier
 import com.aichat.sandbox.data.vector.VectorDocument
@@ -493,6 +494,29 @@ class VectorTuneupViewModel @Inject constructor(
         if (_uiState.value.isBusy) return
         persistManualEdit("Batch Restyle") { document, xml ->
             VectorBatchRestyleApplier.apply(document, xml, restyle)
+        }
+    }
+
+    /**
+     * Persist a [document] edited in the node editor as a new MANUAL_EDIT version.
+     * The node editor already produced the final document (via `ApplyToDocument`),
+     * so this just serializes + re-analyzes it and reuses the shared persist
+     * pipeline — the result branches from the current source version exactly like
+     * the path-level edits do.
+     */
+    fun persistNodeEdit(document: VectorDocument, label: String = "Edit nodes") {
+        if (_uiState.value.isBusy) return
+        persistManualEdit(label) { _, originalXml ->
+            val xml = AndroidVectorDrawableWriter.write(document)
+            VectorManualEditResult(
+                document = document,
+                xml = xml,
+                metrics = VectorMetricsAnalyzer.analyze(document, xml),
+                warnings = emptyList(),
+                editedPathCount = 1,
+                deletedPathCount = 0,
+                summary = if (xml == originalXml) "No node changes" else "Edited path nodes",
+            )
         }
     }
 

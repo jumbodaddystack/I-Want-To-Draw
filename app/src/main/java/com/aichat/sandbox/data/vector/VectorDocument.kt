@@ -263,6 +263,18 @@ fun VectorDocument.replacePath(pathId: String, newPath: VectorPath): VectorDocum
     return copy(root = mapGroup(root))
 }
 
+/**
+ * Return a copy of this document with [newPath] written in: it **replaces** the
+ * existing path with the same id (preserving tree position, see [replacePath]), or
+ * — when no path matches — is **appended** to the root group. The node editor uses
+ * this for write-back so it serves both editing an existing path and committing a
+ * brand-new one (drawn with the pen tool) through the same call.
+ */
+fun VectorDocument.upsertPath(pathId: String, newPath: VectorPath): VectorDocument {
+    if (allPaths().any { it.id == pathId }) return replacePath(pathId, newPath)
+    return copy(root = root.copy(children = root.children + VectorNode.PathNode(newPath)))
+}
+
 /** Depth-first list of every non-root group in the document. */
 fun VectorDocument.allGroups(): List<VectorGroup> {
     val out = ArrayList<VectorGroup>()

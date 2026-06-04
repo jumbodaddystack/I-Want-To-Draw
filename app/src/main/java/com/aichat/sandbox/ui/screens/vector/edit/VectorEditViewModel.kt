@@ -56,6 +56,18 @@ class VectorEditViewModel @Inject constructor() : ViewModel() {
         if (pathId != null) dispatch(VectorEditAction.BeginEdit(pathId))
     }
 
+    /**
+     * Open the editor on [document] ready to draw a **new** path: the existing paths
+     * show as static context, the pen tool is armed, and a fresh draft is started so
+     * the first tap places an anchor. Committing (Finish) creates the new path; Done
+     * appends it to the document (see `VectorDocument.upsertPath`).
+     */
+    fun openForNewPath(document: VectorDocument) {
+        open(document)
+        setTool(EditTool.PEN)
+        startPath()
+    }
+
     /** Funnel every action through the pure reducer. The single state mutation point. */
     fun dispatch(action: VectorEditAction) {
         _state.update { reducer.reduce(it, action) }
