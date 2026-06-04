@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import com.aichat.sandbox.data.vector.VectorDocument
 import com.aichat.sandbox.data.vector.VectorGroup
 import com.aichat.sandbox.data.vector.VectorViewport
+import com.aichat.sandbox.data.vector.edit.AnchorType
 import com.aichat.sandbox.ui.components.notes.ViewportController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,6 +68,7 @@ class VectorEditViewModel @Inject constructor() : ViewModel() {
     fun startPath() = dispatch(VectorEditAction.StartPath)
     fun commitPath() = dispatch(VectorEditAction.CommitPath)
     fun deleteSelected() = dispatch(VectorEditAction.DeleteSelected)
+    fun setAnchorType(id: String, type: AnchorType) = dispatch(VectorEditAction.SetAnchorType(id, type))
     fun toggleClosed(subpathId: String) = dispatch(VectorEditAction.ToggleSubpathClosed(subpathId))
     fun undo() = dispatch(VectorEditAction.Undo)
     fun redo() = dispatch(VectorEditAction.Redo)
