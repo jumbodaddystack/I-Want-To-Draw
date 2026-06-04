@@ -47,6 +47,19 @@ sealed interface VectorEditAction {
     data class MoveSelection(val dx: Float, val dy: Float) : VectorEditAction
 
     /**
+     * Drag the [side] control handle of anchor [id] to world ([x], [y]). The
+     * opposite handle follows the anchor's [com.aichat.sandbox.data.vector.edit.AnchorType]:
+     * a `CORNER` moves the dragged handle alone, a `SMOOTH` keeps the opposite
+     * handle colinear at its own length, and a `SYMMETRIC` mirrors it exactly.
+     */
+    data class MoveHandle(
+        val id: String,
+        val side: EditHitTest.HandleSide,
+        val x: Float,
+        val y: Float,
+    ) : VectorEditAction
+
+    /**
      * Insert an anchor on the segment leaving anchor [segmentIndex] of [subpathId]
      * at parameter [t] (0..1), splitting it with a curve-preserving de Casteljau
      * split. For a closed subpath, the last segment index wraps to the start anchor.

@@ -66,7 +66,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started
 - [x] Tests: `EditablePathRoundTripTest`, `VectorDocumentReplacePathTest` (14 tests, green)
 - [x] Committed + pushed
 
-### Phase 1 — node editor (the rest of Phase 1) — 🟡 IN PROGRESS (1a+1b done → **NEXT: 1c**)
+### Phase 1 — node editor (the rest of Phase 1) — 🟡 IN PROGRESS (1a+1b+1c done → **NEXT: 1d**)
 Build in this order (each step is shippable + testable on its own):
 - [x] **1a. Pure reducer core (no UI):** `ui/screens/vector/edit/VectorEditState.kt`,
   `VectorEditAction.kt`, `VectorEditReducer.kt`. Actions: `BeginEdit`, `SetTool`,
@@ -89,7 +89,13 @@ Build in this order (each step is shippable + testable on its own):
   segment; cubic point via de Casteljau; combined-priority; a returned `Segment` feeds
   `InsertAnchorOnSegment` and lands the new node exactly on the reported curve point;
   `worldTolerance` inverse-scales.
-- [ ] **1c. ViewModel:** `VectorEditViewModel.kt` (StateFlow host, Hilt — mirror `VectorTuneupViewModel`).
+- [x] **1c. ViewModel:** `VectorEditViewModel.kt` (StateFlow host, Hilt — mirror `VectorTuneupViewModel`).
+  Holds `MutableStateFlow<VectorEditState>`, `dispatch(action)` funnels through the reducer,
+  owns the `ViewportController`, and maps gestures → actions (`onTap`/`onDragStart`/`onDrag`/
+  `onDragEnd`, `pan`/`zoom`). Continuous drags are coalesced to a single undo step. Also added
+  the missing reducer action **`MoveHandle(id, side, x, y)`** (corner=independent, smooth=colinear
+  keep-length, symmetric=mirror) so `Hit.Handle` drags have a home. **Tests:** `VectorEditViewModelTest`
+  (8) + 4 new `MoveHandle` reducer tests → `*.edit.*` now **59, green**.
 - [ ] **1d. Canvas + gestures:** `VectorEditCanvas.kt` — render via existing
   `VectorPreviewCanvas` internals (`preparePreviewPaths`/`buildComposePath`/
   `drawPreparedPath`); reuse `ViewportController` (pan/zoom) + `Snap`
@@ -123,11 +129,11 @@ Build in this order (each step is shippable + testable on its own):
 
 ## 3. Latest handoff (update this each session)
 
-**Last updated:** 2026-06-04 · **Last completed:** Phase 1 step 1b (pure hit-testing)
+**Last updated:** 2026-06-04 · **Last completed:** Phase 1 step 1c (ViewModel + `MoveHandle`)
 
-**State of the branch:** Phase 0 + Phase 1a (ceGqz, merged to main via PR #91) +
-Phase 1b now on `claude/vector-roadmap-next-phase-a83BW`. Edit tests green (47 in
-`*.edit.*`: 12 Phase-0 round-trip/replace + 21 reducer + 14 new hit-test). No PR open.
+**State of the branch:** Phase 0 + 1a + 1b are merged to main (PRs #91, #92). Phase 1c is
+now on `claude/vector-roadmap-next-phase-EXVGM`. Edit tests green (**59** in `*.edit.*`:
+12 Phase-0 round-trip/replace + 25 reducer + 14 hit-test + 8 ViewModel). No PR open.
 
 **What exists now (for the next session to build on):**
 - *(Phase 0)* `data/vector/edit/` — `EditablePath` node model (absolute `ControlPoint`
@@ -153,38 +159,58 @@ Phase 1b now on `claude/vector-roadmap-next-phase-a83BW`. Edit tests green (47 i
     `n-1` that wraps to anchor 0 — so a `Hit.Segment` feeds `InsertAnchorOnSegment`
     unchanged. Cubic picking = coarse sample (24) + ternary refine (24); handles are
     only hit for `candidates` (i.e. selected) anchors.
+- *(Phase 1c, NEW)* `ui/screens/vector/edit/`:
+  - `VectorEditReducer` gained **`MoveHandle(id, side, x, y)`** (the handle-drag gap the
+    prior handoff flagged): places the dragged `IN`/`OUT` handle and reconciles the
+    opposite per `AnchorType` — `CORNER` independent, `SMOOTH` colinear keeping its own
+    length, `SYMMETRIC` mirrored. `side` reuses `EditHitTest.HandleSide`. Pure; pushes one
+    undo snapshot.
+  - `VectorEditViewModel.kt` — first Android-coupled file in the package. `@HiltViewModel`,
+    no-arg `@Inject` ctor, **no coroutine work** (so it's JVM-testable without Robolectric).
+    Holds `MutableStateFlow<VectorEditState>` (`state`), `open(document, pathId?)` starts a
+    session, `dispatch(action)` = `_state.update { reducer.reduce(it, action) }`. Owns
+    `val viewport = ViewportController()`. Gesture API: `onTap(screenX, screenY, additive)`
+    (pen→`PlaceAnchor`; else hitTest → `Anchor`=`SelectAnchor` / `Segment`=`InsertAnchorOnSegment`
+    / empty=`ClearSelection`; handles ignored on tap), `onDragStart/onDrag/onDragEnd`
+    (resolves a `Handle` or `MoveSelection` target at press, applies world-space deltas live,
+    and **coalesces the drag to one undo step** by trimming `undoStack` back to its pre-drag
+    baseline), plus `pan`/`zoom` and thin `setTool`/`setSnapMask`/`startPath`/`commitPath`/
+    `deleteSelected`/`toggleClosed`/`undo`/`redo`/`applyToDocument` pass-throughs.
+    `EMPTY_DOCUMENT` (24×24, no paths) is the placeholder before `open`.
 - Reusable, confirmed APIs (still): `VectorPreviewPathNormalizer.normalize`,
   `PathDataFormatter.format`, `PathDataParser.parse`, `ViewportController` (world↔screen,
   bounded clamp), `Snap` (`MASK_GRID/ANGLE/ENDPOINT`, all pure — reducer imports it and
   stays JVM-clean), `VectorPreviewCanvas` internals.
 
-**→ NEXT ACTION:** **Phase 1 step 1c** — `ui/screens/vector/edit/VectorEditViewModel.kt`,
-a Hilt `@HiltViewModel` StateFlow host over `VectorEditReducer` (mirror
-`VectorTuneupViewModel`): hold `MutableStateFlow<VectorEditState>`, expose `state`, and
-`dispatch(action)` = `_state.update { reducer.reduce(it, action) }`. It owns the
-`ViewportController` (pan/zoom) and turns canvas gestures into actions; use
-`EditHitTest.worldTolerance(EditHitTest.DEFAULT_TOLERANCE_PX, viewport.scale)` +
-`viewport.screenToWorld*` to map a touch, then `EditHitTest.hitTest(...)` → the matching
-action (`Anchor` → `SelectAnchor`; `Segment` → `InsertAnchorOnSegment`; `Handle` → handle
-drag — see handle-ref note below). Then 1d/1e (Compose canvas + screen) → 1f (Tune-Up wiring).
+**→ NEXT ACTION:** **Phase 1 step 1d** — `ui/screens/vector/edit/VectorEditCanvas.kt`, the
+Compose canvas + gestures. Render the geometry through the existing `VectorPreviewCanvas`
+internals (`preparePreviewPaths`/`buildComposePath`/`drawPreparedPath`) under the
+`VectorEditViewModel.viewport` mapping; overlay anchor knobs, control handles (only for
+selected anchors, matching `EditHitTest`'s candidate rule), and a rubber-band. Wire pointer
+input straight to the VM's gesture API: tap → `vm.onTap(x, y, additive)`; drag →
+`vm.onDragStart`/`onDrag`/`onDragEnd`; pinch/scroll → `vm.zoom`/`vm.pan`. The VM already does
+all hit-testing + action mapping, so 1d is purely "draw state + forward gestures." Then 1e
+(screen + toolbar) → 1f (Tune-Up wiring).
 
 **Watch-outs for next session:**
-- Reducer + hit-test are pure (no Android imports) — keep them that way; only 1c–1e touch
-  Compose/Hilt. `VectorEditViewModel` is the first Android-coupled file in this package.
-- `InsertAnchorOnSegment` is `(subpathId, segmentIndex, t)`; closing-segment index wraps
-  to the start anchor. `EditHitTest.hitSegment` already returns matching `(segmentIndex, t)`
-  — pass them straight through.
-- **Handle dragging gap:** `EditHitTest` now *identifies* a handle (`Hit.Handle{anchorId,
-  side}`), but the **reducer has no "drag this anchor's IN/OUT handle to (x,y)" action yet** —
-  `DragHandle` only pulls symmetric handles on the just-placed **pen draft** anchor, not an
-  arbitrary committed anchor's single handle. Step 1c/1d needs a new reducer action (e.g.
-  `MoveHandle(anchorId, side, x, y)` respecting `AnchorType` mirror/independent) — add it
-  alongside the canvas, with a reducer test, then wire `Hit.Handle` to it.
-- Selection is anchor-ids only; that's enough for select/move/delete. Handle editing uses
-  the `Hit.Handle` ref directly (no need to put handles in `Selection`).
+- Reducer + hit-test stay pure (no Android imports); `VectorEditViewModel` is the only
+  Android-coupled file so far. Keep new pure logic in the reducer, not the canvas.
+- The VM's gesture API is the whole contract for 1d — don't re-implement hit-testing in the
+  canvas. Tap/drag both already route through `EditHitTest` inside the VM. Drags are
+  **coalesced to one undo step** in `onDragEnd`; the canvas just needs to bracket a drag with
+  start/…/end honestly (call `onDragEnd` even on cancel) or the undo stack won't be trimmed.
+- Handle knobs are only grabbable for **selected** anchors (the VM passes `state.selection`
+  as the hitTest candidates). Draw handles only for selected anchors so what's visible matches
+  what's hittable.
+- `MoveHandle`/`MoveSelection` apply **world** deltas — the VM converts screen px by dividing
+  by `viewport.scale`, so pass raw screen deltas to `onDrag`.
+- Tolerance is world-space and inverse-scales; at scale 1 on a small artboard it's large
+  (DEFAULT 22px ÷ scale), so anchors dominate segment hits when zoomed out — that's expected
+  (it's how the VM tests pick segments only after zooming in). No action needed, just don't be
+  surprised in manual testing.
 - **Confirm the two "open choices" with the user before wiring UI (step 1f):**
   in-Tune-Up edit mode vs. dedicated screen (handles-as-absolute-`ControlPoint` already locked).
-- Re-run `*.edit.*` after each step; keep them green (currently 47).
+- Re-run `*.edit.*` after each step; keep them green (currently **59**).
 
 ---
 

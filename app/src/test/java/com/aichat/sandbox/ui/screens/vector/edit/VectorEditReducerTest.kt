@@ -343,6 +343,84 @@ class VectorEditReducerTest {
         assertEquals(AnchorType.CORNER, corner.editing!!.subpaths.single().anchors[1].type)
     }
 
+    // ---- handle dragging ----
+
+    @Test
+    fun moveHandleCornerLeavesOppositeUntouched() {
+        // Mid anchor[1] at (4,0): in=(2,0), out=(4,3), classified CORNER.
+        val begun = reduce(
+            stateOn(path("M0,0 C2,-2 2,0 4,0 C4,3 8,3 8,0")),
+            VectorEditAction.BeginEdit("p"),
+        )
+        val mid = begun.editing!!.subpaths.single().anchors[1]
+        assertEquals(AnchorType.CORNER, mid.type)
+        val after = reducer.reduce(
+            begun,
+            VectorEditAction.MoveHandle(mid.id, EditHitTest.HandleSide.OUT, 6f, 1f),
+        )
+        val m = after.editing!!.subpaths.single().anchors[1]
+        assertEquals(6f, m.outHandle!!.x, 1e-4f)
+        assertEquals(1f, m.outHandle!!.y, 1e-4f)
+        // The incoming handle is independent for a corner.
+        assertEquals(2f, m.inHandle!!.x, 1e-4f)
+        assertEquals(0f, m.inHandle!!.y, 1e-4f)
+    }
+
+    @Test
+    fun moveHandleSymmetricMirrorsTheOpposite() {
+        val begun = reduce(
+            stateOn(path("M0,0 C2,-2 2,0 4,0 C4,3 8,3 8,0")),
+            VectorEditAction.BeginEdit("p"),
+        )
+        val mid = begun.editing!!.subpaths.single().anchors[1]
+        val symed = reducer.reduce(begun, VectorEditAction.SetAnchorType(mid.id, AnchorType.SYMMETRIC))
+        // Drag the outgoing handle to (4,4): anchor (4,0), so the incoming handle
+        // must mirror to (4,-4).
+        val after = reducer.reduce(
+            symed,
+            VectorEditAction.MoveHandle(mid.id, EditHitTest.HandleSide.OUT, 4f, 4f),
+        )
+        val m = after.editing!!.subpaths.single().anchors[1]
+        assertEquals(4f, m.outHandle!!.x, 1e-4f)
+        assertEquals(4f, m.outHandle!!.y, 1e-4f)
+        assertEquals(4f, m.inHandle!!.x, 1e-4f)
+        assertEquals(-4f, m.inHandle!!.y, 1e-4f)
+    }
+
+    @Test
+    fun moveHandleSmoothKeepsOppositeLengthButRealigns() {
+        val begun = reduce(
+            stateOn(path("M0,0 C2,-2 2,0 4,0 C4,3 8,3 8,0")),
+            VectorEditAction.BeginEdit("p"),
+        )
+        val mid = begun.editing!!.subpaths.single().anchors[1]
+        val smoothed = reducer.reduce(begun, VectorEditAction.SetAnchorType(mid.id, AnchorType.SMOOTH))
+        val inLenBefore = smoothed.editing!!.subpaths.single().anchors[1].let {
+            hypot(it.x - it.inHandle!!.x, it.y - it.inHandle!!.y)
+        }
+        // Drag the outgoing handle to (7,4): the incoming handle stays colinear
+        // through the anchor and retains its own length.
+        val after = reducer.reduce(
+            smoothed,
+            VectorEditAction.MoveHandle(mid.id, EditHitTest.HandleSide.OUT, 7f, 4f),
+        )
+        val m = after.editing!!.subpaths.single().anchors[1]
+        assertColinearThrough(m)
+        val inLenAfter = hypot(m.x - m.inHandle!!.x, m.y - m.inHandle!!.y)
+        assertEquals(inLenBefore, inLenAfter, 1e-3f)
+    }
+
+    @Test
+    fun moveHandleUnknownAnchorIsIgnored() {
+        val begun = reduce(stateOn(path("M0,0 L10,0")), VectorEditAction.BeginEdit("p"))
+        val after = reducer.reduce(
+            begun,
+            VectorEditAction.MoveHandle("nope", EditHitTest.HandleSide.OUT, 5f, 5f),
+        )
+        assertEquals(begun.editing, after.editing)
+        assertFalse(after.canUndo)
+    }
+
     // ---- write-back ----
 
     @Test

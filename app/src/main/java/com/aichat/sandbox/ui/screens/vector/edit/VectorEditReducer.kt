@@ -46,6 +46,7 @@ class VectorEditReducer {
             is VectorEditAction.SelectAnchor -> selectAnchor(state, action.id, action.additive)
             is VectorEditAction.ClearSelection -> state.copy(selection = Selection())
             is VectorEditAction.MoveSelection -> moveSelection(state, action.dx, action.dy)
+            is VectorEditAction.MoveHandle -> moveHandle(state, action.id, action.side, action.x, action.y)
             is VectorEditAction.InsertAnchorOnSegment ->
                 insertAnchor(state, action.subpathId, action.segmentIndex, action.t)
             is VectorEditAction.DeleteSelected -> deleteSelected(state)
@@ -155,6 +156,78 @@ class VectorEditReducer {
             if (a.id in state.selection.anchorIds) a.translated(adjDx, adjDy) else a
         }
         return state.pushingUndo().copy(editing = moved)
+    }
+
+    /**
+     * Drag one control handle of a committed anchor. The dragged side lands on
+     * ([x], [y]); the opposite side is reconciled to honor the anchor's
+     * [AnchorType] (see [reconcileOpposite]). A [AnchorType.CORNER] (or an anchor
+     * not under edit) leaves the other handle untouched.
+     */
+    private fun moveHandle(
+        state: VectorEditState,
+        id: String,
+        side: EditHitTest.HandleSide,
+        x: Float,
+        y: Float,
+    ): VectorEditState {
+        val editing = state.editing ?: return state
+        if (editing.subpaths.none { sp -> sp.anchors.any { it.id == id } }) return state
+        val updated = editing.mapAnchors { a -> if (a.id == id) dragHandleOn(a, side, x, y) else a }
+        return state.pushingUndo().copy(editing = updated)
+    }
+
+    /** Place [side]'s handle at ([x], [y]) and reconcile the opposite side. */
+    private fun dragHandleOn(
+        anchor: EditAnchor,
+        side: EditHitTest.HandleSide,
+        x: Float,
+        y: Float,
+    ): EditAnchor {
+        val dragged = ControlPoint(x, y)
+        val withDragged = when (side) {
+            EditHitTest.HandleSide.IN -> anchor.copy(inHandle = dragged)
+            EditHitTest.HandleSide.OUT -> anchor.copy(outHandle = dragged)
+        }
+        return when (anchor.type) {
+            AnchorType.CORNER -> withDragged
+            AnchorType.SMOOTH -> reconcileOpposite(withDragged, side, equalLength = false)
+            AnchorType.SYMMETRIC -> reconcileOpposite(withDragged, side, equalLength = true)
+        }
+    }
+
+    /**
+     * Keep the handle opposite the just-dragged [draggedSide] colinear through the
+     * anchor (continuous tangent). [equalLength] mirrors it to the dragged length
+     * (symmetric); otherwise it retains its own length (smooth).
+     */
+    private fun reconcileOpposite(
+        anchor: EditAnchor,
+        draggedSide: EditHitTest.HandleSide,
+        equalLength: Boolean,
+    ): EditAnchor {
+        val dragged = when (draggedSide) {
+            EditHitTest.HandleSide.IN -> anchor.inHandle
+            EditHitTest.HandleSide.OUT -> anchor.outHandle
+        } ?: return anchor
+        val dirX = dragged.x - anchor.x
+        val dirY = dragged.y - anchor.y
+        val len = hypot(dirX, dirY)
+        if (len < EPS) return anchor
+        val ux = dirX / len
+        val uy = dirY / len
+        val opposite = when (draggedSide) {
+            EditHitTest.HandleSide.IN -> anchor.outHandle
+            EditHitTest.HandleSide.OUT -> anchor.inHandle
+        }
+        val oppLen = if (equalLength) len
+        else opposite?.let { hypot(it.x - anchor.x, it.y - anchor.y) } ?: len
+        // Opposite handle sits on the ray pointing away from the dragged one.
+        val oppPoint = ControlPoint(anchor.x - ux * oppLen, anchor.y - uy * oppLen)
+        return when (draggedSide) {
+            EditHitTest.HandleSide.IN -> anchor.copy(outHandle = oppPoint)
+            EditHitTest.HandleSide.OUT -> anchor.copy(inHandle = oppPoint)
+        }
     }
 
     private fun insertAnchor(
