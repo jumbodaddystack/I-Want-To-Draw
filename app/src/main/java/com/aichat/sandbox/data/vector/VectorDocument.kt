@@ -242,6 +242,27 @@ fun VectorDocument.allPaths(): List<VectorPath> {
     return out
 }
 
+/**
+ * Return a copy of this document with the path identified by [pathId] replaced by
+ * [newPath], preserving tree position (group nesting and sibling order). When no
+ * path matches, the document is returned unchanged. Used by the Phase 1 node
+ * editor to write an edited [VectorPath] back into the immutable tree.
+ */
+fun VectorDocument.replacePath(pathId: String, newPath: VectorPath): VectorDocument {
+    fun mapGroup(group: VectorGroup): VectorGroup =
+        group.copy(
+            children = group.children.map { child ->
+                when (child) {
+                    is VectorNode.PathNode ->
+                        if (child.path.id == pathId) VectorNode.PathNode(newPath) else child
+                    is VectorNode.GroupNode ->
+                        VectorNode.GroupNode(mapGroup(child.group))
+                }
+            },
+        )
+    return copy(root = mapGroup(root))
+}
+
 /** Depth-first list of every non-root group in the document. */
 fun VectorDocument.allGroups(): List<VectorGroup> {
     val out = ArrayList<VectorGroup>()
