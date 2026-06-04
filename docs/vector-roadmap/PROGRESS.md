@@ -66,7 +66,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started
 - [x] Tests: `EditablePathRoundTripTest`, `VectorDocumentReplacePathTest` (14 tests, green)
 - [x] Committed + pushed
 
-### Phase 1 — node editor (the rest of Phase 1) — 🟡 IN PROGRESS (1a+1b+1c done → **NEXT: 1d**)
+### Phase 1 — node editor (the rest of Phase 1) — 🟡 IN PROGRESS (1a+1b+1c+1d done → **NEXT: 1e**)
 Build in this order (each step is shippable + testable on its own):
 - [x] **1a. Pure reducer core (no UI):** `ui/screens/vector/edit/VectorEditState.kt`,
   `VectorEditAction.kt`, `VectorEditReducer.kt`. Actions: `BeginEdit`, `SetTool`,
@@ -96,10 +96,20 @@ Build in this order (each step is shippable + testable on its own):
   the missing reducer action **`MoveHandle(id, side, x, y)`** (corner=independent, smooth=colinear
   keep-length, symmetric=mirror) so `Hit.Handle` drags have a home. **Tests:** `VectorEditViewModelTest`
   (8) + 4 new `MoveHandle` reducer tests → `*.edit.*` now **59, green**.
-- [ ] **1d. Canvas + gestures:** `VectorEditCanvas.kt` — render via existing
-  `VectorPreviewCanvas` internals (`preparePreviewPaths`/`buildComposePath`/
-  `drawPreparedPath`); reuse `ViewportController` (pan/zoom) + `Snap`
-  (grid/angle/endpoint). Overlay anchors/handles/rubber-band. Pen + direct-select gestures.
+- [x] **1d. Canvas + gestures:** `ui/screens/vector/edit/VectorEditCanvas.kt` — Compose
+  `Canvas` that renders via the existing `VectorPreviewCanvas` internals
+  (`preparePreviewPaths`/`buildComposePath`/`drawPreparedPath`) under the VM's
+  `ViewportController` mapping (`screen = world*scale + offset`). Draws static doc paths
+  (minus the path under edit), the **live** editing path's geometry + a constant-width
+  skeleton outline (so an unpainted edit path is still visible), an artboard border, and
+  the overlay: anchor knobs (selected = filled accent, idle = hollow), control handles
+  **only for selected anchors** (matches `EditHitTest` candidates), and the in-progress
+  pen draft. Custom `awaitEachGesture` loop classifies **1-finger tap → `onTap`**,
+  **1-finger drag → `onDragStart`/`onDrag`/`onDragEnd`** (honest bracket incl. cancel,
+  so the VM's drag-coalesce trims correctly), **2-finger → pan/zoom** via
+  `calculatePan`/`calculateZoom`/`calculateCentroid`. Fits + bounds-clamps the viewport to
+  the artboard on document/size change (the one place that frames the VM's viewport).
+  Pure-UI (no new reducer logic); `*.edit.*` stays **59**.
 - [ ] **1e. Screen + toolbar:** `VectorEditScreen.kt` (Pen / Direct-select / add /
   delete / corner-smooth / close / undo / redo).
 - [ ] **1f. Wire into Tune-Up:** add an "Edit" entry in `ui/screens/vector/VectorTuneupScreen.kt`;
@@ -129,11 +139,13 @@ Build in this order (each step is shippable + testable on its own):
 
 ## 3. Latest handoff (update this each session)
 
-**Last updated:** 2026-06-04 · **Last completed:** Phase 1 step 1c (ViewModel + `MoveHandle`)
+**Last updated:** 2026-06-04 · **Last completed:** Phase 1 step 1d (Compose canvas + gestures)
 
-**State of the branch:** Phase 0 + 1a + 1b are merged to main (PRs #91, #92). Phase 1c is
-now on `claude/vector-roadmap-next-phase-EXVGM`. Edit tests green (**59** in `*.edit.*`:
-12 Phase-0 round-trip/replace + 25 reducer + 14 hit-test + 8 ViewModel). No PR open.
+**State of the branch:** Phase 0 + 1a + 1b + 1c are merged to main (PRs #91–#93). Phase 1d
+is now on `claude/vector-roadmap-next-phase-0k3F5`. `:app:compileDebugKotlin` is clean and
+edit tests stay green (**59** in `*.edit.*`: 12 Phase-0 round-trip/replace + 25 reducer +
+14 hit-test + 8 ViewModel). 1d is a Composable (pure UI), so it adds no JVM tests — its bar
+is "compiles + 59 stays green," both met. No PR open.
 
 **What exists now (for the next session to build on):**
 - *(Phase 0)* `data/vector/edit/` — `EditablePath` node model (absolute `ControlPoint`
@@ -177,40 +189,60 @@ now on `claude/vector-roadmap-next-phase-EXVGM`. Edit tests green (**59** in `*.
     baseline), plus `pan`/`zoom` and thin `setTool`/`setSnapMask`/`startPath`/`commitPath`/
     `deleteSelected`/`toggleClosed`/`undo`/`redo`/`applyToDocument` pass-throughs.
     `EMPTY_DOCUMENT` (24×24, no paths) is the placeholder before `open`.
+- *(Phase 1d, NEW)* `ui/screens/vector/edit/VectorEditCanvas.kt`:
+  - `@Composable fun VectorEditCanvas(state, viewport, modifier, onTap, onDragStart, onDrag,
+    onDragEnd, onPan, onZoom)` — the screen (1e) passes `vm.state.value` + `vm.viewport` +
+    `vm::onTap`/`onDragStart`/`onDrag`/`onDragEnd`/`pan`/`zoom`. `onTap` is `(x, y) -> Unit`
+    (additive multi-select is deferred to 1e; canvas taps are always non-additive).
+  - Renders through the **existing** preview pipeline (no parallel renderer): static doc
+    paths via `preparePreviewPaths(VectorPreviewBuilder.build(document))` minus
+    `state.editing?.pathId`; the live edit path via a private `buildEditingRender(editing)`
+    that runs `EditablePathSerializer.toCommands → VectorPreviewPathNormalizer.normalize →
+    buildComposePath` and resolves paints with `parseVectorColor`/`toStrokeCap`/`toStrokeJoin`.
+  - World→screen is the VM's `ViewportController` (`withTransform { translate(off); scale }`),
+    **not** the preview's fit transform — same mapping the VM hit-tests against. Overlay
+    (knobs/handles/pen-draft/border) is drawn in screen space at constant px.
+  - Gesture classification lives in a custom `awaitEachGesture` (NOT `detectTransformGestures`,
+    which fires for one finger too): pointer-count gates tap/drag (1) vs pan/zoom (2).
 - Reusable, confirmed APIs (still): `VectorPreviewPathNormalizer.normalize`,
   `PathDataFormatter.format`, `PathDataParser.parse`, `ViewportController` (world↔screen,
   bounded clamp), `Snap` (`MASK_GRID/ANGLE/ENDPOINT`, all pure — reducer imports it and
   stays JVM-clean), `VectorPreviewCanvas` internals.
 
-**→ NEXT ACTION:** **Phase 1 step 1d** — `ui/screens/vector/edit/VectorEditCanvas.kt`, the
-Compose canvas + gestures. Render the geometry through the existing `VectorPreviewCanvas`
-internals (`preparePreviewPaths`/`buildComposePath`/`drawPreparedPath`) under the
-`VectorEditViewModel.viewport` mapping; overlay anchor knobs, control handles (only for
-selected anchors, matching `EditHitTest`'s candidate rule), and a rubber-band. Wire pointer
-input straight to the VM's gesture API: tap → `vm.onTap(x, y, additive)`; drag →
-`vm.onDragStart`/`onDrag`/`onDragEnd`; pinch/scroll → `vm.zoom`/`vm.pan`. The VM already does
-all hit-testing + action mapping, so 1d is purely "draw state + forward gestures." Then 1e
-(screen + toolbar) → 1f (Tune-Up wiring).
+**→ NEXT ACTION:** **Phase 1 step 1e** — `ui/screens/vector/edit/VectorEditScreen.kt`, the
+screen + toolbar that hosts `VectorEditCanvas`. Collect `vm.state` (`collectAsState`), put the
+canvas in a `Box`/`Scaffold`, and add a toolbar wired to the VM pass-throughs:
+Pen (`setTool(PEN)` + `startPath`/`commitPath`) / Direct-select (`setTool(DIRECT_SELECT)`) /
+add (insert is a canvas tap on a segment — surface as a hint, no button needed) / delete
+(`deleteSelected`) / corner↔smooth↔symmetric (`SetAnchorType` on the selected anchor — note the
+VM has **no `setAnchorType` pass-through yet**; either add one or `dispatch` the action directly)
+/ close (`toggleClosed` — needs the active subpath id; derive from selection or "last subpath")
+/ undo (`undo`, gate on `state.canUndo`) / redo (`redo`, gate on `state.canRedo`). Snap toggles
+(`setSnapMask` with `Snap.MASK_GRID/ANGLE/ENDPOINT`) are a nice-to-have. Then 1f (Tune-Up wiring).
 
 **Watch-outs for next session:**
-- Reducer + hit-test stay pure (no Android imports); `VectorEditViewModel` is the only
-  Android-coupled file so far. Keep new pure logic in the reducer, not the canvas.
-- The VM's gesture API is the whole contract for 1d — don't re-implement hit-testing in the
-  canvas. Tap/drag both already route through `EditHitTest` inside the VM. Drags are
-  **coalesced to one undo step** in `onDragEnd`; the canvas just needs to bracket a drag with
-  start/…/end honestly (call `onDragEnd` even on cancel) or the undo stack won't be trimmed.
-- Handle knobs are only grabbable for **selected** anchors (the VM passes `state.selection`
-  as the hitTest candidates). Draw handles only for selected anchors so what's visible matches
-  what's hittable.
-- `MoveHandle`/`MoveSelection` apply **world** deltas — the VM converts screen px by dividing
-  by `viewport.scale`, so pass raw screen deltas to `onDrag`.
-- Tolerance is world-space and inverse-scales; at scale 1 on a small artboard it's large
-  (DEFAULT 22px ÷ scale), so anchors dominate segment hits when zoomed out — that's expected
-  (it's how the VM tests pick segments only after zooming in). No action needed, just don't be
-  surprised in manual testing.
-- **Confirm the two "open choices" with the user before wiring UI (step 1f):**
+- Reducer + hit-test stay pure (no Android imports); `VectorEditViewModel` + `VectorEditCanvas`
+  are the only Android-coupled edit files. Keep new logic in the reducer, not the screen/canvas.
+- **Pass `vm.onTap(x, y)` for the canvas tap** (the canvas's `onTap` is `(Float, Float) -> Unit`;
+  the VM signature is `onTap(x, y, additive=false)`). If 1e adds a multi-select toggle, thread
+  `additive` through a new canvas param — today it's always non-additive.
+- The canvas **frames the VM's viewport itself** (fit + `setPanBounds` on document/size change).
+  Don't also fit from the screen, or you'll fight it. If 1e wants a "reset view" button, call
+  `vm.viewport.fitToContent(bounds, canvasSize)` with the artboard rect.
+- `SetAnchorType`/`ToggleSubpathClosed` need a target id. `SetAnchorType` acts on a single
+  anchor id — for a multi-anchor selection decide a policy (apply to each, or disable the button
+  unless exactly one is selected). `ToggleSubpathClosed` takes a **subpath** id, not an anchor id.
+- Drags are **coalesced to one undo step** by the VM in `onDragEnd`; the canvas already brackets
+  honestly (incl. cancel). Don't second-guess it from the screen.
+- Handle knobs are only drawn/grabbable for **selected** anchors (canvas + `EditHitTest` agree).
+- `MoveHandle`/`MoveSelection` apply **world** deltas; the VM divides screen px by `viewport.scale`,
+  so the canvas passes raw screen deltas to `onDrag` (already wired).
+- Tolerance is world-space and inverse-scales (DEFAULT 22px ÷ scale); zoomed out, anchors dominate
+  segment hits — expected. Zoom in to insert points on a segment.
+- **Confirm the two "open choices" with the user before wiring UI into Tune-Up (step 1f):**
   in-Tune-Up edit mode vs. dedicated screen (handles-as-absolute-`ControlPoint` already locked).
-- Re-run `*.edit.*` after each step; keep them green (currently **59**).
+- Re-run `*.edit.*` after each step; keep them green (currently **59**). 1d/1e are Composables
+  (no JVM tests) — the bar is "compiles clean + 59 stays green."
 
 ---
 
