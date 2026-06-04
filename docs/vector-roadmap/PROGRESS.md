@@ -66,7 +66,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started
 - [x] Tests: `EditablePathRoundTripTest`, `VectorDocumentReplacePathTest` (14 tests, green)
 - [x] Committed + pushed
 
-### Phase 1 — node editor (the rest of Phase 1) — 🟡 IN PROGRESS (1a done → **NEXT: 1b**)
+### Phase 1 — node editor (the rest of Phase 1) — 🟡 IN PROGRESS (1a+1b done → **NEXT: 1c**)
 Build in this order (each step is shippable + testable on its own):
 - [x] **1a. Pure reducer core (no UI):** `ui/screens/vector/edit/VectorEditState.kt`,
   `VectorEditAction.kt`, `VectorEditReducer.kt`. Actions: `BeginEdit`, `SetTool`,
@@ -78,8 +78,17 @@ Build in this order (each step is shippable + testable on its own):
   insert splits a cubic without changing the curve (sampled) and a line at its
   midpoint; closing-segment insert wraps to start; delete; corner→smooth→symmetric→
   corner; close/open; write-back; undo/redo inverts every action exactly + cap.
-- [ ] **1b. Hit-testing:** `ui/screens/vector/edit/EditHitTest.kt` (pure; screen-px
-  tolerance ÷ viewport scale). **Tests:** `EditHitTestTest` at varied zoom.
+- [x] **1b. Hit-testing:** `ui/screens/vector/edit/EditHitTest.kt` (pure; world coords
+  + world-space tolerance = screen-px ÷ viewport scale). Returns a `Hit` sum type
+  (`Anchor` / `Handle{side: IN/OUT}` / `Segment{segmentIndex, t, x, y}`); `hitTest(...)`
+  combines them with paint-order priority (handle of selected anchors → anchor →
+  segment). Line projection + de Casteljau sample-and-refine for cubics; closing-segment
+  index wraps to the start anchor to match the reducer. **Tests:** `EditHitTestTest`
+  (14, green) — nearest anchor; zoom-dependent pick/miss; handle only for candidates +
+  IN/OUT sides; line midpoint `t`; closing-segment wrap; open subpath has no closing
+  segment; cubic point via de Casteljau; combined-priority; a returned `Segment` feeds
+  `InsertAnchorOnSegment` and lands the new node exactly on the reported curve point;
+  `worldTolerance` inverse-scales.
 - [ ] **1c. ViewModel:** `VectorEditViewModel.kt` (StateFlow host, Hilt — mirror `VectorTuneupViewModel`).
 - [ ] **1d. Canvas + gestures:** `VectorEditCanvas.kt` — render via existing
   `VectorPreviewCanvas` internals (`preparePreviewPaths`/`buildComposePath`/
@@ -114,11 +123,11 @@ Build in this order (each step is shippable + testable on its own):
 
 ## 3. Latest handoff (update this each session)
 
-**Last updated:** 2026-06-04 · **Last completed:** Phase 1 step 1a (pure reducer core)
+**Last updated:** 2026-06-04 · **Last completed:** Phase 1 step 1b (pure hit-testing)
 
-**State of the branch:** Phase 0 + Phase 1a code + all five phase plan docs + this
-tracker committed/pushed to `claude/vector-roadmap-next-phase-ceGqz`. Edit tests
-green (33 in `*.edit.*`: 12 Phase-0 round-trip/replace + 21 new reducer). No PR open.
+**State of the branch:** Phase 0 + Phase 1a (ceGqz, merged to main via PR #91) +
+Phase 1b now on `claude/vector-roadmap-next-phase-a83BW`. Edit tests green (47 in
+`*.edit.*`: 12 Phase-0 round-trip/replace + 21 reducer + 14 new hit-test). No PR open.
 
 **What exists now (for the next session to build on):**
 - *(Phase 0)* `data/vector/edit/` — `EditablePath` node model (absolute `ControlPoint`
@@ -133,28 +142,49 @@ green (33 in `*.edit.*`: 12 Phase-0 round-trip/replace + 21 new reducer). No PR 
     undo (every geometry action snapshots first; restore = exact inverse; cap 200,
     `NEW_PATH_ID = "edit-path"`). Reuses `Snap` for grid/angle/endpoint snapping in
     `PlaceAnchor` + single-anchor `MoveSelection`. De Casteljau split in `splitSegment`.
+  - *(Phase 1b, NEW)* `ui/screens/vector/edit/EditHitTest.kt` — pure `object`. Public:
+    `hitTest(path, wx, wy, tolerance, selection, handleCandidates=selection.anchorIds)`
+    (priority: handle → anchor → segment), plus the individual `hitAnchor` / `hitHandle`
+    / `hitSegment`, the `Hit` sealed interface (`Anchor` / `Handle{subpathId, anchorId,
+    side: HandleSide.IN|OUT}` / `Segment{subpathId, segmentIndex, t, x, y}`), and
+    `worldTolerance(screenPx, scale) = screenPx/scale` (`DEFAULT_TOLERANCE_PX = 22f`).
+    Tolerance is **world-space** (caller divides screen px by `viewport.scale`).
+    Segment iteration mirrors the reducer exactly — closed subpaths add a closing span
+    `n-1` that wraps to anchor 0 — so a `Hit.Segment` feeds `InsertAnchorOnSegment`
+    unchanged. Cubic picking = coarse sample (24) + ternary refine (24); handles are
+    only hit for `candidates` (i.e. selected) anchors.
 - Reusable, confirmed APIs (still): `VectorPreviewPathNormalizer.normalize`,
   `PathDataFormatter.format`, `PathDataParser.parse`, `ViewportController` (world↔screen,
   bounded clamp), `Snap` (`MASK_GRID/ANGLE/ENDPOINT`, all pure — reducer imports it and
   stays JVM-clean), `VectorPreviewCanvas` internals.
 
-**→ NEXT ACTION:** **Phase 1 step 1b** — pure `ui/screens/vector/edit/EditHitTest.kt`
-(anchor / handle / segment-`t` hit-testing; tolerance in screen px ÷ `viewport.scale`)
-+ `EditHitTestTest` at varied zoom. It feeds the reducer's `SelectAnchor` /
-`InsertAnchorOnSegment(subpathId, segmentIndex, t)` — note 1a takes an explicit
-`segmentIndex` (small deviation from the plan doc's `(subpathId, t)`), so the hit-test
-must return both the segment index and `t`. Then 1c (ViewModel) → 1d/1e (Compose) → 1f.
+**→ NEXT ACTION:** **Phase 1 step 1c** — `ui/screens/vector/edit/VectorEditViewModel.kt`,
+a Hilt `@HiltViewModel` StateFlow host over `VectorEditReducer` (mirror
+`VectorTuneupViewModel`): hold `MutableStateFlow<VectorEditState>`, expose `state`, and
+`dispatch(action)` = `_state.update { reducer.reduce(it, action) }`. It owns the
+`ViewportController` (pan/zoom) and turns canvas gestures into actions; use
+`EditHitTest.worldTolerance(EditHitTest.DEFAULT_TOLERANCE_PX, viewport.scale)` +
+`viewport.screenToWorld*` to map a touch, then `EditHitTest.hitTest(...)` → the matching
+action (`Anchor` → `SelectAnchor`; `Segment` → `InsertAnchorOnSegment`; `Handle` → handle
+drag — see handle-ref note below). Then 1d/1e (Compose canvas + screen) → 1f (Tune-Up wiring).
 
 **Watch-outs for next session:**
-- Reducer is pure (no Android imports) — keep 1b that way too; only 1c–1e touch Compose.
-- `InsertAnchorOnSegment` is `(subpathId, segmentIndex, t)`, and for a **closed** subpath
-  the last segment index wraps to the start anchor (covered by a test). Hit-test must match.
-- Selection is anchor-ids only so far; direct-select **handle** dragging needs a
-  handle-aware selection/ref (the plan's "handle refs") — add it alongside 1b/1d.
-- `DragHandle` currently = pen symmetric-handle pull on the just-placed draft anchor.
+- Reducer + hit-test are pure (no Android imports) — keep them that way; only 1c–1e touch
+  Compose/Hilt. `VectorEditViewModel` is the first Android-coupled file in this package.
+- `InsertAnchorOnSegment` is `(subpathId, segmentIndex, t)`; closing-segment index wraps
+  to the start anchor. `EditHitTest.hitSegment` already returns matching `(segmentIndex, t)`
+  — pass them straight through.
+- **Handle dragging gap:** `EditHitTest` now *identifies* a handle (`Hit.Handle{anchorId,
+  side}`), but the **reducer has no "drag this anchor's IN/OUT handle to (x,y)" action yet** —
+  `DragHandle` only pulls symmetric handles on the just-placed **pen draft** anchor, not an
+  arbitrary committed anchor's single handle. Step 1c/1d needs a new reducer action (e.g.
+  `MoveHandle(anchorId, side, x, y)` respecting `AnchorType` mirror/independent) — add it
+  alongside the canvas, with a reducer test, then wire `Hit.Handle` to it.
+- Selection is anchor-ids only; that's enough for select/move/delete. Handle editing uses
+  the `Hit.Handle` ref directly (no need to put handles in `Selection`).
 - **Confirm the two "open choices" with the user before wiring UI (step 1f):**
   in-Tune-Up edit mode vs. dedicated screen (handles-as-absolute-`ControlPoint` already locked).
-- Re-run `*.edit.*` after each step; keep them green.
+- Re-run `*.edit.*` after each step; keep them green (currently 47).
 
 ---
 
