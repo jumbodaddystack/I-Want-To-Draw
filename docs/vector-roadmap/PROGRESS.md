@@ -207,7 +207,7 @@ the two Android-coupled, headless-unverifiable steps are deferred to an on-devic
 - [ ] **UI entry**: a note opens directly onto the Phase-1 node canvas via the bridged document
   (`VectorTuneupScreen` import hook). Needs the running app to verify.
 
-### Phase 5 — production polish — 🟢 IN PROGRESS (3 of 5 sub-features' pure-JVM cores done; UI tops + gradients/symbols/AI-backend remain)
+### Phase 5 — production polish — 🟢 IN PROGRESS (SF1/SF2/SF4/SF5a cores done; SF3 symbols + SF5b AI-backend + thin UI tops remain)
 Per `phase-5-production-polish.md`. Five **independent** sub-features; pick by priority. Pure-JVM cores landed
 this session; thin Compose/UI tops + Android-coupled tails deferred (headless build env can't verify them).
 - **SF1 — Stroke styling (dash + variable width):** 🟢 model + geometry + writers done
@@ -232,7 +232,16 @@ this session; thin Compose/UI tops + Android-coupled tails deferred (headless bu
   - [x] Tests: `CurveFitterTest` (2), `LocalBitmapTracerTest` (3) → **5, green**.
   - [ ] **5b semantic AI tracer** `AiBitmapTracer` (reuse `ApiClient`/`ChatStreamer` + `VectorScene*` compiler; gate on `supportsVision`; fall back to local) + `AiBitmapTracerTest` (fake streamer).
   - [ ] UI entry: paste/import a bitmap → trace → hand the `VectorDocument` to the node canvas.
-- **SF2 — Gradients / advanced fills:** ⬜ NOT STARTED (marquee; biggest regression surface — touches both parsers + both writers + preview `Brush`).
+- **SF2 — Gradients / advanced fills:** 🟢 model + both writers + both parsers + preview done (only the fill-editing UI controls remain)
+  - [x] `data/vector/VectorFill.kt` — sealed `VectorFill` (`Solid`/`Linear`/`Radial`/`Sweep`) + `GradientStop`. Coords in **viewport (user-space) units**.
+  - [x] `VectorStyle` additive nullable `fill: VectorFill?` (null ⇒ existing scalar `fillColor`/`fillAlpha` untouched, byte-identical).
+  - [x] `AndroidVectorDrawableWriter` — emits `<aapt:attr name="android:fillColor"><gradient android:type="linear|radial|sweep" …><item/></gradient></aapt:attr>` (the writer learned to emit a `<path>…</path>` block), adds `xmlns:aapt` to the header only when a gradient is present; `Solid` fill → scalar attr.
+  - [x] `VectorSvgWriter` — gradient pre-pass collects `<linearGradient>`/`<radialGradient>` into `<defs>` (`gradientUnits="userSpaceOnUse"`, stable ids `grad0…`), references via `fill="url(#gradN)"`; **sweep has no SVG primitive** → falls back to first stop + `SVG_GRADIENT_UNSUPPORTED`.
+  - [x] `AndroidVectorDrawableParser` — parses the `<aapt:attr>`/`<gradient>` child into `VectorFill` (no longer drops+warns representable gradients).
+  - [x] `VectorSvgParser` — up-front `collectGradients` pass (ref-before-def safe) + `fill="url(#id)"` resolution; `<defs>`/gradient elements consumed silently; stop `offset`/`stop-color`/`stop-opacity` → `GradientStop`.
+  - [x] Preview — `VectorPreviewStyle.fill`, `VectorPreviewBuilder` carry-through, `VectorPreviewCanvas.toBrush` maps `VectorFill`→Compose `Brush` (linear/radial/sweep), `PreparedPreviewPath.fillBrush` drawn over the flat fill.
+  - [x] Tests: `VectorFillRoundTripTest` (7) — Android aapt round-trip, SVG defs round-trip (linear+radial), sweep→first-stop+warning, sweep Android round-trip, **solid-fill byte-identical regression guard**, stop-opacity round-trip. `:app:assembleDebug` clean; writer/parser/preview suites green.
+  - [ ] **Fill-editing UI** (gradient picker / stop editor) in `VectorPathEditPanel.kt` + a `VectorManualEdit` op to set a fill. (UI — verify on device.)
 - **SF3 — Reusable vector symbols (master/instance):** ⬜ NOT STARTED (`VectorSymbol`/`SymbolInstance`/`SymbolResolver` + Room store).
 - **This session:** `:app:assembleDebug` clean; **26 new pure-JVM tests** (12 SF1 + 9 SF4 + 5 SF5a), all green; no regressions in the existing `data.vector.*` / `*.edit.*` / `ui.components.notes.*` suites.
 
@@ -240,42 +249,65 @@ this session; thin Compose/UI tops + Android-coupled tails deferred (headless bu
 
 ## 3. Latest handoff (update this each session)
 
-**Last updated:** 2026-06-05 · **Last completed:** Phase 5 sub-features **1 (stroke styling), 4 (ergonomics), 5a (local bitmap tracer)** — pure-JVM cores
+**Last updated:** 2026-06-05 · **Last completed:** Phase 5 sub-feature **2 (gradients / advanced fills)** — model + both writers + both parsers + preview `Brush`
 
-**State of the branch:** Phases 0–4 core merged to main (PRs #95/#96/#97/#98). Phase **5 (partial)** is on
-`claude/vector-roadmap-next-phase-sVtSO` (this branch), 3 commits: SF1+SF4, then SF5a. `:app:assembleDebug`
-clean; **26 new pure-JVM tests** all green; the existing `data.vector.*` / `*.edit.*` / `ui.components.notes.*`
-suites are unaffected (still green apart from the **known** ~21 `data/notes` `Color`/`Log` "not mocked" failures
-in `NoteRasterizerTest`/`NoteSvgExporterTest`/`NoteVectorDrawableExporterTest`/`NoteAiServiceTest` — present on a
-clean checkout, unrelated). No PR open.
+**State of the branch:** Phases 0–4 core merged to main (PRs #95/#96/#97/#98). Phase **5 (partial)** continues on
+`claude/sharp-fermi-CoacN` (this branch): SF1/SF4/SF5a cores landed earlier; **this session added SF2 (gradients)
+end-to-end**. `:app:assembleDebug` clean; **7 new pure-JVM tests** (`VectorFillRoundTripTest`) all green; the existing
+`data.vector.*` / `*.edit.*` / `ui.components.notes.*` suites are unaffected (still green apart from the **known** ~21
+`data/notes` `Color`/`Log` "not mocked" failures in `NoteRasterizerTest`/`NoteSvgExporterTest`/`NoteVectorDrawableExporterTest`/
+`NoteAiServiceTest` — present on a clean checkout, unrelated). No PR open.
 
-**What this Phase-5 slice delivers (all pure JVM — no Android/Compose imports, model + geometry only):**
-- **SF1 stroke styling:** `VectorStyle` gained nullable `strokeDashArray`/`strokeDashOffset`/`variableWidth`.
-  `StrokeDashBaker` cuts a stroke into dash "on" runs; `VariableWidthOutliner` (+ `VariableWidthProfile`) bakes a
-  width-along-path stroke into a filled outline; `StrokeExportBaker` drives both from the writers (`bakeVariableWidth`
-  for both, `bakeDashes` Android-only with a `STROKE_DASH_BAKED` warning). `VectorSvgWriter` now emits native
-  `stroke-dasharray`/`-dashoffset`; both writers stay byte-identical for any path that doesn't opt in.
-- **SF4 ergonomics:** `EditKeyBindings.resolve(...)` maps a synthetic `KeySpec` + modifiers onto the **existing**
-  reducer actions (arrow nudge, ctrl+Z/redo, Delete/P/V/Esc); `NumericTransform.parse(...)` → `TransformEntry`
-  (+ `toMoveSelection`). No new edit math — both funnel through the Phase-1 reducer.
-- **SF5a auto-trace:** `data/vector/trace/` — `BitmapTracer` interface (ARGB IntArray in, `TraceResult` out),
-  `CurveFitter` (Schneider cubic fit), `LocalBitmapTracer` (threshold → 4-conn components → Moore outline /
-  Zhang–Suen centerline → RDP → cubic fit → editable `VectorPath`s). New warning codes `TRACE_EMPTY`/`TRACE_FELL_BACK_TO_LOCAL`.
+**What SF2 delivers (model/writer/parser pure JVM; preview is the one Compose top, but compiles + is `assembleDebug`-clean):**
+- **`VectorFill` model:** new `data/vector/VectorFill.kt` — sealed `Solid`/`Linear`/`Radial`/`Sweep` + `GradientStop(offset, color)`.
+  Gradient coords are **viewport (user-space) units** (same space as path data) so both formats emit them with no
+  bounding-box ambiguity. `VectorStyle` gained additive nullable `fill: VectorFill?` — **null ⇒ the scalar
+  `fillColor`/`fillAlpha` path is byte-identical** (the regression-safety contract, pinned by a guard test); a non-null
+  `fill` overrides the scalar fill.
+- **Android writer:** a gradient fill emits a nested `<aapt:attr name="android:fillColor"><gradient android:type="…"
+  …><item android:offset android:color/></gradient></aapt:attr>` (writer now emits a `<path>…</path>` block when a
+  gradient is present, self-closing otherwise) and adds `xmlns:aapt` to the `<vector>` header **only** when some path
+  uses a gradient. `Solid` fill ⇒ scalar `android:fillColor`/`android:fillAlpha`.
+- **SVG writer:** `buildGradientPlan` walks paths once (doc order), emits `<linearGradient>`/`<radialGradient>` into a
+  single `<defs>` block with stable ids `grad0…` and `gradientUnits="userSpaceOnUse"`, and maps each path to
+  `fill="url(#gradN)"`. **Sweep has no SVG primitive** → first-stop solid fallback + `SVG_GRADIENT_UNSUPPORTED`.
+- **Parsers populate instead of dropping:** Android parses the `<aapt:attr>`/`<gradient>` child; SVG runs an up-front
+  `collectGradients` pass (so `fill="url(#id)"` resolves regardless of def order) and resolves the ref in `applyStyle`.
+  `<defs>`/gradient tags no longer warn (they're consumed by the pre-pass).
+- **Preview:** `VectorPreviewStyle.fill` + builder carry-through; `VectorPreviewCanvas.toBrush(fill)` maps `VectorFill`
+  → Compose `Brush.linearGradient`/`radialGradient`/`sweepGradient` (stops via `parseVectorColor`); `PreparedPreviewPath`
+  gained `fillBrush`, drawn over the flat fill in `drawPreparedPath`. `VectorEditCanvas` passes it for the live edit path too.
 
-**→ NEXT ACTION (Phase 5 has 2 untouched sub-features + several thin tails):**
-1. **SF2 — Gradients / advanced fills** (the marquee, biggest regression surface): add `VectorFill` (Solid/Linear/Radial/
-   Sweep + `GradientStop`), thread `fill: VectorFill?` through `VectorStyle` (additive), both writers (`<aapt:attr>` for
-   Android, `<defs>` for SVG), both parsers (populate instead of dropping), and the preview `Brush`. Per-format round-trip
-   tests gate it. Re-scope `GRADIENT_NOT_SUPPORTED`/`SVG_GRADIENT_UNSUPPORTED` to fire only when genuinely unrepresentable.
-2. **SF3 — Vector symbols:** `VectorSymbol`/`SymbolInstance`/`VectorNode.InstanceNode` + a pure `SymbolResolver.expand(doc, library)`
+**→ NEXT ACTION (Phase 5 remaining: SF3 + SF5b + thin UI tops):**
+1. **SF3 — Vector symbols:** `VectorSymbol`/`SymbolInstance`/`VectorNode.InstanceNode` + a pure `SymbolResolver.expand(doc, library)`
    (namespaced ids, instance transform + style override) so every existing consumer works on the expanded doc; + Room store mirroring `Stamp`.
-3. **SF5b — semantic AI tracer** `AiBitmapTracer` (reuse `ApiClient`/`ChatStreamer` + `VectorScene*`; gate on `supportsVision`;
+   `SymbolResolverTest` (expand single instance / namespacing / transform+override / master-edit-propagates) is the pure-JVM gate.
+2. **SF5b — semantic AI tracer** `AiBitmapTracer` (reuse `ApiClient`/`ChatStreamer` + `VectorScene*`; gate on `supportsVision`;
    always fall back to `LocalBitmapTracer`) + `AiBitmapTracerTest` with a fake `ChatStreamer`.
-4. **Thin UI/Compose tops (verify on device):** caps/join/dash/fill controls in `VectorPathEditPanel`; dash `PathEffect` +
-   outlined-fill draw + gradient `Brush` in `VectorPreviewCanvas`; `onKeyEvent` + numeric-transform row on `VectorEditCanvas`;
-   a bitmap-import → trace → node-canvas entry.
+3. **Thin UI/Compose tops (verify on device):** caps/join/dash/**fill (gradient picker + stop editor)** controls in
+   `VectorPathEditPanel` (+ a `VectorManualEdit` op to set `VectorFill`); dash `PathEffect` + outlined-fill draw in
+   `VectorPreviewCanvas`; `onKeyEvent` + numeric-transform row on `VectorEditCanvas`; a bitmap-import → trace → node-canvas entry.
 
-**Watch-outs for next session (Phase 5):**
+**Watch-outs for next session (SF2 gradients — what to know before extending):**
+- **The additive-nullable contract is the safety net.** `VectorStyle.fill == null` must keep every existing
+  document/writer byte-identical — the `solidFill_unchanged_existingDocumentsByteIdentical` test guards it. Both writers
+  early-out (no `xmlns:aapt`, no `<defs>`) when no path opts in.
+- **Coordinates are user-space everywhere.** Both writers emit absolute viewport-unit coords (Android `<gradient>` raw,
+  SVG `gradientUnits="userSpaceOnUse"`). The SVG parser reads coords verbatim via `parseLength` — a **foreign SVG using
+  the default `objectBoundingBox` (0..1 fractions) will mis-map** (no bbox to scale by); round-trip through *our* writer is
+  exact. If you need objectBoundingBox import, resolve against the path bbox in `collectGradients`.
+- **Colors normalize through SVG.** An opaque 8-digit Android stop (`#FFRRGGBB`) round-trips through SVG as a 6-digit
+  `#RRGGBB` (the `FF` alpha drops, since SVG only writes `stop-opacity` when <1). Compare gradient stops by *rendered*
+  color, not byte-string, across an Android↔SVG hop. Android↔Android keeps the item color verbatim.
+- **Sweep is Android-only.** It writes natively to VectorDrawable and round-trips there; SVG degrades it to the first
+  stop + warning. The preview *does* render it (`Brush.sweepGradient`).
+- **`StrokeExportBaker.bakeVariableWidth` drops `fill`** when it replaces a profiled stroke with a filled outline (it
+  builds a fresh `VectorStyle(fillColor=…)`). A variable-width stroke + gradient fill is an exotic combo and currently
+  loses the gradient on Android export — fine for now, but note it if SF1/SF2 ever need to compose.
+- **Gradient ids are positional** (`grad{N}` by doc order in the SVG `<defs>`). Deterministic, but if you add cross-doc
+  merging keep the numbering stable or pin it in tests.
+
+**Watch-outs carried over (earlier Phase 5 slices):**
 - **Keep new math pure + in the model/geometry layer** (`data/vector/…`, `data/vector/trace/…`); UI is the thin untested top.
   The whole point of this slice is that bakers/fitter/tracer/key-resolvers are JVM-tested without a device.
 - **Additive `VectorStyle` fields are the safety contract:** every new field is nullable so current docs serialize
@@ -809,3 +841,36 @@ Keep this file the *only* thing a fresh session must read to be oriented.
   colliding with the Phase-2 `edit/boolean/StrokeOutliner`; dash baking emits **one path with multiple subpaths** rather
   than one `<path>` per run (no id collisions, visually identical); the `STROKE_DASH_BAKED` warning is surfaced by the
   baker, not the (warnings-less) Android writer.
+
+### Phase 5 — production polish, sub-feature 2 (gradients / advanced fills) (2026-06-05)
+- **Shipped (model/writer/parser pure JVM; preview is the lone Compose top, `assembleDebug`-clean):** a real fill model
+  carried end-to-end (parsers → model → both writers → preview), lifting the old "gradients parsed-but-dropped + warned".
+  - **Model:** `data/vector/VectorFill.kt` — sealed `Solid`/`Linear`/`Radial`/`Sweep` + `GradientStop(offset, color)`,
+    gradient coords in viewport (user-space) units. `VectorStyle` gained additive nullable `fill: VectorFill?`.
+  - **Android writer:** nested `<aapt:attr name="android:fillColor"><gradient android:type="linear|radial|sweep" …>
+    <item/></gradient></aapt:attr>` block (writer learned to emit `<path>…</path>` when a gradient is present), `xmlns:aapt`
+    header added only when needed; `Solid` ⇒ scalar attrs.
+  - **SVG writer:** `buildGradientPlan` → one `<defs>` with `<linearGradient>`/`<radialGradient>` (`userSpaceOnUse`, ids
+    `grad0…`), paths reference `fill="url(#gradN)"`; sweep → first-stop fallback + `SVG_GRADIENT_UNSUPPORTED`.
+  - **Parsers:** Android parses the aapt/gradient child into `VectorFill`; SVG runs an up-front `collectGradients` pass
+    (ref-before-def safe) and resolves `url(#id)` in `applyStyle`; gradient/`<defs>` tags no longer warn.
+  - **Preview:** `VectorPreviewStyle.fill` + builder carry-through; `VectorPreviewCanvas.toBrush` maps `VectorFill`→Compose
+    `Brush`; `PreparedPreviewPath.fillBrush` drawn over the flat fill (also wired into `VectorEditCanvas`'s live edit path).
+  - **7 new pure-JVM tests** (`VectorFillRoundTripTest`): Android aapt round-trip, SVG defs round-trip (linear+radial),
+    sweep→first-stop+warning, sweep Android round-trip, **solid-fill byte-identical regression guard**, stop-opacity
+    round-trip. `:app:assembleDebug` clean; writer/parser/preview suites green.
+- **Key decisions:**
+  1. **Additive nullable `fill` is the regression contract** (matches SF1's `strokeDashArray` etc.): null leaves the scalar
+     `fillColor`/`fillAlpha` path byte-identical; both writers early-out on a no-gradient document.
+  2. **User-space coordinates everywhere** (Android raw `<gradient>` coords, SVG `userSpaceOnUse`) to dodge the
+     objectBoundingBox-vs-userSpace ambiguity called out in the plan's risks. Round-trip through our own writer is exact.
+  3. **Sweep degrades gracefully on SVG** (no primitive) to first-stop + warning; it's native + round-tripping on Android,
+     and the preview renders it via `Brush.sweepGradient`.
+  4. **Stable positional gradient ids** (`grad{N}` by doc order) keep the SVG output deterministic like the rest of the writer.
+- **Verified:** 7 JVM tests + `:app:assembleDebug`. Existing `AndroidVectorDrawableWriter/Parser` + `VectorSvgWriter/Parser`
+  + `VectorPreviewBuilder` suites stay green (additive change, guarded by the byte-identical test).
+- **Not yet done (deferred):** the **fill-editing UI** (gradient picker + stop editor in `VectorPathEditPanel`, plus a
+  `VectorManualEdit` op to set a `VectorFill`) — a Compose top to verify on device. SF3 (symbols) + SF5b (AI tracer) untouched.
+- **Deviation from plan:** none material. The plan sketched `VectorFill.Solid(color, alpha)`; shipped as written. Colors
+  normalize through an SVG hop (opaque 8-digit → 6-digit) — documented as a watch-out rather than a deviation, since it's
+  inherent to the SVG `stop-opacity` representation.

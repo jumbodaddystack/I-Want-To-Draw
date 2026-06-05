@@ -37,7 +37,8 @@ data class VectorPreviewPath(
 
 /**
  * The subset of [VectorStyle] the preview renderer understands. Mirrors the
- * stroke/fill attributes; complex paints (gradients) are intentionally absent.
+ * stroke/fill attributes. Phase 5 adds [fill]: a non-null gradient/solid fill the
+ * canvas maps to a Compose `Brush`, overriding the scalar [fillColor].
  */
 data class VectorPreviewStyle(
     val fillColor: String?,
@@ -48,6 +49,7 @@ data class VectorPreviewStyle(
     val strokeLineCap: String?,
     val strokeLineJoin: String?,
     val fillType: String?,
+    val fill: VectorFill? = null,
 )
 
 /**

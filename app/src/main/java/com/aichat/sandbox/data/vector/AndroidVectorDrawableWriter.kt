@@ -26,6 +26,12 @@ object AndroidVectorDrawableWriter {
         val sb = StringBuilder(1024)
         sb.append("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n")
         sb.append("<vector xmlns:android=\"http://schemas.android.com/apk/res/android\"\n")
+        // Gradients are expressed as nested <aapt:attr> children, which need the
+        // aapt namespace declared on the root. Only emit it when a path opts in,
+        // so non-gradient documents stay byte-identical.
+        if (baked.allPaths().any { it.style.fill.isGradient() }) {
+            sb.append(INDENT).append("xmlns:aapt=\"http://schemas.android.com/aapt\"\n")
+        }
         val vp = baked.viewport
         sb.append(INDENT).append("android:width=\"").append(num(vp.widthDp)).append("dp\"\n")
         sb.append(INDENT).append("android:height=\"").append(num(vp.heightDp)).append("dp\"\n")
@@ -72,12 +78,26 @@ object AndroidVectorDrawableWriter {
         val data = path.commands?.takeIf { it.isNotEmpty() }
             ?.let { PathDataFormatter.format(it) }
             ?: path.pathData
+        val style = path.style
         sb.append(pad).append("<path")
         appendAttr(sb, "android:name", path.name)
         appendAttr(sb, "android:pathData", data)
-        val style = path.style
-        appendAttr(sb, "android:fillColor", style.fillColor)
-        appendAttr(sb, "android:fillAlpha", style.fillAlpha)
+        // A non-null fill overrides the scalar fillColor/fillAlpha. A Solid fill is
+        // still a plain attribute; only a gradient needs the nested <aapt:attr> block.
+        val gradient = style.fill as? VectorFill.Linear
+            ?: style.fill as? VectorFill.Radial
+            ?: style.fill as? VectorFill.Sweep
+        when (val fill = style.fill) {
+            is VectorFill.Solid -> {
+                appendAttr(sb, "android:fillColor", fill.color)
+                appendAttr(sb, "android:fillAlpha", fill.alpha)
+            }
+            null -> {
+                appendAttr(sb, "android:fillColor", style.fillColor)
+                appendAttr(sb, "android:fillAlpha", style.fillAlpha)
+            }
+            else -> { /* gradient: emitted as a nested child below */ }
+        }
         appendAttr(sb, "android:fillType", style.fillType)
         appendAttr(sb, "android:strokeColor", style.strokeColor)
         appendAttr(sb, "android:strokeAlpha", style.strokeAlpha)
@@ -85,8 +105,66 @@ object AndroidVectorDrawableWriter {
         appendAttr(sb, "android:strokeLineCap", style.strokeLineCap)
         appendAttr(sb, "android:strokeLineJoin", style.strokeLineJoin)
         appendAttr(sb, "android:strokeMiterLimit", style.strokeMiterLimit)
-        sb.append("/>\n")
+        if (gradient == null) {
+            sb.append("/>\n")
+            return
+        }
+        sb.append(">\n")
+        writeGradient(sb, gradient, depth + 1)
+        sb.append(pad).append("</path>\n")
     }
+
+    /** Emits a `<aapt:attr name="android:fillColor"><gradient .../></aapt:attr>` block. */
+    private fun writeGradient(sb: StringBuilder, fill: VectorFill, depth: Int) {
+        val pad = INDENT.repeat(depth)
+        val gpad = INDENT.repeat(depth + 1)
+        val ipad = INDENT.repeat(depth + 2)
+        sb.append(pad).append("<aapt:attr name=\"android:fillColor\">\n")
+        sb.append(gpad).append("<gradient")
+        when (fill) {
+            is VectorFill.Linear -> {
+                appendAttr(sb, "android:type", "linear")
+                appendAttr(sb, "android:startX", fill.x1)
+                appendAttr(sb, "android:startY", fill.y1)
+                appendAttr(sb, "android:endX", fill.x2)
+                appendAttr(sb, "android:endY", fill.y2)
+                appendAttr(sb, "android:tileMode", fill.tileMode)
+            }
+            is VectorFill.Radial -> {
+                appendAttr(sb, "android:type", "radial")
+                appendAttr(sb, "android:centerX", fill.cx)
+                appendAttr(sb, "android:centerY", fill.cy)
+                appendAttr(sb, "android:gradientRadius", fill.radius)
+                appendAttr(sb, "android:tileMode", fill.tileMode)
+            }
+            is VectorFill.Sweep -> {
+                appendAttr(sb, "android:type", "sweep")
+                appendAttr(sb, "android:centerX", fill.cx)
+                appendAttr(sb, "android:centerY", fill.cy)
+            }
+            is VectorFill.Solid -> {} // unreachable: gradients only
+        }
+        val stops = (fill as? VectorFill.Linear)?.stops
+            ?: (fill as? VectorFill.Radial)?.stops
+            ?: (fill as? VectorFill.Sweep)?.stops
+            ?: emptyList()
+        if (stops.isEmpty()) {
+            sb.append("/>\n")
+        } else {
+            sb.append(">\n")
+            for (stop in stops) {
+                sb.append(ipad).append("<item")
+                appendAttr(sb, "android:offset", stop.offset)
+                appendAttr(sb, "android:color", stop.color)
+                sb.append("/>\n")
+            }
+            sb.append(gpad).append("</gradient>\n")
+        }
+        sb.append(pad).append("</aapt:attr>\n")
+    }
+
+    private fun VectorFill?.isGradient(): Boolean =
+        this is VectorFill.Linear || this is VectorFill.Radial || this is VectorFill.Sweep
 
     private fun appendAttr(sb: StringBuilder, name: String, value: String?) {
         if (value == null) return

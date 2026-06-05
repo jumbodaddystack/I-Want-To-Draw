@@ -48,6 +48,7 @@ object VectorSvgParser {
         val strokeLineCap: String? = null,
         val strokeLineJoin: String? = null,
         val strokeMiterLimit: Float? = null,
+        val fill: VectorFill? = null,
     )
 
     fun parse(svg: String): VectorDocument {
@@ -84,8 +85,11 @@ object VectorSvgParser {
 
         val viewport = parseViewport(rootElement, warnings)
         val ids = IdGen()
-        val rootStyle = applyStyle(StyleCtx(), rootElement, warnings, "root")
-        val children = parseChildren(rootElement, rootStyle, ids, warnings)
+        // Gradients can be referenced (fill="url(#id)") before they are defined, so
+        // collect every <linearGradient>/<radialGradient> up front, keyed by id.
+        val gradients = collectGradients(rootElement)
+        val rootStyle = applyStyle(StyleCtx(), rootElement, warnings, "root", gradients)
+        val children = parseChildren(rootElement, rootStyle, ids, warnings, gradients)
 
         if (warnings.isNotEmpty()) {
             val count = warnings.size
@@ -163,13 +167,14 @@ object VectorSvgParser {
         ctx: StyleCtx,
         ids: IdGen,
         warnings: MutableList<VectorWarning>,
+        gradients: Map<String, VectorFill>,
     ): List<VectorNode> {
         val out = ArrayList<VectorNode>()
         val nodes = parent.childNodes
         for (idx in 0 until nodes.length) {
             val node = nodes.item(idx)
             if (node.nodeType != Node.ELEMENT_NODE) continue
-            out += parseElement(node as Element, ctx, ids, warnings)
+            out += parseElement(node as Element, ctx, ids, warnings, gradients)
         }
         return out
     }
@@ -179,19 +184,17 @@ object VectorSvgParser {
         ctx: StyleCtx,
         ids: IdGen,
         warnings: MutableList<VectorWarning>,
+        gradients: Map<String, VectorFill>,
     ): List<VectorNode> {
         val tag = localName(el.tagName)
         return when (tag) {
-            "g" -> listOf(parseGroup(el, ctx, ids, warnings))
+            "g" -> listOf(parseGroup(el, ctx, ids, warnings, gradients))
             "path", "rect", "circle", "ellipse", "line", "polyline", "polygon" ->
-                parseShape(tag, el, ctx, ids, warnings)
-            "defs", "lineargradient", "radialgradient", "gradient" -> {
-                warnings += VectorWarning(
-                    VectorWarning.Codes.SVG_GRADIENT_UNSUPPORTED,
-                    "Gradient/<$tag> definitions are not imported yet.",
-                )
-                emptyList()
-            }
+                parseShape(tag, el, ctx, ids, warnings, gradients)
+            // <defs>/gradient definitions are consumed by the up-front
+            // collectGradients pass (and referenced via fill="url(#id)"), so they
+            // produce no renderable node here and no longer warn.
+            "defs", "lineargradient", "radialgradient", "gradient" -> emptyList()
             "image", "use" -> {
                 warnings += VectorWarning(
                     VectorWarning.Codes.SVG_EXTERNAL_RESOURCE_IGNORED,
@@ -215,8 +218,9 @@ object VectorSvgParser {
         ctx: StyleCtx,
         ids: IdGen,
         warnings: MutableList<VectorWarning>,
+        gradients: Map<String, VectorFill>,
     ): VectorNode.GroupNode {
-        val childCtx = applyStyle(ctx, el, warnings, el.id())
+        val childCtx = applyStyle(ctx, el, warnings, el.id(), gradients)
         val transform = attr(el, "transform")?.let { parseTransform(it, warnings, el.id()) }
         val group = VectorGroup(
             id = ids.nextGroup(),
@@ -228,7 +232,7 @@ object VectorSvgParser {
             scaleY = transform?.scaleY,
             translateX = transform?.translateX,
             translateY = transform?.translateY,
-            children = parseChildren(el, childCtx, ids, warnings),
+            children = parseChildren(el, childCtx, ids, warnings, gradients),
         )
         return VectorNode.GroupNode(group)
     }
@@ -244,8 +248,9 @@ object VectorSvgParser {
         ctx: StyleCtx,
         ids: IdGen,
         warnings: MutableList<VectorWarning>,
+        gradients: Map<String, VectorFill>,
     ): List<VectorNode> {
-        val style = applyStyle(ctx, el, warnings, el.id())
+        val style = applyStyle(ctx, el, warnings, el.id(), gradients)
         val pathData = when (tag) {
             "path" -> attr(el, "d") ?: ""
             "rect" -> rectToPath(el)
@@ -381,6 +386,7 @@ object VectorSvgParser {
         el: Element,
         warnings: MutableList<VectorWarning>,
         nodeId: String?,
+        gradients: Map<String, VectorFill>,
     ): StyleCtx {
         val inline = attr(el, "style")?.let { parseInlineStyle(it) } ?: emptyMap()
         fun prop(name: String): String? = inline[name] ?: attr(el, name)
@@ -388,9 +394,24 @@ object VectorSvgParser {
         var result = ctx
 
         prop("fill")?.let { value ->
-            when (val c = parseColor(value)) {
-                is ColorResult.None -> result = result.copy(fillColor = null)
-                is ColorResult.Resolved -> result = result.copy(fillColor = c.android)
+            val ref = gradientRef(value)
+            if (ref != null) {
+                // fill="url(#id)" — resolve against the collected gradients. Keep a
+                // sensible scalar fallback (the first stop) for anything that only
+                // reads fillColor; VectorFill is the source of truth from here.
+                val gradient = gradients[ref]
+                if (gradient != null) {
+                    result = result.copy(fill = gradient, fillColor = firstStopColor(gradient))
+                } else {
+                    warnings += VectorWarning(
+                        VectorWarning.Codes.SVG_GRADIENT_UNSUPPORTED,
+                        "Gradient reference fill ($value) could not be resolved; left default.",
+                        nodeId,
+                    )
+                }
+            } else when (val c = parseColor(value)) {
+                is ColorResult.None -> result = result.copy(fillColor = null, fill = null)
+                is ColorResult.Resolved -> result = result.copy(fillColor = c.android, fill = null)
                 is ColorResult.Unsupported -> warnings += unsupportedColor("fill", value, c.gradient, nodeId)
             }
         }
@@ -444,6 +465,7 @@ object VectorSvgParser {
         strokeLineCap = strokeLineCap,
         strokeLineJoin = strokeLineJoin,
         strokeMiterLimit = strokeMiterLimit,
+        fill = fill,
     )
 
     private fun parseInlineStyle(style: String): Map<String, String> {
@@ -501,6 +523,100 @@ object VectorSvgParser {
         }
         return NAMED_COLORS[v.lowercase()]?.let { ColorResult.Resolved(it) }
             ?: ColorResult.Unsupported(gradient = false)
+    }
+
+    // ---- gradients ----
+
+    /**
+     * Collects every `<linearGradient>`/`<radialGradient>` in the document into a
+     * map keyed by `id`, so a `fill="url(#id)"` can be resolved regardless of
+     * whether the gradient is defined before or after the shape that uses it.
+     */
+    private fun collectGradients(root: Element): Map<String, VectorFill> {
+        val map = HashMap<String, VectorFill>()
+        fun walk(el: Element) {
+            val tag = localName(el.tagName)
+            if (tag == "lineargradient" || tag == "radialgradient") {
+                attr(el, "id")?.let { id -> parseSvgGradient(tag, el)?.let { map[id] = it } }
+            }
+            val nodes = el.childNodes
+            for (i in 0 until nodes.length) {
+                val n = nodes.item(i)
+                if (n.nodeType == Node.ELEMENT_NODE) walk(n as Element)
+            }
+        }
+        walk(root)
+        return map
+    }
+
+    private fun parseSvgGradient(tag: String, el: Element): VectorFill? {
+        val stops = elementChildren(el)
+            .filter { localName(it.tagName) == "stop" }
+            .map { stopEl ->
+                val style = attr(stopEl, "style")?.let { parseInlineStyle(it) } ?: emptyMap()
+                fun sp(name: String): String? = style[name] ?: attr(stopEl, name)
+                GradientStop(parseOffset(sp("offset")), svgStopColor(sp("stop-color"), sp("stop-opacity")))
+            }
+        if (stops.isEmpty()) return null
+        return if (tag == "radialgradient") {
+            VectorFill.Radial(
+                cx = num(el, "cx") ?: 0f, cy = num(el, "cy") ?: 0f,
+                radius = num(el, "r") ?: 0f, stops = stops,
+            )
+        } else {
+            VectorFill.Linear(
+                x1 = num(el, "x1") ?: 0f, y1 = num(el, "y1") ?: 0f,
+                x2 = num(el, "x2") ?: 0f, y2 = num(el, "y2") ?: 0f, stops = stops,
+            )
+        }
+    }
+
+    /** Extracts the bare id from a `url(#id)` reference, or null when not a ref. */
+    private fun gradientRef(value: String): String? {
+        val v = value.trim()
+        if (!v.startsWith("url(", ignoreCase = true)) return null
+        val inside = v.substringAfter('(').substringBefore(')').trim().trim('"', '\'')
+        return inside.removePrefix("#").takeIf { it.isNotEmpty() }
+    }
+
+    private fun firstStopColor(fill: VectorFill): String? = when (fill) {
+        is VectorFill.Linear -> fill.stops.firstOrNull()?.color
+        is VectorFill.Radial -> fill.stops.firstOrNull()?.color
+        is VectorFill.Sweep -> fill.stops.firstOrNull()?.color
+        is VectorFill.Solid -> fill.color
+    }
+
+    /** Parses a stop offset ("50%" or "0.5") into a 0..1 fraction. */
+    private fun parseOffset(raw: String?): Float {
+        val t = raw?.trim() ?: return 0f
+        return if (t.endsWith("%")) (t.dropLast(1).toFloatOrNull() ?: 0f) / 100f
+        else t.toFloatOrNull() ?: 0f
+    }
+
+    /** Combines an SVG `stop-color` + optional `stop-opacity` into an `#AARRGGBB`/`#RRGGBB`. */
+    private fun svgStopColor(colorRaw: String?, opacityRaw: String?): String {
+        val base = colorRaw?.let { (parseColor(it) as? ColorResult.Resolved)?.android } ?: "#000000"
+        val opacity = opacityRaw?.toFloatOrNull() ?: return base
+        val hex = base.removePrefix("#")
+        val existingA: Int
+        val rgb: String
+        when (hex.length) {
+            8 -> { existingA = hex.substring(0, 2).toInt(16); rgb = hex.substring(2) }
+            6 -> { existingA = 255; rgb = hex }
+            else -> { existingA = 255; rgb = "000000" }
+        }
+        val a = (existingA * opacity.coerceIn(0f, 1f) + 0.5f).toInt().coerceIn(0, 255)
+        return "#" + a.toString(16).padStart(2, '0').uppercase() + rgb.uppercase()
+    }
+
+    private fun elementChildren(el: Element): List<Element> {
+        val out = ArrayList<Element>()
+        val nodes = el.childNodes
+        for (i in 0 until nodes.length) {
+            val n = nodes.item(i)
+            if (n.nodeType == Node.ELEMENT_NODE) out += n as Element
+        }
+        return out
     }
 
     // ---- transforms ----

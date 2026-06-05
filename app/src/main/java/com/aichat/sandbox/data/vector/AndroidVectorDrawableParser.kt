@@ -153,14 +153,9 @@ object AndroidVectorDrawableParser {
         val id = ids.nextPath()
         val pathData = attr(el, "android:pathData") ?: ""
 
-        // Gradients are expressed as nested <aapt:attr> / <gradient> children.
-        if (hasElementChild(el)) {
-            warnings += VectorWarning(
-                VectorWarning.Codes.GRADIENT_NOT_SUPPORTED,
-                "Nested gradient/aapt children on <path> are not supported",
-                id,
-            )
-        }
+        // Gradients are expressed as nested <aapt:attr name="android:fillColor">
+        // /<gradient> children — parse them into a VectorFill instead of dropping.
+        val fill = parseFillGradient(el, id, warnings)
 
         val commands: List<PathCommand>? = if (pathData.isBlank()) {
             null
@@ -180,6 +175,7 @@ object AndroidVectorDrawableParser {
             strokeLineCap = attr(el, "android:strokeLineCap"),
             strokeLineJoin = attr(el, "android:strokeLineJoin"),
             strokeMiterLimit = attr(el, "android:strokeMiterLimit")?.toFloatOrNull(),
+            fill = fill,
         )
 
         return VectorPath(
@@ -196,12 +192,74 @@ object AndroidVectorDrawableParser {
     private fun attr(el: Element, name: String): String? =
         if (el.hasAttribute(name)) el.getAttribute(name) else null
 
-    private fun hasElementChild(el: Element): Boolean {
+    /** Direct child elements of [el] (skips text/comment nodes). */
+    private fun elementChildren(el: Element): List<Element> {
+        val out = ArrayList<Element>()
         val nodes = el.childNodes
         for (i in 0 until nodes.length) {
-            if (nodes.item(i).nodeType == Node.ELEMENT_NODE) return true
+            val n = nodes.item(i)
+            if (n.nodeType == Node.ELEMENT_NODE) out += n as Element
         }
-        return false
+        return out
+    }
+
+    /**
+     * Parses a `<aapt:attr name="android:fillColor"><gradient .../></aapt:attr>`
+     * child of a `<path>` into a [VectorFill]. Returns null when the path has no
+     * gradient fill. Any other nested element (e.g. a gradient on a different
+     * attribute we can't model) is surfaced as [GRADIENT_NOT_SUPPORTED].
+     */
+    private fun parseFillGradient(
+        pathEl: Element,
+        pathId: String,
+        warnings: MutableList<VectorWarning>,
+    ): VectorFill? {
+        var fill: VectorFill? = null
+        for (child in elementChildren(pathEl)) {
+            val isFillAttr = child.tagName == "aapt:attr" &&
+                attr(child, "name") == "android:fillColor"
+            val gradientEl = if (isFillAttr) {
+                elementChildren(child).firstOrNull { it.tagName == "gradient" }
+            } else {
+                null
+            }
+            if (gradientEl != null) {
+                fill = parseGradient(gradientEl)
+            } else {
+                warnings += VectorWarning(
+                    VectorWarning.Codes.GRADIENT_NOT_SUPPORTED,
+                    "Nested <${child.tagName}> on <path> is not supported and was dropped.",
+                    pathId,
+                )
+            }
+        }
+        return fill
+    }
+
+    private fun parseGradient(el: Element): VectorFill {
+        val stops = elementChildren(el)
+            .filter { it.tagName == "item" }
+            .mapNotNull { item ->
+                val offset = attr(item, "android:offset")?.toFloatOrNull() ?: return@mapNotNull null
+                val color = attr(item, "android:color") ?: return@mapNotNull null
+                GradientStop(offset, color)
+            }
+        val tileMode = attr(el, "android:tileMode")
+        fun f(name: String): Float = attr(el, name)?.toFloatOrNull() ?: 0f
+        return when (attr(el, "android:type")?.lowercase()) {
+            "radial" -> VectorFill.Radial(
+                cx = f("android:centerX"), cy = f("android:centerY"),
+                radius = f("android:gradientRadius"), stops = stops, tileMode = tileMode,
+            )
+            "sweep" -> VectorFill.Sweep(
+                cx = f("android:centerX"), cy = f("android:centerY"), stops = stops,
+            )
+            else -> VectorFill.Linear(
+                x1 = f("android:startX"), y1 = f("android:startY"),
+                x2 = f("android:endX"), y2 = f("android:endY"),
+                stops = stops, tileMode = tileMode,
+            )
+        }
     }
 
     /** Strips a trailing unit suffix (`dp`, `dip`, `px`, …) and parses the number. */

@@ -99,6 +99,12 @@ data class VectorStyle(
     val strokeDashOffset: Float? = null,
     /** Width-along-the-path profile. Has no native attribute in either format, so export bakes it to a filled outline. */
     val variableWidth: VariableWidthProfile? = null,
+    // Phase 5 (sub-feature 2) — real fill model. Additive + nullable: when null the
+    // scalar fillColor/fillAlpha path above is untouched (byte-identical for every
+    // existing document); a non-null fill overrides the scalar fill and carries
+    // solid or linear/radial/sweep gradients through writers + preview.
+    /** Solid or gradient fill. Overrides [fillColor]/[fillAlpha] when present. */
+    val fill: VectorFill? = null,
 )
 
 /**
