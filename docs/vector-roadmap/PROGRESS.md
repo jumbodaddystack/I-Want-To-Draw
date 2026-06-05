@@ -207,7 +207,7 @@ the two Android-coupled, headless-unverifiable steps are deferred to an on-devic
 - [ ] **UI entry**: a note opens directly onto the Phase-1 node canvas via the bridged document
   (`VectorTuneupScreen` import hook). Needs the running app to verify.
 
-### Phase 5 — production polish — 🟢 IN PROGRESS (SF1/SF2/SF4/SF5a cores done; SF3 symbols + SF5b AI-backend + thin UI tops remain)
+### Phase 5 — production polish — 🟢 IN PROGRESS (SF1/SF2/SF3/SF4/SF5a cores done; SF5b AI-backend + Room/UI tops remain)
 Per `phase-5-production-polish.md`. Five **independent** sub-features; pick by priority. Pure-JVM cores landed
 this session; thin Compose/UI tops + Android-coupled tails deferred (headless build env can't verify them).
 - **SF1 — Stroke styling (dash + variable width):** 🟢 model + geometry + writers done
@@ -242,21 +242,55 @@ this session; thin Compose/UI tops + Android-coupled tails deferred (headless bu
   - [x] Preview — `VectorPreviewStyle.fill`, `VectorPreviewBuilder` carry-through, `VectorPreviewCanvas.toBrush` maps `VectorFill`→Compose `Brush` (linear/radial/sweep), `PreparedPreviewPath.fillBrush` drawn over the flat fill.
   - [x] Tests: `VectorFillRoundTripTest` (7) — Android aapt round-trip, SVG defs round-trip (linear+radial), sweep→first-stop+warning, sweep Android round-trip, **solid-fill byte-identical regression guard**, stop-opacity round-trip. `:app:assembleDebug` clean; writer/parser/preview suites green.
   - [ ] **Fill-editing UI** (gradient picker / stop editor) in `VectorPathEditPanel.kt` + a `VectorManualEdit` op to set a fill. (UI — verify on device.)
-- **SF3 — Reusable vector symbols (master/instance):** ⬜ NOT STARTED (`VectorSymbol`/`SymbolInstance`/`SymbolResolver` + Room store).
+- **SF3 — Reusable vector symbols (master/instance):** 🟢 pure core done (only Room library store + "insert symbol" UI remain)
+  - [x] `data/vector/symbol/VectorSymbol.kt` (`id`/`name`/`viewport`/`root` — a symbol *is* a mini-document reusing `VectorGroup`).
+  - [x] `data/vector/symbol/SymbolInstance.kt` (`symbolId` + translate/scale/rotation + optional `styleOverride`).
+  - [x] `VectorNode.InstanceNode(instance)` added to the sealed tree; warning codes `SYMBOL_UNRESOLVED`/`SYMBOL_CYCLE`.
+  - [x] All **13** exhaustive `when (VectorNode)` sites across writers/optimizer/preview/quantizer/manual-edit/edit-plan/
+        icon-size/catalog/stroke-baker/`allPaths`/`replacePath` got an `InstanceNode` branch (mappers pass-through, leaf
+        collectors/writers skip) — **dead code for symbol-free docs, so byte-identical regression contract holds**.
+  - [x] `data/vector/symbol/SymbolResolver.kt` — pure `expand(doc, library)`: each instance → `GroupNode` (instance
+        transform) with namespaced ids `"${instance.id}/${childId}"`, `styleOverride` folded onto every leaf path; nested
+        instances expand recursively (cycle-guarded); missing/cyclic instances dropped + warned. So **every existing
+        consumer works on the expanded doc with zero new writer/preview code**, and master-edit-propagation is just re-expand.
+  - [x] Tests: `SymbolResolverTest` (**7**, green) — single-instance expand / unique namespacing / transform+override /
+        master-edit-propagates / unresolved-drop+warn / cycle-drop-without-loop / symbol-free-doc identity. `:app:assembleDebug` clean.
+  - [ ] **Room library store** (`VectorSymbol` entity/DAO mirroring `Stamp` + `AppDatabase`/migration/Hilt) + the editor's
+        "insert reusable object" affordance pointing at the symbol library. (Android-coupled DB + Compose — verify on device.)
 - **This session:** `:app:assembleDebug` clean; **26 new pure-JVM tests** (12 SF1 + 9 SF4 + 5 SF5a), all green; no regressions in the existing `data.vector.*` / `*.edit.*` / `ui.components.notes.*` suites.
 
 ---
 
 ## 3. Latest handoff (update this each session)
 
-**Last updated:** 2026-06-05 · **Last completed:** Phase 5 sub-feature **2 (gradients / advanced fills)** — model + both writers + both parsers + preview `Brush`
+**Last updated:** 2026-06-05 · **Last completed:** Phase 5 sub-feature **3 (reusable vector symbols / master-instance)** — pure model + `VectorNode.InstanceNode` + `SymbolResolver.expand` + full consumer wiring
 
-**State of the branch:** Phases 0–4 core merged to main (PRs #95/#96/#97/#98). Phase **5 (partial)** continues on
-`claude/sharp-fermi-CoacN` (this branch): SF1/SF4/SF5a cores landed earlier; **this session added SF2 (gradients)
-end-to-end**. `:app:assembleDebug` clean; **7 new pure-JVM tests** (`VectorFillRoundTripTest`) all green; the existing
-`data.vector.*` / `*.edit.*` / `ui.components.notes.*` suites are unaffected (still green apart from the **known** ~21
-`data/notes` `Color`/`Log` "not mocked" failures in `NoteRasterizerTest`/`NoteSvgExporterTest`/`NoteVectorDrawableExporterTest`/
-`NoteAiServiceTest` — present on a clean checkout, unrelated). No PR open.
+**State of the branch:** Phases 0–4 core + Phase 5 SF1/SF2/SF4/SF5a merged to main (PRs through #100). Phase **5 (partial)**
+continues on `claude/trusting-turing-aWqnj` (this branch): **this session added SF3 (vector symbols) pure core**.
+`:app:assembleDebug` clean; **7 new pure-JVM tests** (`SymbolResolverTest`) all green; the existing
+`data.vector.*` / `*.edit.*` / `ui.components.notes.*` suites are unaffected — every regression-sensitive suite
+(`AndroidVectorDrawableWriterTest`/`VectorSvgWriterTest`/`VectorDrawableOptimizerTest`/`VectorQuantizerTest`/
+`VectorManualEditApplierTest`/`VectorPreviewBuilderTest`/`IconSizeSetTest`/`VectorPathCatalogTest`/`VectorEditPlanApplierTest`/
+`StrokeStyleExportTest`/`VectorFillRoundTripTest`) re-run green this session. The **known** ~21 `data/notes` `Color`/`Log`
+"not mocked" failures are unrelated (present on a clean checkout). No PR open.
+
+**What SF3 delivers (pure JVM — no Android imports anywhere in the new code):**
+- **Model:** `data/vector/symbol/VectorSymbol` (a symbol *is* a mini-document — reuses `VectorViewport` + `VectorGroup`) and
+  `SymbolInstance` (`symbolId` + translate/scale/rotation, expressed exactly as a `<group>` transform, + optional
+  `styleOverride: VectorStyle?`). New sealed variant `VectorNode.InstanceNode(instance)` (`id == instance.id`).
+- **Resolver:** `SymbolResolver.expand(doc, library: Map<String, VectorSymbol>): VectorDocument` replaces each instance with
+  a `GroupNode` carrying the instance transform, whose children are the symbol's root children with **every id namespaced
+  `"${instance.id}/${childId}"`** (recursively — so multiple instances never collide), and folds `styleOverride` onto each
+  leaf path (per-placement recolour, field-by-field overlay covering all `VectorStyle` fields incl. SF1/SF2's). Nested
+  instances expand recursively under a `seen` cycle-guard; a missing master → `SYMBOL_UNRESOLVED` warn + drop, a cycle →
+  `SYMBOL_CYCLE` warn + drop. **Fast-path identity:** a symbol-free doc with an empty library is returned unchanged (`===`).
+- **The whole point:** the editor/preview/both writers operate on the **expanded** document, so symbols cost *zero* new
+  writer/preview code, and "edit the master → every instance updates" is just re-running `expand` against the updated library.
+- **Consumer wiring (compile + safety):** `InstanceNode` is a new arm of the sealed `VectorNode`, so all **13** exhaustive
+  `when` sites got a branch — tree-rebuilding mappers (`replacePath`/optimizer/quantizer/manual-edit/edit-plan/icon-size/
+  stroke-baker) **pass the instance through unchanged**; leaf collectors + both writers + preview **skip** it (it has no
+  concrete path until expanded). Existing documents contain no `InstanceNode`, so **every new branch is dead code for them
+  → byte-identical**, which is why all the writer/optimizer/preview regression suites stayed green.
 
 **What SF2 delivers (model/writer/parser pure JVM; preview is the one Compose top, but compiles + is `assembleDebug`-clean):**
 - **`VectorFill` model:** new `data/vector/VectorFill.kt` — sealed `Solid`/`Linear`/`Radial`/`Sweep` + `GradientStop(offset, color)`.
@@ -278,15 +312,34 @@ end-to-end**. `:app:assembleDebug` clean; **7 new pure-JVM tests** (`VectorFillR
   → Compose `Brush.linearGradient`/`radialGradient`/`sweepGradient` (stops via `parseVectorColor`); `PreparedPreviewPath`
   gained `fillBrush`, drawn over the flat fill in `drawPreparedPath`. `VectorEditCanvas` passes it for the live edit path too.
 
-**→ NEXT ACTION (Phase 5 remaining: SF3 + SF5b + thin UI tops):**
-1. **SF3 — Vector symbols:** `VectorSymbol`/`SymbolInstance`/`VectorNode.InstanceNode` + a pure `SymbolResolver.expand(doc, library)`
-   (namespaced ids, instance transform + style override) so every existing consumer works on the expanded doc; + Room store mirroring `Stamp`.
-   `SymbolResolverTest` (expand single instance / namespacing / transform+override / master-edit-propagates) is the pure-JVM gate.
-2. **SF5b — semantic AI tracer** `AiBitmapTracer` (reuse `ApiClient`/`ChatStreamer` + `VectorScene*`; gate on `supportsVision`;
-   always fall back to `LocalBitmapTracer`) + `AiBitmapTracerTest` with a fake `ChatStreamer`.
-3. **Thin UI/Compose tops (verify on device):** caps/join/dash/**fill (gradient picker + stop editor)** controls in
+**→ NEXT ACTION (Phase 5 remaining: SF5b + Room/UI tops — SF3 pure core now done):**
+1. **SF5b — semantic AI tracer** `data/vector/trace/AiBitmapTracer.kt` (reuse `ApiClient`/`ChatStreamer` + `VectorScene*`
+   compiler; gate on `ModelCapabilities.of(modelId).supportsVision`; **always** fall back to `LocalBitmapTracer` on no-vision /
+   no-network / parse-failure) + `AiBitmapTracerTest` with a fake `ChatStreamer`. This is the last pure-JVM-testable Phase-5 core.
+   *(Note: this touches the multi-provider AI client — read the `claude-api` skill / `ModelCapabilities` before wiring, and keep
+   the deterministic `LocalBitmapTracer` as the guaranteed fallback.)*
+2. **SF3 Room/UI tail (verify on device):** a `VectorSymbol` Room entity/DAO mirroring `Stamp` (+ `AppDatabase` registration,
+   migration, Hilt module) for an app-scoped symbol library, and the editor's "insert reusable object" affordance pointing at it
+   (creating `InstanceNode`s; export calls `SymbolResolver.expand` first). The pure resolver is already the engine — this is just
+   persistence + a thin Compose entry.
+3. **Other thin UI/Compose tops (verify on device):** caps/join/dash/**fill (gradient picker + stop editor)** controls in
    `VectorPathEditPanel` (+ a `VectorManualEdit` op to set `VectorFill`); dash `PathEffect` + outlined-fill draw in
    `VectorPreviewCanvas`; `onKeyEvent` + numeric-transform row on `VectorEditCanvas`; a bitmap-import → trace → node-canvas entry.
+
+**Watch-outs for next session (SF3 symbols — what to know before extending):**
+- **`SymbolResolver.expand` must run before any export/preview/metrics** on a doc that contains instances — that's the contract
+  that lets the writers/preview stay symbol-unaware. The writers/preview/`allPaths`/catalog **silently skip** an unexpanded
+  `InstanceNode` (no crash, but the instance is invisible), so if a symbol "disappears" on export you forgot to expand.
+- **Every new `when (VectorNode)` arm must keep the symbol-free path byte-identical.** The 13 branches added this session are
+  dead code for instance-free docs by construction. If you add an `InstanceNode` branch with real behavior, re-run the writer/
+  optimizer/preview regression suites and confirm they're still green.
+- **Namespacing is recursive + per-instance** (`"${instance.id}/…"` on every descendant id). Two instances of one master are
+  guaranteed disjoint; don't reintroduce raw symbol ids into the expanded tree or you'll get collisions.
+- **`styleOverride` is a field-by-field overlay** (non-null override field wins) covering all `VectorStyle` fields including
+  SF1 dash/variable-width and SF2 `fill`. It folds onto **direct** leaf paths only; a nested instance keeps its own override.
+- **No viewport reconciliation:** an instance maps symbol-space → host-space purely via its translate/scale/rotation (about the
+  origin, pivot defaulted to 0,0). A symbol authored in a 24×24 box dropped at scale 1 occupies 24×24 host units. If you want
+  auto-fit-to-box, derive a scale from `symbol.viewport` vs a target before building the `SymbolInstance` (don't bake it into expand).
 
 **Watch-outs for next session (SF2 gradients — what to know before extending):**
 - **The additive-nullable contract is the safety net.** `VectorStyle.fill == null` must keep every existing
@@ -841,6 +894,41 @@ Keep this file the *only* thing a fresh session must read to be oriented.
   colliding with the Phase-2 `edit/boolean/StrokeOutliner`; dash baking emits **one path with multiple subpaths** rather
   than one `<path>` per run (no id collisions, visually identical); the `STROKE_DASH_BAKED` warning is surfaced by the
   baker, not the (warnings-less) Android writer.
+
+### Phase 5 — production polish, sub-feature 3 (reusable vector symbols / master-instance) (2026-06-05)
+- **Shipped (pure JVM, no Android imports):** the headless-testable core of SF3 — define a vector master once, instance it
+  many times, edits to the master propagate to every instance.
+  - **Model:** `data/vector/symbol/VectorSymbol` (`id`/`name`/`viewport`/`root` — reuses `VectorGroup`, a symbol *is* a
+    mini-document) and `SymbolInstance` (`symbolId` + translate/scale/rotation as a `<group>` transform + optional
+    `styleOverride`). New sealed `VectorNode.InstanceNode(instance)`; warning codes `SYMBOL_UNRESOLVED`/`SYMBOL_CYCLE`.
+  - **Resolver:** `SymbolResolver.expand(doc, library)` → each instance becomes a `GroupNode` (instance transform) with
+    recursively-namespaced child ids (`"${instance.id}/…"`) and `styleOverride` folded onto each leaf path; nested instances
+    expand under a `seen` cycle-guard; missing/cyclic instances drop + warn; symbol-free + empty-library returns `===` doc.
+  - **Consumer wiring:** all 13 exhaustive `when (VectorNode)` sites (writers, optimizer, preview, quantizer, manual-edit,
+    edit-plan, icon-size, catalog, stroke-baker, `allPaths`, `replacePath`) gained an `InstanceNode` arm — mappers pass through,
+    leaf collectors/writers skip — dead code for instance-free docs, so the byte-identical contract holds.
+  - **7 new pure-JVM tests** (`SymbolResolverTest`): single-instance expand, unique namespacing, transform+override,
+    master-edit-propagates, unresolved-drop+warn, cycle-drop-without-loop, symbol-free identity. `:app:assembleDebug` clean;
+    the writer/optimizer/preview/quantizer/manual-edit/icon-size/catalog/edit-plan/SF1/SF2 regression suites re-ran green.
+- **Key decisions:**
+  1. **Expand-then-reuse.** Symbols cost zero new writer/preview code because `expand` lowers them to the plain group+path tree
+     those surfaces already understand; the host document persists the *unexpanded* tree + a library, and expansion runs at the
+     export/preview boundary (matching how Phase 3 quantizes-on-export rather than mutating the live model).
+  2. **Master-edit-propagation is re-expansion**, not mutation tracking — change the `VectorSymbol` in the library, re-run
+     `expand`, every instance reflects it (proved by `expand_masterEdit_propagatesToAllInstances`).
+  3. **Recursive per-instance namespacing** guarantees global id uniqueness across any number of instances + nested symbols.
+  4. **`styleOverride` is an additive field-overlay** (covers SF1/SF2 fields too), so a per-placement recolour composes with
+     the already-landed stroke-styling/gradient work.
+  5. **Robustness over strictness:** unresolved/cyclic instances are dropped with a warning rather than throwing, and unexpanded
+     instances are skipped (not crashed) by every consumer — the "you forgot to expand" failure mode is visible-by-absence.
+- **Verified:** 7 JVM tests + `:app:assembleDebug`. The full set of `when (VectorNode)`-touching suites re-run green.
+- **Not yet done (deferred to on-device — Android-coupled, headless-unverifiable):** the Room symbol-library entity/DAO
+  (mirroring `Stamp`, + `AppDatabase`/migration/Hilt) and the "insert reusable object" Compose affordance that creates
+  `InstanceNode`s. Tracked as the one open SF3 checkbox in §2.
+- **Deviation from plan:** none material. The plan named `VectorSymbol`/`SymbolInstance`/`SymbolResolver` (+ a Room store) —
+  all the pure pieces delivered as specified; the Room store/UI tail was intentionally scoped out of this headless session
+  (same pattern as the Phase-1–4 Android tails). Added two warning codes (`SYMBOL_UNRESOLVED`/`SYMBOL_CYCLE`) and a fast-path
+  identity return, neither anticipated verbatim but both minimal/additive.
 
 ### Phase 5 — production polish, sub-feature 2 (gradients / advanced fills) (2026-06-05)
 - **Shipped (model/writer/parser pure JVM; preview is the lone Compose top, `assembleDebug`-clean):** a real fill model

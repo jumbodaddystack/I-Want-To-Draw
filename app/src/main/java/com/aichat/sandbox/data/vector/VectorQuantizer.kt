@@ -43,6 +43,7 @@ object VectorQuantizer {
             when (child) {
                 is VectorNode.GroupNode -> VectorNode.GroupNode(mapGroup(child.group, fn))
                 is VectorNode.PathNode -> VectorNode.PathNode(mapPath(child.path, fn))
+                is VectorNode.InstanceNode -> child // unresolved instance passes through
             }
         },
     )

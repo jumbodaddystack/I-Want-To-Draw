@@ -1,5 +1,7 @@
 package com.aichat.sandbox.data.vector
 
+import com.aichat.sandbox.data.vector.symbol.SymbolInstance
+
 /**
  * Source-of-truth model for the Vector Art Tune-Up pipeline.
  *
@@ -62,6 +64,19 @@ sealed interface VectorNode {
 
     data class PathNode(val path: VectorPath) : VectorNode {
         override val id: String get() = path.id
+    }
+
+    /**
+     * Phase 5 (sub-feature 3) — a placement of a reusable [SymbolInstance].
+     * Instances are *expanded* into plain group+paths by
+     * [com.aichat.sandbox.data.vector.symbol.SymbolResolver.expand] before any
+     * metrics/optimize/preview/export pass, so consumers that walk resolved
+     * geometry never encounter one. Tree-rebuilding transforms pass it through
+     * unchanged; leaf collectors skip it (it contributes no concrete path until
+     * expanded). A document with no instances is byte-identical to before.
+     */
+    data class InstanceNode(val instance: SymbolInstance) : VectorNode {
+        override val id: String get() = instance.id
     }
 }
 
@@ -130,6 +145,11 @@ data class VectorWarning(
         const val NEGATIVE_STROKE_WIDTH = "NEGATIVE_STROKE_WIDTH"
         const val GRADIENT_NOT_SUPPORTED = "GRADIENT_NOT_SUPPORTED"
         const val CLIP_PATH_NOT_SUPPORTED = "CLIP_PATH_NOT_SUPPORTED"
+
+        // Phase 5 (sub-feature 3) — reusable vector symbols. Surfaced by
+        // SymbolResolver.expand when an instance can't be resolved.
+        const val SYMBOL_UNRESOLVED = "SYMBOL_UNRESOLVED"
+        const val SYMBOL_CYCLE = "SYMBOL_CYCLE"
 
         // Phase 5 — stroke styling. Android VectorDrawable has no dash attribute,
         // so a dashed stroke is baked into chopped geometry on export and flagged.
@@ -258,6 +278,7 @@ fun VectorDocument.allPaths(): List<VectorPath> {
             when (child) {
                 is VectorNode.PathNode -> out += child.path
                 is VectorNode.GroupNode -> walk(child.group)
+                is VectorNode.InstanceNode -> Unit // no concrete path until expanded
             }
         }
     }
@@ -280,6 +301,7 @@ fun VectorDocument.replacePath(pathId: String, newPath: VectorPath): VectorDocum
                         if (child.path.id == pathId) VectorNode.PathNode(newPath) else child
                     is VectorNode.GroupNode ->
                         VectorNode.GroupNode(mapGroup(child.group))
+                    is VectorNode.InstanceNode -> child // unresolved instances pass through
                 }
             },
         )

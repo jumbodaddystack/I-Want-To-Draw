@@ -76,6 +76,7 @@ data class IconSizeSet(
     private fun scaleGroup(group: VectorGroup, factor: Float): VectorGroup = group.copy(
         children = group.children.map { child ->
             when (child) {
+                is VectorNode.InstanceNode -> child // unresolved instance passes through
                 is VectorNode.GroupNode -> VectorNode.GroupNode(scaleGroup(child.group, factor))
                 is VectorNode.PathNode -> {
                     val w = child.path.style.strokeWidth

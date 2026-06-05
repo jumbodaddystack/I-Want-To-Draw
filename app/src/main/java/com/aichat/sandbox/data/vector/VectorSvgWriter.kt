@@ -75,6 +75,7 @@ object VectorSvgWriter {
         when (node) {
             is VectorNode.GroupNode -> writeGroup(sb, node.group, depth, warnings, plan)
             is VectorNode.PathNode -> writePath(sb, node.path, depth, warnings, plan)
+            is VectorNode.InstanceNode -> Unit // symbols are expanded before export; nothing to emit
         }
     }
 

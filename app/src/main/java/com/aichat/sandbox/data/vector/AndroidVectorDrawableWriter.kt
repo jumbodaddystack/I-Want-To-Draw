@@ -50,6 +50,7 @@ object AndroidVectorDrawableWriter {
         when (node) {
             is VectorNode.GroupNode -> writeGroup(sb, node.group, depth)
             is VectorNode.PathNode -> writePath(sb, node.path, depth)
+            is VectorNode.InstanceNode -> Unit // symbols are expanded before export; nothing to emit
         }
     }
 

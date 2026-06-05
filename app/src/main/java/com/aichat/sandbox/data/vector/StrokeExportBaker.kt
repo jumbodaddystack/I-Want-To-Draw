@@ -74,6 +74,7 @@ object StrokeExportBaker {
                     when (child) {
                         is VectorNode.PathNode -> VectorNode.PathNode(fn(child.path))
                         is VectorNode.GroupNode -> VectorNode.GroupNode(mapGroup(child.group))
+                        is VectorNode.InstanceNode -> child // unresolved instance passes through
                     }
                 },
             )

@@ -33,6 +33,7 @@ object VectorPreviewBuilder {
         fun walk(group: VectorGroup) {
             for (child in group.children) {
                 when (child) {
+                    is VectorNode.InstanceNode -> Unit // symbols are expanded before preview
                     is VectorNode.GroupNode -> walk(child.group)
                     is VectorNode.PathNode -> {
                         val path = child.path

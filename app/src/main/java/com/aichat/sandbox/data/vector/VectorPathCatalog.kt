@@ -49,6 +49,7 @@ object VectorPathCatalog {
         fun walk(group: VectorGroup, parentGroupId: String?) {
             for (child in group.children) {
                 when (child) {
+                    is VectorNode.InstanceNode -> Unit // no concrete path until expanded
                     is VectorNode.GroupNode -> walk(child.group, child.group.id)
                     is VectorNode.PathNode -> {
                         val path = child.path

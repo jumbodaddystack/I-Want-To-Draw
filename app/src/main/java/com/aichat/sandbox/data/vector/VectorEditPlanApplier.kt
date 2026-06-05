@@ -122,6 +122,7 @@ object VectorEditPlanApplier {
         val newChildren = ArrayList<VectorNode>(group.children.size)
         for (child in group.children) {
             when (child) {
+                is VectorNode.InstanceNode -> newChildren += child // unresolved instance passes through
                 is VectorNode.GroupNode ->
                     newChildren += VectorNode.GroupNode(applyOperation(child.group, op, ctx))
                 is VectorNode.PathNode -> {

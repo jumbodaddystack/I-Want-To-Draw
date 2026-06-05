@@ -172,6 +172,7 @@ object VectorManualEditApplier {
         val newChildren = ArrayList<VectorNode>(group.children.size)
         for (child in group.children) {
             when (child) {
+                is VectorNode.InstanceNode -> newChildren += child // unresolved instance passes through
                 is VectorNode.GroupNode ->
                     newChildren += VectorNode.GroupNode(applyEdit(child.group, prepared, ctx))
                 is VectorNode.PathNode -> {
@@ -302,6 +303,7 @@ object VectorManualEditApplier {
                 when (child) {
                     is VectorNode.GroupNode -> walk(child.group)
                     is VectorNode.PathNode -> out += child.path.id
+                    is VectorNode.InstanceNode -> Unit // no concrete path id until expanded
                 }
             }
         }
