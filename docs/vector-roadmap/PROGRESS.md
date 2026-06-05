@@ -185,9 +185,27 @@ Build in this order (each step is shippable + testable on its own):
 - [ ] On-device manual verify (toggle keyline overlay; pixel-snap a drawn anchor onto integers; size-preview
   strip updates live; export a 24/48/108 × VD/SVG `.zip` and re-import) — headless build env can't do this.
 
-### Phase 4 — unify the two domains — ⬜ NOT STARTED
-- [ ] Per `phase-4-unify-domains.md`: notes-bridge vectorization, single canonical
-  editable `VectorDocument`, route AI (notes `EditOp` + tune-up plans/redraw), lossless export, tests.
+### Phase 4 — unify the two domains — 🟢 CORE COMPLETE (pure JVM bridge + AI routing done → export-rewire + UI-entry remain)
+Per `phase-4-unify-domains.md`. Steps 1–4 + the pure integration tests are done (the plan's "bulk of the value");
+the two Android-coupled, headless-unverifiable steps are deferred to an on-device session.
+- [x] **Bridge core (pure, no Android imports)** `data/vector/notesbridge/`: `PolylineSimplify` (shared RDP),
+  `AutoShapeFitter` (line/rect/circle), `StrokeVectorizer` (samples→centerline→Catmull-Rom cubic `EditablePath`),
+  `ShapeVectorizer` (`Shape`→exact kappa-arc commands→`EditablePath`), `NoteVectorBridge`
+  (`toDocument`/`strokeToEditablePath`/`shapeToEditablePath`, `WidthMode`, `NoteVectorResult`, `ColorHex`).
+- [x] **One RDP:** `EditPreviewController.simplifyStroke` now delegates to `PolylineSimplify.keepMask`
+  (numerically identical; `EditPreviewControllerTest` still green — characterization preserved).
+- [x] **AI routing (geometry-free):** `EditOpToManualEdit` maps notes `EditOp` Recolor/Restyle/Delete/Simplify →
+  `VectorManualEdit`; geometry/canvas ops skipped. Tune-Up edit-plans/redraw already operate on `VectorDocument`,
+  so they now also apply to a bridged-from-ink document (proved by integration test).
+- [x] **Tests (pure JVM):** `StrokeVectorizerTest` (5), `ShapeVectorizerTest` (5), `AutoShapeFitterTest` (4),
+  `NoteVectorBridgeTest` (3), `EditOpToManualEditTest` (4), `UnifiedModelIntegrationTest` (4) → **25 new, green**.
+  Lossless export is proved at the model level (bridge → `AndroidVectorDrawableWriter` → `AndroidVectorDrawableParser`
+  byte-identical path data). Full suite green apart from the known ~21 `data/notes` Color/Log "not mocked" failures.
+- [ ] **Lossless export rewire** (`NoteSvgExporter`/`NoteVectorDrawableExporter` → route strokes/shapes through
+  the bridge + document writers, compose text/image via existing emitters). Android-coupled; their tests need the
+  `Color`/`Log` framework stubs (the known-failing set) so this can't be verified headless — do it on-device.
+- [ ] **UI entry**: a note opens directly onto the Phase-1 node canvas via the bridged document
+  (`VectorTuneupScreen` import hook). Needs the running app to verify.
 
 ### Phase 5 — production polish — ⬜ NOT STARTED
 - [ ] Per `phase-5-production-polish.md`: stroke styling, gradients, vector symbols,
@@ -197,19 +215,55 @@ Build in this order (each step is shippable + testable on its own):
 
 ## 3. Latest handoff (update this each session)
 
-**Last updated:** 2026-06-05 · **Last completed:** Phase 3 (pixel-perfect icon production pipeline)
+**Last updated:** 2026-06-05 · **Last completed:** Phase 4 **core** (notes↔vector bridge + AI routing; pure JVM)
 
-**State of the branch:** Phase 0 + 1 merged to main (PR #95); Phase **2** merged to main (PR #96).
-Phase **3** is on `claude/vector-roadmap-next-phase-B0Mwt`. `:app:assembleDebug` builds clean; the full
-JVM suite is green apart from the **known** ~21 `data/notes` `NoteRasterizer`/`Color`/`Log` "not mocked"
-failures (`NoteRasterizerTest`/`NoteSvgExporterTest`/`NoteVectorDrawableExporterTest`/`NoteAiServiceTest` —
-present on a clean checkout). `*.edit.*` is green at **103** (96 + 7 new pixel-snap reducer tests), plus
-**24** new pure tests under `data/vector/` + `ui/components/notes/`. No PR open. **Production pipeline is
-now in:** Material keyline overlay + integer/pixel-grid snap + synchronized 24/48/108 multi-size artboards
-+ a lossless grid-quantized icon-set exporter (VD/SVG, single & batch), all pure-JVM cores wired into the
-node editor and persisting/exporting through the existing plumbing. The only remaining Phase 3 item is
-on-device manual verify. Phases 4/5 can now start (both build on the Phase 1 editable model; Phase 4 can
-reuse the Phase 3 quantizer/exporter for its lossless export).
+**State of the branch:** Phases 0–3 merged to main (PRs #95/#96/#97). Phase **4 core** is on
+`claude/vector-roadmap-next-phase-qlI0h`. `compileDebugUnitTestKotlin` is clean; the full JVM suite is green
+apart from the **known** ~21 `data/notes` `Color`/`Log` "not mocked" failures
+(`NoteRasterizerTest`/`NoteSvgExporterTest`/`NoteVectorDrawableExporterTest`/`NoteAiServiceTest` — present on a
+clean checkout, unrelated to this change). **25 new pure-JVM tests** under `data/vector/notesbridge/` +
+`data/vector/UnifiedModelIntegrationTest`, all green; `*.edit.*` and `EditPreviewControllerTest` unaffected.
+No PR open.
+
+**What Phase 4 core delivers:** the notes canvas and the Tune-Up workspace are now **two views of one editable
+`VectorDocument`** at the model level. A pure `data/vector/notesbridge/` module vectorizes committed freehand
+ink + shapes into the *same* Phase-1 `EditablePath`/`VectorDocument` the node editor / boolean ops / grids /
+lossless writers already use, and routes geometry-free notes AI ops onto the shared `VectorManualEdit` vocabulary.
+Two Android-coupled, headless-unverifiable tails remain (exporter rewire + UI entry — see checklist); they're the
+right place for the next on-device session to finish Phase 4. Phase 5 can also start independently.
+
+**Phase 4 — what exists now (for the next session to build on):**
+- *(NEW, pure JVM — no Android/Compose imports)* `data/vector/notesbridge/`:
+  - `PolylineSimplify.kt` — the **one** notes RDP. `keepMask(points, tol): BooleanArray` + `simplify(...)` +
+    `perpDistance(...)`. Replicates `EditPreviewController`'s exact numerics (eps `1e-6`, `maxDist=0` init), and
+    `EditPreviewController.simplifyStroke` now **delegates** here (its private `rdp`/`perpDistance` deleted), so
+    notes + bridge share one implementation. `VectorPathSimplifier` (optimizer side) is left untouched.
+  - `AutoShapeFitter.kt` — `fit(points): Shape?` over a simplified polyline. Conservative line / circle-ellipse /
+    axis-rect detection (line = chord-relative deviation; circle = bbox-ellipse normalized-radius spread; rect =
+    every point hugs a bbox edge **and** all four corners are visited). Strict thresholds → a deliberate squiggle
+    returns null. Returns a `ui.components.notes.Shape` (pure value type).
+  - `StrokeVectorizer.kt` — `toEditablePath(item, widthMode, autoShape=true)`. Decode `StrokeCodec` → centerline
+    polyline (+ mean pressure) → dedupe → `PolylineSimplify` → optional `AutoShapeFitter` (snap to primitive) →
+    else **Catmull-Rom → Bézier** cubic fit (`handle = p ± (next−prev)/6`; interior SMOOTH, endpoints CORNER) →
+    one open `EditSubpath`. Style: `strokeColor=#AARRGGBB`, `strokeWidth=max(0.5, base×meanPressure)` (matches the
+    legacy exporters' collapse), round cap/join, no fill. `SIMPLIFY_TOLERANCE=0.75`.
+  - `ShapeVectorizer.kt` — `toCommands(shape)` (exact line/rect/ellipse/arrow/polygon; rounded-rect + ellipse use
+    the `0.5523` kappa cubic arcs; ellipse bakes `rotationRad`), `fromShape(shape, style, id, name)` and
+    `toEditablePath(item)` → run commands through `EditablePathFactory` so the result is the same all-cubic
+    `EditablePath`. Fill from `ShapeCodec` `fillArgb`, stroke from the item.
+  - `NoteVectorBridge.kt` — `toDocument(items, viewport, widthMode=CENTERLINE_UNIFORM): NoteVectorResult`
+    (z-order → root children; `itemToPathId` map; text/image + degenerate items in `skipped`), single-item entries
+    `strokeToEditablePath`/`shapeToEditablePath`, `pathId(item) = "note_${id}"`, `enum WidthMode`
+    (`CENTERLINE_UNIFORM` wired; `OUTLINE_FILL` is a deferred seam), and `internal object ColorHex` (ARGB→hex,
+    so the bridge avoids `android.graphics.Color`).
+  - `EditOpToManualEdit.kt` — `convert(ops, idToPathId)` / `convertOne(...)`: notes `EditOp` Recolor→`RecolorPaths`
+    (stroke), Restyle(width)→`RestylePaths`, Delete→`DeletePaths`, Simplify→`SimplifyPaths`. Geometry ops
+    (Transform/ReplaceWithShape/Smooth) + canvas ops (SetLayer/Group) and unresolvable ids are skipped.
+- *(MODIFIED)* `ui/screens/notes/EditPreviewController.kt` — `simplifyStroke` delegates to `PolylineSimplify`;
+  its private `rdp`/`perpDistance` removed (behavior identical, `EditPreviewControllerTest` green).
+- **Decision record (enforced):** canonical model = editable `VectorDocument`; bridge is **one-way** (ink →
+  document) at the commit boundary; variable width = **centerline cubic + uniform stroke** (the `WidthMode` enum
+  keeps `OUTLINE_FILL` open). Matches `phase-4-unify-domains.md` §"Decision record".
 
 **Phase 3 — what exists now (for the next session to build on):**
 - *(NEW, pure JVM — no Android imports)* `data/vector/`:
@@ -396,16 +450,38 @@ reuse the Phase 3 quantizer/exporter for its lossless export).
   bounded clamp), `Snap` (`MASK_GRID/ANGLE/ENDPOINT`, all pure — reducer imports it and
   stays JVM-clean), `VectorPreviewCanvas` internals.
 
-**→ NEXT ACTION:** Phase 3 is code-complete. Options for the next session:
-1. **On-device manual verify** of Phases 1 + 2 + 3 (the only open checkboxes) — needs an emulator/device
-   (headless env can't). Phase-3 flow: Tune-Up → EDIT tab → **Edit nodes** → toolbar **Keyline** toggles the
-   Material overlay; **Pixel** snap + draw/drag an anchor → it lands on integers inside the artboard; top-bar
-   size-preview toggle shows the 24/48/108 strip updating live; top-bar export → pick sizes/formats/quantize
-   → **Export (.zip)** → share sheet → unzip + re-import each VD/SVG.
-2. **Start Phase 4** (unify domains) or **Phase 5** (production polish) — both build on the Phase 1 editable
-   model; Phase 4's "lossless export" can reuse the Phase 3 `VectorQuantizer`/`IconSetExporter` directly.
+**→ NEXT ACTION:** Phase 4 **core** (pure JVM bridge + AI routing) is in and green. Options for the next session:
+1. **Finish Phase 4's two Android-coupled tails** (need a device/emulator to verify):
+   a. **Lossless export rewire** — point `NoteSvgExporter`/`NoteVectorDrawableExporter` at
+      `NoteVectorBridge.toDocument(...)` + `AndroidVectorDrawableWriter`/`VectorSvgWriter` for strokes/shapes,
+      composing the existing `<text>`/`<image>` emitters (don't fold those into the Tune-Up writers). These
+      exporters use `android.graphics.Color`, so their tests are in the **known-failing** set — verify on-device.
+   b. **UI entry** — a notes "Open in vector editor" hook that runs the bridge and hands the document to the
+      Phase-1 node canvas (`VectorTuneupScreen`/`NodeEditorHost`).
+2. **On-device manual verify** of the Phase 1–4 flows (still the only open checkboxes for 1/2/3) and the new
+   Phase-4 flow: draw a wobbly circle + a squiggle → open in vector editor → circle becomes an exact ellipse,
+   squiggle an editable cubic → move an anchor → export VD+SVG → re-import → geometry identical, uniform round stroke.
+3. **Start Phase 5** (production polish) — independent sub-features on the Phase-1 model.
 
-**Watch-outs for next session (Phase 3):**
+**Watch-outs for next session (Phase 4):**
+- **The bridge is pure and model-level; the export rewire is where Android creeps in.** Keep new vectorization
+  math in `data/vector/notesbridge/` (JVM-testable). The exporters' `Color`/`Log` usage is exactly why their
+  tests need framework stubs and fail headless — that's why losslessness is proved at the **document** level
+  (`UnifiedModelIntegrationTest.bridgedStrokeAndShapeExportLosslesslyThroughDocumentWriter`), not through those
+  exporters. When rewiring, fit the bridged note-pixel viewport into the chosen icon dp box (reuse the Phase-3
+  `IconSizeSet`/`VectorQuantizer` rather than re-deriving a transform).
+- **`AndroidVectorDrawableParser` reissues path ids** (VectorDrawable XML has no id attribute) — never assert
+  round-trip equality by `path.id` across write→parse; compare by position + `pathData` (the integration tests do).
+- **Auto-shape is conservative by design.** Thresholds (`LINE_REL_TOL` .06 / `CIRCLE_REL_TOL` .16 / `RECT_REL_TOL`
+  .10 / `CLOSE_REL_TOL` .22) favor under-fitting; `genericSquiggleNotFitted` is the guard. It's opt-out via
+  `StrokeVectorizer.toEditablePath(..., autoShape=false)` so the raw curve is always reachable.
+- **One RDP now.** `EditPreviewController.simplifyStroke` delegates to `PolylineSimplify`; if you touch RDP, the
+  numeric contract (eps `1e-6`, `maxDist=0` init) lives there and `EditPreviewControllerTest` pins notes' output.
+  `VectorPathSimplifier` (optimizer, slightly different init) was intentionally **not** merged — don't.
+- **Width is collapsed to a uniform mean** (`max(0.5, base×meanPressure)`), matching the legacy exporters. The
+  `WidthMode.OUTLINE_FILL` seam exists for true variable-width outline-fill later without touching callers.
+
+**Watch-outs carried over (Phase 3):**
 - **`VectorEditViewModel` must stay no-arg-injectable.** Export was deliberately NOT plumbed through the edit
   VM (that would need an injected `VectorTuneupExporter` + coroutine and break `VectorEditViewModelTest`'s
   Robolectric-free construction). It is hoisted: screen `onExportIconSet` callback → `NodeEditorHost` →
@@ -592,3 +668,38 @@ Keep this file the *only* thing a fresh session must read to be oriented.
   `KeylineGrid.shapeFigures()` returns a sealed `List<Figure>` instead of the plan's sketched `List<Any>` (cleaner,
   test-inspectable). Added `exportSet`'s optional `baseName` param + `VectorTuneupExporter.exportIconSet`'s zip
   packaging (the plan said "zip/dir") and a `"zip"` managed-extension; all minimal, none anticipated verbatim.
+
+### Phase 4 — unify the two domains, **core** (2026-06-05)
+- **Shipped (plan steps 1–4 + pure integration tests — the "bulk of the value"):** a pure
+  `data/vector/notesbridge/` module — `PolylineSimplify` (the single notes RDP), `AutoShapeFitter`
+  (line/circle/rect detection), `StrokeVectorizer` (freehand → centerline → Catmull-Rom cubic `EditablePath`),
+  `ShapeVectorizer` (`Shape` → exact kappa-arc commands → `EditablePath`), `NoteVectorBridge`
+  (`toDocument` + single-item entries, `WidthMode`, `NoteVectorResult`, `ColorHex`), and `EditOpToManualEdit`
+  (geometry-free notes `EditOp` → `VectorManualEdit`). `EditPreviewController.simplifyStroke` refactored to
+  delegate to `PolylineSimplify`. **25 new pure-JVM tests green** (`StrokeVectorizerTest` 5, `ShapeVectorizerTest`
+  5, `AutoShapeFitterTest` 4, `NoteVectorBridgeTest` 3, `EditOpToManualEditTest` 4, `UnifiedModelIntegrationTest`
+  4); full suite green apart from the known ~21 `data/notes` Color/Log "not mocked" failures;
+  `compileDebugUnitTestKotlin` clean.
+- **Key decisions:**
+  1. **Canonical model = editable `VectorDocument`; bridge is one-way (ink → document)** at the commit boundary
+     (document → ink is left to round-trip tests, never mutates persisted strokes). Matches the plan's decision record.
+  2. **Variable width = centerline cubic + uniform stroke** (`max(0.5, base×meanPressure)`, round cap/join), which
+     is what the legacy exporters already did — moved into the canonical model so it's uniform/lossless *from the
+     document's view*. `WidthMode.OUTLINE_FILL` is a deferred enum seam.
+  3. **One RDP.** Extracted the notes RDP into `PolylineSimplify` (exact numerics preserved) and pointed
+     `EditPreviewController` at it; left the optimizer's `VectorPathSimplifier` untouched (different init, widely used).
+  4. **Auto-shape is conservative + opt-out** (`autoShape=false`) so a deliberate squiggle is never snapped.
+  5. **Losslessness proved at the document level** (bridge → `AndroidVectorDrawableWriter` → re-parse, byte-identical
+     `pathData`) rather than through the Android-coupled exporters — deliberately, since those can't run headless.
+- **Verified:** 25 JVM tests — samples→cubic resample-within-tolerance, straight→single LineTo, width/color/cap
+  mapping, interior-SMOOTH/endpoint-CORNER; rect/ellipse/polygon/line/arrow exact commands + reparse; auto-shape
+  wobbly-circle/near-rect/near-line positives + squiggle negative; bridge z-order/skip/viewport; EditOp→ManualEdit
+  recolor/restyle/delete/simplify + geometry-op skip; and the four end-to-end integrations (lossless write/parse,
+  node-edit stability, AI edit-plan on a bridged doc validates clean, notes-recolor-via-bridge == manual edit).
+- **Not yet done (deferred to an on-device session — Android-coupled, headless-unverifiable):** (a) rewiring the
+  live `NoteSvgExporter`/`NoteVectorDrawableExporter` to route through the bridge + document writers; (b) the UI
+  "open a note in the vector editor" entry hook. Both are tracked as open checkboxes in §2.
+- **Deviation from plan:** the plan named `PolylineSimplify`/`AutoShapeFitter`/`StrokeVectorizer`/`ShapeVectorizer`/
+  `NoteVectorBridge`/`EditOpToManualEdit` — all delivered. `AutoShapeFitter` returns a `ui.components.notes.Shape`
+  (pure value type) directly rather than an internal type. The exporter rewire + entry wiring (plan steps 3 & 5's
+  UI half) were intentionally scoped out of this headless session, leaving Phase 4 **core-complete**.
