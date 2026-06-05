@@ -129,6 +129,10 @@ data class VectorWarning(
         // so a dashed stroke is baked into chopped geometry on export and flagged.
         const val STROKE_DASH_BAKED = "STROKE_DASH_BAKED"
 
+        // Phase 5 — bitmap auto-trace.
+        const val TRACE_EMPTY = "TRACE_EMPTY"
+        const val TRACE_FELL_BACK_TO_LOCAL = "TRACE_FELL_BACK_TO_LOCAL"
+
         // Phase 2 — faithful deterministic optimizer.
         const val OPTIMIZER_SKIPPED_UNPARSED_PATH = "OPTIMIZER_SKIPPED_UNPARSED_PATH"
         const val OPTIMIZER_SKIPPED_FILLED_PATH = "OPTIMIZER_SKIPPED_FILLED_PATH"
