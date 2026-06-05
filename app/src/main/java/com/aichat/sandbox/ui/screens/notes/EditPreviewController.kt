@@ -4,6 +4,8 @@ import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.data.notes.EditOp
 import com.aichat.sandbox.data.notes.EditOpsDoc
+import com.aichat.sandbox.data.vector.VectorPoint
+import com.aichat.sandbox.data.vector.notesbridge.PolylineSimplify
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
@@ -273,10 +275,11 @@ object EditPreviewController {
         val samples = StrokeCodec.decode(item.payload)
         val count = samples.size / stride
         if (count < 3 || tolerance <= 0f) return item
-        val keep = BooleanArray(count)
-        keep[0] = true
-        keep[count - 1] = true
-        rdp(samples, stride, 0, count - 1, tolerance, keep)
+        // Delegate to the shared RDP (Phase 4) so notes and the notes→vector
+        // bridge simplify with one numerically-identical implementation.
+        val centerline = ArrayList<VectorPoint>(count)
+        for (i in 0 until count) centerline += VectorPoint(samples[i * stride], samples[i * stride + 1])
+        val keep = PolylineSimplify.keepMask(centerline, tolerance)
         val kept = (0 until count).count { keep[it] }
         if (kept == count) return item
         val out = FloatArray(kept * stride)
@@ -310,47 +313,6 @@ object EditPreviewController {
             out[out.size - stride + k] = samples[samples.size - stride + k]
         }
         return out
-    }
-
-    private fun rdp(
-        samples: FloatArray,
-        stride: Int,
-        start: Int,
-        end: Int,
-        tolerance: Float,
-        keep: BooleanArray,
-    ) {
-        if (end - start < 2) return
-        val ax = samples[start * stride]
-        val ay = samples[start * stride + 1]
-        val bx = samples[end * stride]
-        val by = samples[end * stride + 1]
-        var maxDist = 0f
-        var maxIdx = -1
-        for (i in start + 1 until end) {
-            val px = samples[i * stride]
-            val py = samples[i * stride + 1]
-            val d = perpDistance(px, py, ax, ay, bx, by)
-            if (d > maxDist) { maxDist = d; maxIdx = i }
-        }
-        if (maxIdx >= 0 && maxDist > tolerance) {
-            keep[maxIdx] = true
-            rdp(samples, stride, start, maxIdx, tolerance, keep)
-            rdp(samples, stride, maxIdx, end, tolerance, keep)
-        }
-    }
-
-    private fun perpDistance(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
-        val dx = bx - ax
-        val dy = by - ay
-        val lenSq = dx * dx + dy * dy
-        if (lenSq < 1e-6f) {
-            val rx = px - ax
-            val ry = py - ay
-            return kotlin.math.sqrt(rx * rx + ry * ry)
-        }
-        val cross = (dy * px - dx * py + bx * ay - by * ax)
-        return kotlin.math.abs(cross) / kotlin.math.sqrt(lenSq)
     }
 
     private fun buildShapeReplacement(source: NoteItem, spec: EditOp.ShapeSpec): NoteItem {
