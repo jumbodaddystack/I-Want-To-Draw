@@ -207,23 +207,92 @@ the two Android-coupled, headless-unverifiable steps are deferred to an on-devic
 - [ ] **UI entry**: a note opens directly onto the Phase-1 node canvas via the bridged document
   (`VectorTuneupScreen` import hook). Needs the running app to verify.
 
-### Phase 5 — production polish — ⬜ NOT STARTED
-- [ ] Per `phase-5-production-polish.md`: stroke styling, gradients, vector symbols,
-  keyboard ergonomics, AI auto-trace. (Independent sub-features; pick by priority.)
+### Phase 5 — production polish — 🟢 IN PROGRESS (3 of 5 sub-features' pure-JVM cores done; UI tops + gradients/symbols/AI-backend remain)
+Per `phase-5-production-polish.md`. Five **independent** sub-features; pick by priority. Pure-JVM cores landed
+this session; thin Compose/UI tops + Android-coupled tails deferred (headless build env can't verify them).
+- **SF1 — Stroke styling (dash + variable width):** 🟢 model + geometry + writers done
+  - [x] `VectorStyle` additive fields `strokeDashArray`/`strokeDashOffset`/`variableWidth` (nullable; existing docs byte-identical).
+  - [x] `data/vector/StrokeDashBaker.kt` — flatten→arc-length walk→"on" runs (offset, odd-pattern double, zero-gap merge).
+  - [x] `data/vector/VariableWidthProfile.kt` (`WidthStop`/`VariableWidthProfile.widthAt`) + `data/vector/VariableWidthOutliner.kt`
+        (centerline→densify→left/right offset by `width(t)/2`→closed fill band).
+  - [x] `data/vector/StrokeExportBaker.kt` — `bakeVariableWidth` (both writers) + `bakeDashes` (Android only, `STROKE_DASH_BAKED` warning).
+  - [x] Writers wired: `VectorSvgWriter` emits native `stroke-dasharray`/`-dashoffset` + bakes variable-width to fill;
+        `AndroidVectorDrawableWriter` bakes both. Both run the baker at the top → no-op (byte-identical) for any non-opting path.
+  - [x] Tests: `StrokeDashBakerTest` (4), `VariableWidthOutlinerTest` (4), `StrokeStyleExportTest` (4) → **12, green**.
+  - [ ] **1a caps/joins UI** + dash/fill controls in `VectorPathEditPanel.kt`; preview `PathEffect.dashPathEffect` + outlined-fill draw in `VectorPreviewCanvas`. (UI — verify on device.)
+- **SF4 — Keyboard / ergonomics:** 🟢 pure resolvers done
+  - [x] `ui/screens/vector/edit/EditKeyBindings.kt` (`KeySpec` enum + `resolve(key, shift, ctrl, gridStep)` → existing actions; arrows nudge, ctrl+Z/ctrl+shift+Z undo/redo, Delete/P/V/Esc).
+  - [x] `ui/screens/vector/edit/NumericTransformEntry.kt` (`TransformEntry` + `NumericTransform.parse` + `toMoveSelection`).
+  - [x] Tests: `EditKeyBindingsTest` (5), `NumericTransformTest` (4) → **9, green**.
+  - [ ] `Modifier.onKeyEvent` plumbing on `VectorEditCanvas` + a numeric-transform inspector row (UI — verify on device).
+- **SF5 — AI auto-trace:** 🟢 5a (local tracer) done; 5b (AI backend) deferred
+  - [x] `data/vector/trace/BitmapTracer.kt` (interface + `TraceOptions`/`TraceMode`/`TraceResult`), `data/vector/trace/CurveFitter.kt`
+        (Schneider least-squares cubic fit, recursive split + Newton reparam), `data/vector/trace/LocalBitmapTracer.kt`
+        (threshold→4-conn components→Moore outline / Zhang–Suen centerline→RDP→cubic fit). Warning codes `TRACE_EMPTY`/`TRACE_FELL_BACK_TO_LOCAL`.
+  - [x] Tests: `CurveFitterTest` (2), `LocalBitmapTracerTest` (3) → **5, green**.
+  - [ ] **5b semantic AI tracer** `AiBitmapTracer` (reuse `ApiClient`/`ChatStreamer` + `VectorScene*` compiler; gate on `supportsVision`; fall back to local) + `AiBitmapTracerTest` (fake streamer).
+  - [ ] UI entry: paste/import a bitmap → trace → hand the `VectorDocument` to the node canvas.
+- **SF2 — Gradients / advanced fills:** ⬜ NOT STARTED (marquee; biggest regression surface — touches both parsers + both writers + preview `Brush`).
+- **SF3 — Reusable vector symbols (master/instance):** ⬜ NOT STARTED (`VectorSymbol`/`SymbolInstance`/`SymbolResolver` + Room store).
+- **This session:** `:app:assembleDebug` clean; **26 new pure-JVM tests** (12 SF1 + 9 SF4 + 5 SF5a), all green; no regressions in the existing `data.vector.*` / `*.edit.*` / `ui.components.notes.*` suites.
 
 ---
 
 ## 3. Latest handoff (update this each session)
 
-**Last updated:** 2026-06-05 · **Last completed:** Phase 4 **core** (notes↔vector bridge + AI routing; pure JVM)
+**Last updated:** 2026-06-05 · **Last completed:** Phase 5 sub-features **1 (stroke styling), 4 (ergonomics), 5a (local bitmap tracer)** — pure-JVM cores
 
-**State of the branch:** Phases 0–3 merged to main (PRs #95/#96/#97). Phase **4 core** is on
-`claude/vector-roadmap-next-phase-qlI0h`. `compileDebugUnitTestKotlin` is clean; the full JVM suite is green
-apart from the **known** ~21 `data/notes` `Color`/`Log` "not mocked" failures
-(`NoteRasterizerTest`/`NoteSvgExporterTest`/`NoteVectorDrawableExporterTest`/`NoteAiServiceTest` — present on a
-clean checkout, unrelated to this change). **25 new pure-JVM tests** under `data/vector/notesbridge/` +
-`data/vector/UnifiedModelIntegrationTest`, all green; `*.edit.*` and `EditPreviewControllerTest` unaffected.
-No PR open.
+**State of the branch:** Phases 0–4 core merged to main (PRs #95/#96/#97/#98). Phase **5 (partial)** is on
+`claude/vector-roadmap-next-phase-sVtSO` (this branch), 3 commits: SF1+SF4, then SF5a. `:app:assembleDebug`
+clean; **26 new pure-JVM tests** all green; the existing `data.vector.*` / `*.edit.*` / `ui.components.notes.*`
+suites are unaffected (still green apart from the **known** ~21 `data/notes` `Color`/`Log` "not mocked" failures
+in `NoteRasterizerTest`/`NoteSvgExporterTest`/`NoteVectorDrawableExporterTest`/`NoteAiServiceTest` — present on a
+clean checkout, unrelated). No PR open.
+
+**What this Phase-5 slice delivers (all pure JVM — no Android/Compose imports, model + geometry only):**
+- **SF1 stroke styling:** `VectorStyle` gained nullable `strokeDashArray`/`strokeDashOffset`/`variableWidth`.
+  `StrokeDashBaker` cuts a stroke into dash "on" runs; `VariableWidthOutliner` (+ `VariableWidthProfile`) bakes a
+  width-along-path stroke into a filled outline; `StrokeExportBaker` drives both from the writers (`bakeVariableWidth`
+  for both, `bakeDashes` Android-only with a `STROKE_DASH_BAKED` warning). `VectorSvgWriter` now emits native
+  `stroke-dasharray`/`-dashoffset`; both writers stay byte-identical for any path that doesn't opt in.
+- **SF4 ergonomics:** `EditKeyBindings.resolve(...)` maps a synthetic `KeySpec` + modifiers onto the **existing**
+  reducer actions (arrow nudge, ctrl+Z/redo, Delete/P/V/Esc); `NumericTransform.parse(...)` → `TransformEntry`
+  (+ `toMoveSelection`). No new edit math — both funnel through the Phase-1 reducer.
+- **SF5a auto-trace:** `data/vector/trace/` — `BitmapTracer` interface (ARGB IntArray in, `TraceResult` out),
+  `CurveFitter` (Schneider cubic fit), `LocalBitmapTracer` (threshold → 4-conn components → Moore outline /
+  Zhang–Suen centerline → RDP → cubic fit → editable `VectorPath`s). New warning codes `TRACE_EMPTY`/`TRACE_FELL_BACK_TO_LOCAL`.
+
+**→ NEXT ACTION (Phase 5 has 2 untouched sub-features + several thin tails):**
+1. **SF2 — Gradients / advanced fills** (the marquee, biggest regression surface): add `VectorFill` (Solid/Linear/Radial/
+   Sweep + `GradientStop`), thread `fill: VectorFill?` through `VectorStyle` (additive), both writers (`<aapt:attr>` for
+   Android, `<defs>` for SVG), both parsers (populate instead of dropping), and the preview `Brush`. Per-format round-trip
+   tests gate it. Re-scope `GRADIENT_NOT_SUPPORTED`/`SVG_GRADIENT_UNSUPPORTED` to fire only when genuinely unrepresentable.
+2. **SF3 — Vector symbols:** `VectorSymbol`/`SymbolInstance`/`VectorNode.InstanceNode` + a pure `SymbolResolver.expand(doc, library)`
+   (namespaced ids, instance transform + style override) so every existing consumer works on the expanded doc; + Room store mirroring `Stamp`.
+3. **SF5b — semantic AI tracer** `AiBitmapTracer` (reuse `ApiClient`/`ChatStreamer` + `VectorScene*`; gate on `supportsVision`;
+   always fall back to `LocalBitmapTracer`) + `AiBitmapTracerTest` with a fake `ChatStreamer`.
+4. **Thin UI/Compose tops (verify on device):** caps/join/dash/fill controls in `VectorPathEditPanel`; dash `PathEffect` +
+   outlined-fill draw + gradient `Brush` in `VectorPreviewCanvas`; `onKeyEvent` + numeric-transform row on `VectorEditCanvas`;
+   a bitmap-import → trace → node-canvas entry.
+
+**Watch-outs for next session (Phase 5):**
+- **Keep new math pure + in the model/geometry layer** (`data/vector/…`, `data/vector/trace/…`); UI is the thin untested top.
+  The whole point of this slice is that bakers/fitter/tracer/key-resolvers are JVM-tested without a device.
+- **Additive `VectorStyle` fields are the safety contract:** every new field is nullable so current docs serialize
+  byte-identically and the existing writer/parser round-trip tests stay green. SF2's `fill` must follow the same rule (null `fill`
+  ⇒ the existing scalar `fillColor`/`fillAlpha` path is untouched). Verify the writer regression tests after adding it.
+- **`AndroidVectorDrawableWriter.write` returns a `String` (no warnings channel).** SF1's `STROKE_DASH_BAKED` is surfaced by
+  `StrokeExportBaker.bakeDashes` (tested directly), not by the writer. If SF2 needs to warn on unrepresentable gradients from the
+  Android writer, either route through `bake*` first or add a `writeWithWarnings` like the SVG writer has.
+- **`VariableWidthOutliner` is butt-capped** (the band closes straight across endpoints) and **distinct from the Phase-2
+  `edit/boolean/StrokeOutliner`** (that one fuses constant-width pieces via the clipper; this one offsets one centerline by a
+  varying width for export baking). Round/square caps are a deferred visual refinement.
+- **Dash baking deviation:** the plan said "one `<path>` per on-run"; I emit **one path with multiple subpaths** (concatenated
+  M/L runs) to avoid id collisions — visually identical. SF1's geometry math (`StrokeDashBaker`) is independent of that choice.
+- **Tracer is deterministic + always-available;** SF5b must keep `LocalBitmapTracer` as the guaranteed fallback (no network / vision /
+  parse-failure → local). The tracer maps **1 px → 1 viewport unit**; fit a traced doc into a target dp box with the Phase-3
+  `IconSizeSet`/`VectorQuantizer` rather than re-deriving a transform.
+- **`BitmapTracer.trace` is `suspend`** — tests use `kotlinx.coroutines.runBlocking` (no Robolectric needed; the local tracer never suspends).
 
 **What Phase 4 core delivers:** the notes canvas and the Tune-Up workspace are now **two views of one editable
 `VectorDocument`** at the model level. A pure `data/vector/notesbridge/` module vectorizes committed freehand
@@ -450,7 +519,7 @@ right place for the next on-device session to finish Phase 4. Phase 5 can also s
   bounded clamp), `Snap` (`MASK_GRID/ANGLE/ENDPOINT`, all pure — reducer imports it and
   stays JVM-clean), `VectorPreviewCanvas` internals.
 
-**→ NEXT ACTION:** Phase 4 **core** (pure JVM bridge + AI routing) is in and green. Options for the next session:
+**Phase 4 remaining (carried over — superseded as the headline by the Phase-5 §3 NEXT ACTION above, but still open):**
 1. **Finish Phase 4's two Android-coupled tails** (need a device/emulator to verify):
    a. **Lossless export rewire** — point `NoteSvgExporter`/`NoteVectorDrawableExporter` at
       `NoteVectorBridge.toDocument(...)` + `AndroidVectorDrawableWriter`/`VectorSvgWriter` for strokes/shapes,
@@ -703,3 +772,40 @@ Keep this file the *only* thing a fresh session must read to be oriented.
   `NoteVectorBridge`/`EditOpToManualEdit` — all delivered. `AutoShapeFitter` returns a `ui.components.notes.Shape`
   (pure value type) directly rather than an internal type. The exporter rewire + entry wiring (plan steps 3 & 5's
   UI half) were intentionally scoped out of this headless session, leaving Phase 4 **core-complete**.
+
+### Phase 5 — production polish, sub-features 1 + 4 + 5a (2026-06-05)
+- **Shipped (pure JVM, no Android/Compose imports):** the headless-testable cores of three of Phase 5's five
+  independent sub-features.
+  - **SF1 — stroke styling:** additive `VectorStyle.strokeDashArray`/`strokeDashOffset`/`variableWidth`;
+    `StrokeDashBaker` (flatten → arc-length walk → "on" runs, odd-pattern doubling, phase offset, zero-gap merge),
+    `VariableWidthProfile` + `VariableWidthOutliner` (densified centerline offset by `width(t)/2` → closed fill band),
+    `StrokeExportBaker` (`bakeVariableWidth` for both writers, `bakeDashes` Android-only + `STROKE_DASH_BAKED` warning).
+    `VectorSvgWriter` emits native `stroke-dasharray`/`-dashoffset`; `AndroidVectorDrawableWriter` bakes both. Both
+    writers run the baker at the top so any path that doesn't opt in serializes byte-identically.
+  - **SF4 — ergonomics:** `EditKeyBindings.resolve(KeySpec, shift, ctrl, gridStep)` and `NumericTransform.parse` +
+    `TransformEntry` — both map onto the **existing** Phase-1 reducer actions, no new edit math.
+  - **SF5a — local auto-trace:** `data/vector/trace/` — `BitmapTracer` interface, `CurveFitter` (Schneider
+    least-squares cubic fit with recursive split + Newton reparam), `LocalBitmapTracer` (threshold → 4-conn
+    components → Moore outline / Zhang–Suen centerline → RDP → cubic fit → editable `VectorPath`s). Codes
+    `TRACE_EMPTY`/`TRACE_FELL_BACK_TO_LOCAL`.
+  - **26 new pure-JVM tests** (SF1: `StrokeDashBakerTest` 4 / `VariableWidthOutlinerTest` 4 / `StrokeStyleExportTest` 4;
+    SF4: `EditKeyBindingsTest` 5 / `NumericTransformTest` 4; SF5a: `CurveFitterTest` 2 / `LocalBitmapTracerTest` 3),
+    all green. `:app:assembleDebug` clean; no regressions in `data.vector.*` / `*.edit.*` / `ui.components.notes.*`.
+- **Key decisions:**
+  1. **Additive nullable model fields** keep every existing document/writer/parser test byte-identical — features only
+     activate for a path that opts in. This is the regression-safety contract SF2 (`fill`) must also follow.
+  2. **Writers stay thin; baking is a pure pre-pass** (`StrokeExportBaker`). SVG keeps dashes native (lossless); only
+     the Android writer (no dash attribute) bakes them. Variable width has no native attribute anywhere → both bake to fill.
+  3. **Key/numeric ergonomics produce existing actions only** — `MoveSelection`/`Undo`/`Redo`/… — so there is zero new
+     reducer surface to test; the binding table itself is the pure unit.
+  4. **The local tracer is deterministic and always-available** (the guaranteed fallback for the future AI backend), maps
+     1 px → 1 viewport unit, and emits editable cubics straight into the Phase-1/4 model.
+- **Verified:** 26 JVM tests (see above) + `:app:assembleDebug`. Writer regression suites
+  (`AndroidVectorDrawableWriterTest`/`VectorSvgWriterTest`) stay green.
+- **Not yet done (deferred):** SF2 (gradients) + SF3 (vector symbols) untouched; SF5b (semantic AI tracer) and **all** thin
+  Compose/UI tops (style controls, preview dash/gradient/outline draw, `onKeyEvent` + numeric row, bitmap-import entry)
+  need a device/emulator. See §2 checkboxes + §3 NEXT ACTION.
+- **Deviation from plan:** the new outliner is named `VariableWidthOutliner` (not the plan's `StrokeOutliner`) to avoid
+  colliding with the Phase-2 `edit/boolean/StrokeOutliner`; dash baking emits **one path with multiple subpaths** rather
+  than one `<path>` per run (no id collisions, visually identical); the `STROKE_DASH_BAKED` warning is surfaced by the
+  baker, not the (warnings-less) Android writer.
