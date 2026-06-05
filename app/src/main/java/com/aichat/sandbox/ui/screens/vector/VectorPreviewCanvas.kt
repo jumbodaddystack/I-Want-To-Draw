@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
@@ -22,6 +23,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import com.aichat.sandbox.data.vector.PreviewSegment
 import com.aichat.sandbox.data.vector.PreviewSubpath
 import com.aichat.sandbox.data.vector.VectorBounds
+import com.aichat.sandbox.data.vector.VectorFill
 import com.aichat.sandbox.data.vector.VectorPreviewModel
 import com.aichat.sandbox.data.vector.VectorPreviewPathNormalizer
 import com.aichat.sandbox.data.vector.VectorViewport
@@ -81,6 +83,7 @@ internal data class PreparedPreviewPath(
     val id: String,
     val path: Path,
     val fill: Color?,
+    val fillBrush: Brush?,
     val stroke: Color?,
     val strokeWidth: Float,
     val cap: StrokeCap,
@@ -129,12 +132,38 @@ internal fun preparePreviewPaths(model: VectorPreviewModel): List<PreparedPrevie
             id = pp.id,
             path = path,
             fill = parseVectorColor(pp.style.fillColor, pp.style.fillAlpha),
+            fillBrush = pp.style.fill?.let { toBrush(it) },
             stroke = parseVectorColor(pp.style.strokeColor, pp.style.strokeAlpha),
             strokeWidth = pp.style.strokeWidth ?: 0f,
             cap = toStrokeCap(pp.style.strokeLineCap),
             join = toStrokeJoin(pp.style.strokeLineJoin),
         )
     }
+
+/**
+ * Maps a [VectorFill] to a Compose [Brush] in viewport coordinates. A [VectorFill.Solid]
+ * returns null so the caller falls back to its flat [PreparedPreviewPath.fill] color.
+ * Gradient stops are resolved with [parseVectorColor]; a gradient with no stops
+ * returns null. Sweep maps to [Brush.sweepGradient] (Android-only, unlike SVG).
+ */
+internal fun toBrush(fill: VectorFill): Brush? {
+    fun stops(list: List<com.aichat.sandbox.data.vector.GradientStop>): Array<Pair<Float, Color>>? {
+        if (list.isEmpty()) return null
+        return list.map { it.offset to (parseVectorColor(it.color) ?: Color.Transparent) }.toTypedArray()
+    }
+    return when (fill) {
+        is VectorFill.Solid -> null
+        is VectorFill.Linear -> stops(fill.stops)?.let {
+            Brush.linearGradient(*it, start = Offset(fill.x1, fill.y1), end = Offset(fill.x2, fill.y2))
+        }
+        is VectorFill.Radial -> stops(fill.stops)?.let {
+            Brush.radialGradient(*it, center = Offset(fill.cx, fill.cy), radius = fill.radius.takeIf { r -> r > 0f } ?: Float.POSITIVE_INFINITY)
+        }
+        is VectorFill.Sweep -> stops(fill.stops)?.let {
+            Brush.sweepGradient(*it, center = Offset(fill.cx, fill.cy))
+        }
+    }
+}
 
 internal fun buildComposePath(subpaths: List<PreviewSubpath>): Path {
     val path = Path()
@@ -156,9 +185,14 @@ internal fun buildComposePath(subpaths: List<PreviewSubpath>): Path {
 
 /** Draws a prepared path: fill first, then stroke. Skips fully transparent paint. */
 internal fun DrawScope.drawPreparedPath(p: PreparedPreviewPath, alpha: Float) {
-    p.fill?.let { fill ->
-        if (fill.alpha > 0f) {
-            drawPath(path = p.path, color = fill, alpha = alpha, style = Fill)
+    // A gradient brush (when present) wins over the flat fill color.
+    if (p.fillBrush != null) {
+        drawPath(path = p.path, brush = p.fillBrush, alpha = alpha, style = Fill)
+    } else {
+        p.fill?.let { fill ->
+            if (fill.alpha > 0f) {
+                drawPath(path = p.path, color = fill, alpha = alpha, style = Fill)
+            }
         }
     }
     p.stroke?.let { stroke ->

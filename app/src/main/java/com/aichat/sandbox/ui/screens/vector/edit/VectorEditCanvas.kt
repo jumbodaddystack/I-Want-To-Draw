@@ -41,6 +41,7 @@ import com.aichat.sandbox.ui.screens.vector.PreparedPreviewPath
 import com.aichat.sandbox.ui.screens.vector.buildComposePath
 import com.aichat.sandbox.ui.screens.vector.drawPreparedPath
 import com.aichat.sandbox.ui.screens.vector.parseVectorColor
+import com.aichat.sandbox.ui.screens.vector.toBrush
 import com.aichat.sandbox.ui.screens.vector.toStrokeCap
 import com.aichat.sandbox.ui.screens.vector.toStrokeJoin
 
@@ -270,6 +271,7 @@ private fun buildEditingRender(editing: EditablePath): Pair<Path, PreparedPrevie
         id = editing.pathId,
         path = path,
         fill = parseVectorColor(editing.style.fillColor, editing.style.fillAlpha),
+        fillBrush = editing.style.fill?.let { toBrush(it) },
         stroke = parseVectorColor(editing.style.strokeColor, editing.style.strokeAlpha),
         strokeWidth = editing.style.strokeWidth ?: 0f,
         cap = toStrokeCap(editing.style.strokeLineCap),

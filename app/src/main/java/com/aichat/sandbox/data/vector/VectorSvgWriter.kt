@@ -41,6 +41,11 @@ object VectorSvgWriter {
         val sb = StringBuilder(1024)
         val vp = baked.viewport
 
+        // Pre-pass: collect every gradient fill into a <defs> block with stable ids,
+        // mapping each opting-in path to its resolved SVG fill. No-op (empty plan)
+        // for any document without a gradient fill, so output stays byte-identical.
+        val plan = buildGradientPlan(baked, warnings)
+
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n")
         sb.append("<svg xmlns=\"").append(SVG_NS).append("\"")
             .append(" width=\"").append(num(vp.widthDp)).append('"')
@@ -48,8 +53,12 @@ object VectorSvgWriter {
             .append(" viewBox=\"0 0 ").append(num(vp.viewportWidth)).append(' ')
             .append(num(vp.viewportHeight)).append("\">\n")
 
+        if (plan.defs.isNotEmpty()) {
+            sb.append(INDENT).append("<defs>\n").append(plan.defs).append(INDENT).append("</defs>\n")
+        }
+
         for (child in baked.root.children) {
-            writeNode(sb, child, depth = 1, warnings = warnings)
+            writeNode(sb, child, depth = 1, warnings = warnings, plan = plan)
         }
 
         sb.append("</svg>\n")
@@ -61,10 +70,11 @@ object VectorSvgWriter {
         node: VectorNode,
         depth: Int,
         warnings: MutableList<VectorWarning>,
+        plan: GradientPlan,
     ) {
         when (node) {
-            is VectorNode.GroupNode -> writeGroup(sb, node.group, depth, warnings)
-            is VectorNode.PathNode -> writePath(sb, node.path, depth, warnings)
+            is VectorNode.GroupNode -> writeGroup(sb, node.group, depth, warnings, plan)
+            is VectorNode.PathNode -> writePath(sb, node.path, depth, warnings, plan)
         }
     }
 
@@ -73,6 +83,7 @@ object VectorSvgWriter {
         group: VectorGroup,
         depth: Int,
         warnings: MutableList<VectorWarning>,
+        plan: GradientPlan,
     ) {
         val pad = INDENT.repeat(depth)
         sb.append(pad).append("<g")
@@ -83,7 +94,7 @@ object VectorSvgWriter {
             return
         }
         sb.append(">\n")
-        for (child in group.children) writeNode(sb, child, depth + 1, warnings)
+        for (child in group.children) writeNode(sb, child, depth + 1, warnings, plan)
         sb.append(pad).append("</g>\n")
     }
 
@@ -92,6 +103,7 @@ object VectorSvgWriter {
         path: VectorPath,
         depth: Int,
         warnings: MutableList<VectorWarning>,
+        plan: GradientPlan,
     ) {
         val pad = INDENT.repeat(depth)
         val data = path.commands?.takeIf { it.isNotEmpty() }
@@ -110,15 +122,27 @@ object VectorSvgWriter {
         (path.name ?: path.id).let { sb.append(" id=\"").append(escapeXml(it)).append('"') }
         sb.append(" d=\"").append(escapeXml(data)).append('"')
 
-        // Fill: Android paths default to no fill, so emit fill="none" when absent
-        // to stop SVG renderers from defaulting to solid black.
-        val fill = resolveColor(style.fillColor)
-        if (fill == null) {
-            sb.append(" fill=\"none\"")
-        } else {
-            sb.append(" fill=\"").append(fill.hex).append('"')
-            val opacity = fill.opacity * (style.fillAlpha ?: 1f)
-            if (opacity < 1f) sb.append(" fill-opacity=\"").append(num(opacity)).append('"')
+        // Fill: a non-null VectorFill (resolved by the gradient pre-pass) overrides
+        // the scalar fillColor. Otherwise emit the scalar color, defaulting to
+        // fill="none" when absent (Android paths have no fill by default, and SVG
+        // would otherwise render solid black).
+        when (val planned = plan.byPathId[path.id]) {
+            is FillRender.Ref -> sb.append(" fill=\"url(#").append(planned.id).append(")\"")
+            is FillRender.Solid -> {
+                sb.append(" fill=\"").append(planned.hex).append('"')
+                if (planned.opacity < 1f) sb.append(" fill-opacity=\"").append(num(planned.opacity)).append('"')
+            }
+            FillRender.None -> sb.append(" fill=\"none\"")
+            null -> {
+                val fill = resolveColor(style.fillColor)
+                if (fill == null) {
+                    sb.append(" fill=\"none\"")
+                } else {
+                    sb.append(" fill=\"").append(fill.hex).append('"')
+                    val opacity = fill.opacity * (style.fillAlpha ?: 1f)
+                    if (opacity < 1f) sb.append(" fill-opacity=\"").append(num(opacity)).append('"')
+                }
+            }
         }
         if (style.fillType.equals("evenOdd", ignoreCase = true)) {
             sb.append(" fill-rule=\"evenodd\"")
@@ -144,6 +168,99 @@ object VectorSvgWriter {
             }
         }
         sb.append("/>\n")
+    }
+
+    // ---- gradients ----
+
+    /** The resolved SVG fill for one path. */
+    private sealed interface FillRender {
+        /** Reference a `<defs>` gradient by id: `fill="url(#id)"`. */
+        data class Ref(val id: String) : FillRender
+        /** A flat color (used for a Solid fill or a sweep fallback). */
+        data class Solid(val hex: String, val opacity: Float) : FillRender
+        /** Explicitly no fill. */
+        data object None : FillRender
+    }
+
+    /** The collected `<defs>` body plus the per-path fill resolution. */
+    private class GradientPlan(
+        val defs: String,
+        val byPathId: Map<String, FillRender>,
+    )
+
+    /**
+     * Walks every path once (document order), emitting a `<linearGradient>` /
+     * `<radialGradient>` into `<defs>` for each gradient fill and mapping the path
+     * to its `url(#…)` reference. Solid fills resolve inline; sweep gradients have
+     * no SVG primitive, so they fall back to the first stop color with an
+     * [VectorWarning.Codes.SVG_GRADIENT_UNSUPPORTED] warning.
+     */
+    private fun buildGradientPlan(
+        document: VectorDocument,
+        warnings: MutableList<VectorWarning>,
+    ): GradientPlan {
+        val defs = StringBuilder()
+        val byPathId = HashMap<String, FillRender>()
+        var seq = 0
+        val gpad = INDENT.repeat(2)
+        val spad = INDENT.repeat(3)
+        for (path in document.allPaths()) {
+            when (val fill = path.style.fill) {
+                null -> {}
+                is VectorFill.Solid -> {
+                    val resolved = resolveColor(fill.color)
+                    byPathId[path.id] = if (resolved == null) {
+                        FillRender.None
+                    } else {
+                        FillRender.Solid(resolved.hex, resolved.opacity * (fill.alpha ?: 1f))
+                    }
+                }
+                is VectorFill.Sweep -> {
+                    warnings += VectorWarning(
+                        VectorWarning.Codes.SVG_GRADIENT_UNSUPPORTED,
+                        "Sweep gradient has no SVG equivalent; exported as the first stop color.",
+                        path.id,
+                    )
+                    val first = fill.stops.firstOrNull()?.let { resolveColor(it.color) }
+                    byPathId[path.id] = if (first == null) FillRender.None
+                    else FillRender.Solid(first.hex, first.opacity)
+                }
+                is VectorFill.Linear -> {
+                    val id = "grad${seq++}"
+                    defs.append(gpad).append("<linearGradient id=\"").append(id)
+                        .append("\" gradientUnits=\"userSpaceOnUse\"")
+                        .append(" x1=\"").append(num(fill.x1)).append('"')
+                        .append(" y1=\"").append(num(fill.y1)).append('"')
+                        .append(" x2=\"").append(num(fill.x2)).append('"')
+                        .append(" y2=\"").append(num(fill.y2)).append("\">\n")
+                    appendStops(defs, fill.stops, spad)
+                    defs.append(gpad).append("</linearGradient>\n")
+                    byPathId[path.id] = FillRender.Ref(id)
+                }
+                is VectorFill.Radial -> {
+                    val id = "grad${seq++}"
+                    defs.append(gpad).append("<radialGradient id=\"").append(id)
+                        .append("\" gradientUnits=\"userSpaceOnUse\"")
+                        .append(" cx=\"").append(num(fill.cx)).append('"')
+                        .append(" cy=\"").append(num(fill.cy)).append('"')
+                        .append(" r=\"").append(num(fill.radius)).append("\">\n")
+                    appendStops(defs, fill.stops, spad)
+                    defs.append(gpad).append("</radialGradient>\n")
+                    byPathId[path.id] = FillRender.Ref(id)
+                }
+            }
+        }
+        return GradientPlan(defs.toString(), byPathId)
+    }
+
+    private fun appendStops(sb: StringBuilder, stops: List<GradientStop>, pad: String) {
+        for (stop in stops) {
+            val c = resolveColor(stop.color) ?: SvgColor("#000000", 0f)
+            sb.append(pad).append("<stop offset=\"").append(num(stop.offset))
+                .append("\" stop-color=\"").append(c.hex).append('"')
+            if (c.opacity < 1f) sb.append(" stop-opacity=\"").append(num(c.opacity)).append('"')
+            sb.append("/>\n")
+        }
     }
 
     /**

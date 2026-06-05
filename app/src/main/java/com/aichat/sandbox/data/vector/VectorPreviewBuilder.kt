@@ -96,5 +96,6 @@ object VectorPreviewBuilder {
         strokeLineCap = strokeLineCap,
         strokeLineJoin = strokeLineJoin,
         fillType = fillType,
+        fill = fill,
     )
 }
