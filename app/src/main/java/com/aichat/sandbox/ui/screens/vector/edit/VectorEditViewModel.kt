@@ -85,6 +85,10 @@ class VectorEditViewModel @Inject constructor() : ViewModel() {
     fun booleanOp(kind: BoolOpKind) = dispatch(VectorEditAction.BooleanOp(kind))
     fun outlineStroke() = dispatch(VectorEditAction.OutlineStroke)
     fun offsetPath(delta: Float) = dispatch(VectorEditAction.OffsetPath(delta))
+    fun toggleKeyline() = dispatch(VectorEditAction.ToggleKeyline)
+    fun setPixelSnap(enabled: Boolean) = dispatch(VectorEditAction.SetPixelSnap(enabled))
+    fun setOpticalAdjust(target: com.aichat.sandbox.data.vector.IconTarget, adjust: com.aichat.sandbox.data.vector.OpticalAdjust) =
+        dispatch(VectorEditAction.SetOpticalAdjust(target, adjust))
     fun undo() = dispatch(VectorEditAction.Undo)
     fun redo() = dispatch(VectorEditAction.Redo)
     fun applyToDocument() = dispatch(VectorEditAction.ApplyToDocument)

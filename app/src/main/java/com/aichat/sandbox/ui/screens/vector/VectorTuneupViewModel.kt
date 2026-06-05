@@ -795,6 +795,23 @@ class VectorTuneupViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Phase 3 — render and share a multi-size icon set (`.zip`) from the node
+     * editor's current geometry. The geometry/serialization is the pure
+     * [com.aichat.sandbox.data.vector.IconSetExporter]; this only adds the file/URI
+     * plumbing and surfaces the result as a shareable export event.
+     */
+    fun exportIconSet(spec: com.aichat.sandbox.data.vector.IconSetExporter.Spec) {
+        viewModelScope.launch {
+            runCatching { exporter.exportIconSet("vector-icons", spec) }
+                .onSuccess { uri -> emit(VectorTuneupEvent.ExportReady(uri, "application/zip")) }
+                .onFailure { t ->
+                    Log.w(TAG, "Icon set export failed", t)
+                    emit(VectorTuneupEvent.ShowMessage("Icon set could not be exported."))
+                }
+        }
+    }
+
     /** Serializes the current project's versions into a portable JSON bundle. */
     private fun buildBundleJson(): String {
         val state = _uiState.value

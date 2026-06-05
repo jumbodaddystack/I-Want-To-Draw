@@ -156,9 +156,34 @@ Build in this order (each step is shippable + testable on its own):
 - [ ] On-device manual verify (select 2 subpaths → Union/Subtract/Intersect/Exclude; Outline a stroked path;
   Offset ±; undo/redo each; Done → new version exports + re-imports) — headless build env can't do this.
 
-### Phase 3 — pixel-perfect pipeline — ⬜ NOT STARTED
-- [ ] Per `phase-3-pixel-perfect-pipeline.md`: keyline grids, integer-grid snap
-  (`EditSnap`), multi-size artboards, grid-quantized lossless + batch export, tests.
+### Phase 3 — pixel-perfect pipeline — 🟢 NEARLY COMPLETE (code-complete → only on-device manual verify left)
+- [x] Pure `data/vector/KeylineGrid.kt` — `KeylineShape`, `KeylineGrid` (`safeZone`/`keylineLines`/
+  `shapeFigures` with a sealed `Figure` = `Line`/`Circle`/`RoundRect`), `KeylinePresets.MATERIAL_24`/
+  `forViewport`. Every figure derives off `edge` by ratio (48-grid = 24-grid ×2).
+- [x] Pure `data/vector/VectorQuantizer.kt` — `mapCoordinates(doc, fn)` (separable per-axis walker,
+  re-emits `pathData`, passes unparsed paths verbatim) + `quantize(doc, step=1f)` (round-to-grid,
+  clamp into viewport, idempotent, kind-preserving).
+- [x] Pure `data/vector/IconSizeSet.kt` — `IconTarget(24/48/108)`, `OpticalAdjust(scale, paddingOverride)`,
+  `IconSizeSet.derive`/`deriveAll` (uniform scale of viewport+coords + optical scale about centre +
+  `strokeWidth` tracking).
+- [x] Pure `data/vector/IconSetExporter.kt` — `Format(VD/SVG)`, `Spec`, `Artifact`, `exportSet(spec, baseName)`
+  + `exportBatch` (derive→quantize→serialize through the existing writers, lossless).
+- [x] Pure `ui/components/notes/EditSnap.kt` — `MASK_PIXEL=0x8` + `quantize`/`quantizeInBounds`
+  (unconditional integer-grid snap, reuses `Snap.SnapResult`).
+- [x] Reducer/state/action: `VectorEditState` gained `keyline`/`sizeSet`; actions `ToggleKeyline`/
+  `SetPixelSnap`/`SetOpticalAdjust`; pixel-snap is the final step in `PlaceAnchor` (via `snap()`) and
+  single-anchor `MoveSelection`. VM pass-throughs added.
+- [x] UI: `KeylineOverlay.kt` (DrawScope ext, drawn under the anchor overlay in `VectorEditCanvas`),
+  `MultiSizePreviewStrip.kt` (reuses `VectorPreviewCanvas`), `IconExportPanel.kt` (size/format/quantize
+  → `IconSetExporter.Spec`). `VectorEditScreen` adds Pixel/Keyline snap chips, a size-preview toggle, and
+  an export `ModalBottomSheet`; wired through Tune-Up `NodeEditorHost` → `VectorTuneupViewModel.exportIconSet`.
+- [x] `data/vector/VectorTuneupExporter.exportIconSet(name, spec)` — zips every `Artifact` into one
+  shareable `.zip` (mirrors `exportBundle`).
+- [x] Tests: `KeylineGridTest` (5), `VectorQuantizerTest` (5), `IconSizeSetTest` (5), `IconSetExporterTest` (5),
+  `EditSnapTest` (4), `VectorEditReducerPixelSnapTest` (7) → **31 new, green**. `:app:assembleDebug` clean;
+  `*.edit.*` now **103** (96 + 7).
+- [ ] On-device manual verify (toggle keyline overlay; pixel-snap a drawn anchor onto integers; size-preview
+  strip updates live; export a 24/48/108 × VD/SVG `.zip` and re-import) — headless build env can't do this.
 
 ### Phase 4 — unify the two domains — ⬜ NOT STARTED
 - [ ] Per `phase-4-unify-domains.md`: notes-bridge vectorization, single canonical
@@ -172,15 +197,71 @@ Build in this order (each step is shippable + testable on its own):
 
 ## 3. Latest handoff (update this each session)
 
-**Last updated:** 2026-06-04 · **Last completed:** Phase 2 (boolean ops + outline-stroke + offset)
+**Last updated:** 2026-06-05 · **Last completed:** Phase 3 (pixel-perfect icon production pipeline)
 
-**State of the branch:** Phase 0 + 1a–1f are merged to main (through PR #95). Phase **2** is on
-`claude/vector-roadmap-next-phase-HYi8t`. `:app:assembleDebug` builds clean; `*.edit.*` tests are
-green at **96** (62 Phase 1 + 34 Phase 2). No PR open. **Shape algebra is now in:** a pure
-`data/vector/edit/boolean/` module does union/subtract/intersect/exclude on selected subpaths,
-outline-stroke, and inset/outset, all wired into the node editor reducer + toolbar and persisting
-through the existing version pipeline. The only remaining Phase 2 item is on-device manual verify
-(headless env can't do it). Phases 3/4/5 can now start (all build on the Phase 1 editable model).
+**State of the branch:** Phase 0 + 1 merged to main (PR #95); Phase **2** merged to main (PR #96).
+Phase **3** is on `claude/vector-roadmap-next-phase-B0Mwt`. `:app:assembleDebug` builds clean; the full
+JVM suite is green apart from the **known** ~21 `data/notes` `NoteRasterizer`/`Color`/`Log` "not mocked"
+failures (`NoteRasterizerTest`/`NoteSvgExporterTest`/`NoteVectorDrawableExporterTest`/`NoteAiServiceTest` —
+present on a clean checkout). `*.edit.*` is green at **103** (96 + 7 new pixel-snap reducer tests), plus
+**24** new pure tests under `data/vector/` + `ui/components/notes/`. No PR open. **Production pipeline is
+now in:** Material keyline overlay + integer/pixel-grid snap + synchronized 24/48/108 multi-size artboards
++ a lossless grid-quantized icon-set exporter (VD/SVG, single & batch), all pure-JVM cores wired into the
+node editor and persisting/exporting through the existing plumbing. The only remaining Phase 3 item is
+on-device manual verify. Phases 4/5 can now start (both build on the Phase 1 editable model; Phase 4 can
+reuse the Phase 3 quantizer/exporter for its lossless export).
+
+**Phase 3 — what exists now (for the next session to build on):**
+- *(NEW, pure JVM — no Android imports)* `data/vector/`:
+  - `KeylineGrid.kt` — `enum KeylineShape`, `data class KeylineGrid(edge=24, padding=1, shapes)` with a
+    sealed `Figure` (`Line`/`Circle`/`RoundRect`). `safeZone()` = viewport inset by `padding`;
+    `keylineLines()` = 4 safe-zone edges + centre cross; `shapeFigures()` = the selected keyline shapes.
+    Standard Material sizes on `edge=24`: square live 18 (inset 3), circle Ø 20, vert-rect 16×20,
+    horiz-rect 20×16, rounded-square corner 2. `object KeylinePresets { MATERIAL_24; forViewport(vp) }`
+    (scales edge + padding by `viewportWidth/24`).
+  - `VectorQuantizer.kt` — `object`. `mapCoordinates(doc, fn)` walks every path's `commands` through a
+    **separable per-axis** `fn` (probes `H`/`V` on their single axis with a `0` placeholder), re-emits
+    `pathData` from the mapped commands, and passes null-`commands` (unparsed) paths through verbatim.
+    `quantize(doc, step=1f)` rounds every coord to the nearest multiple of `step` and clamps into the
+    viewport box — idempotent, command-kind-preserving. `step = viewportWidth/dp` for a device-pixel grid.
+  - `IconSizeSet.kt` — `enum IconTarget(dp)` (24/48/108), `data class OpticalAdjust(scale=1, paddingOverride?)`,
+    `data class IconSizeSet(master, targets, adjust)`. `derive(target)`: new `T×T` viewport, every coord
+    `c → center + (c·(T/E) − center)·s` (uniform scale + optical scale about centre), `strokeWidth ×= (T/E)·s`.
+    `deriveAll()` → `Map<IconTarget, VectorDocument>`. Reuses `VectorQuantizer.mapCoordinates`.
+  - `IconSetExporter.kt` — `object`. `enum Format(extension)` (`ANDROID_VECTOR_DRAWABLE`/`SVG`),
+    `data class Spec(sizes, formats, quantize=true)`, `data class Artifact(target, format, filename, content)`.
+    `exportSet(spec, baseName="icon")` derives each target → quantizes (if `Spec.quantize`) → serializes via
+    the **existing** `AndroidVectorDrawableWriter`/`VectorSvgWriter` (lossless, deterministic order:
+    targets then `Format.entries`). `exportBatch(name→spec)` flattens many masters. Filenames `${baseName}_${dp}.${ext}`.
+- *(NEW, pure)* `ui/components/notes/EditSnap.kt` — `object`, `const MASK_PIXEL=0x8`, `quantize(x,y,step=1f)`
+  (unconditional round, reuses `Snap.SnapResult`), `quantizeInBounds(x,y,bounds,step=1f)` (quantize then
+  clamp into `[minX,minY,maxX,maxY]`). Sibling of `Snap`, not a modification of it.
+- *(MODIFIED)* `ui/screens/vector/edit/`:
+  - `VectorEditState.kt` — `+ keyline: KeylineGrid?`, `+ sizeSet: IconSizeSet?` (neither is part of the undo
+    `snapshot()` — both are view/config, not undoable geometry).
+  - `VectorEditAction.kt` — `+ object ToggleKeyline`, `+ data class SetPixelSnap(enabled)`,
+    `+ data class SetOpticalAdjust(target, adjust)`.
+  - `VectorEditReducer.kt` — handlers for the three; `snap()` (used by `PlaceAnchor`) runs
+    `EditSnap.quantizeInBounds` as the **final** step when `MASK_PIXEL` is set (clamped to `viewportBounds`);
+    single-anchor `MoveSelection` likewise grid- then pixel-snaps. `ToggleKeyline`/`SetOpticalAdjust` are
+    non-undoable (no master geometry change); `SetOpticalAdjust` lazily creates `IconSizeSet(master=document)`.
+  - `VectorEditViewModel.kt` — pass-throughs `toggleKeyline()`/`setPixelSnap(enabled)`/`setOpticalAdjust(target, adjust)`.
+    **(VM ctor is still no-arg `@Inject` — do NOT inject the exporter here; it would break the Robolectric-free
+    `VectorEditViewModelTest`. Export is hoisted to the Tune-Up VM instead.)**
+  - `KeylineOverlay.kt` *(NEW)* — `DrawScope.drawKeylineOverlay(keyline, viewport, …)`; `VectorEditCanvas`
+    draws it (world→screen via the same `ViewportController`) beneath the anchor overlay; canvas gained
+    `keylineLineColor`/`keylineShapeColor`.
+  - `MultiSizePreviewStrip.kt` *(NEW)* — renders `IconSizeSet.deriveAll()` thumbnails via `VectorPreviewCanvas`.
+  - `IconExportPanel.kt` *(NEW)* — size/format/quantize chips → builds an `IconSetExporter.Spec` → `onExport`.
+  - `VectorEditScreen.kt` — snap row gained **Pixel** + **Keyline** chips; top bar gained a size-preview
+    toggle (shows `MultiSizePreviewStrip` above the toolbar) and an export button (opens a `ModalBottomSheet`
+    hosting `IconExportPanel`). New `onExportIconSet: (Spec)->Unit` screen param; the preview/export master
+    is the document with the live editing path folded in (`currentMaster`).
+- *(MODIFIED)* `data/vector/VectorTuneupExporter.kt` — `suspend exportIconSet(name, spec)` runs
+  `IconSetExporter.exportSet` and **zips** every artifact into one `.zip` (atomic `.tmp`→rename + prune,
+  `"zip"` added to `MANAGED_EXTENSIONS`). `ui/screens/vector/VectorTuneupViewModel.kt` — `exportIconSet(spec)`
+  (viewModelScope, emits `ExportReady(uri, "application/zip")`); `NodeEditorHost` passes
+  `onExportIconSet = { tuneupViewModel.exportIconSet(it) }`.
 
 **Phase 2 — what exists now (for the next session to build on):**
 - *(NEW)* `data/vector/edit/boolean/` — **pure JVM, no Android imports** (unit-tested like the
@@ -315,16 +396,39 @@ through the existing version pipeline. The only remaining Phase 2 item is on-dev
   bounded clamp), `Snap` (`MASK_GRID/ANGLE/ENDPOINT`, all pure — reducer imports it and
   stays JVM-clean), `VectorPreviewCanvas` internals.
 
-**→ NEXT ACTION:** Phase 2 is code-complete. Options for the next session:
-1. **On-device manual verify** of Phases 1 + 2 (the only open checkboxes) — needs an emulator/device
-   (headless env can't). Phase-2 flow: Tune-Up → EDIT tab → **Edit nodes** on a path with 2 overlapping
-   subpaths → **Select**, tap an anchor in each subpath → **Union / Subtract / Intersect / Exclude** →
-   confirm one editable result whose anchors drag. Outline a stroked path; Offset ±. Undo/redo each.
-   **Done** → new version → **Export** to VectorDrawable + SVG and re-import.
-2. **Start Phase 3** (pixel-perfect pipeline) per `phase-3-pixel-perfect-pipeline.md`, or **Phase 4/5** —
-   all build on the now-complete Phase 1 editable model + Phase 2 algebra.
+**→ NEXT ACTION:** Phase 3 is code-complete. Options for the next session:
+1. **On-device manual verify** of Phases 1 + 2 + 3 (the only open checkboxes) — needs an emulator/device
+   (headless env can't). Phase-3 flow: Tune-Up → EDIT tab → **Edit nodes** → toolbar **Keyline** toggles the
+   Material overlay; **Pixel** snap + draw/drag an anchor → it lands on integers inside the artboard; top-bar
+   size-preview toggle shows the 24/48/108 strip updating live; top-bar export → pick sizes/formats/quantize
+   → **Export (.zip)** → share sheet → unzip + re-import each VD/SVG.
+2. **Start Phase 4** (unify domains) or **Phase 5** (production polish) — both build on the Phase 1 editable
+   model; Phase 4's "lossless export" can reuse the Phase 3 `VectorQuantizer`/`IconSetExporter` directly.
 
-**Watch-outs for next session (Phase 2):**
+**Watch-outs for next session (Phase 3):**
+- **`VectorEditViewModel` must stay no-arg-injectable.** Export was deliberately NOT plumbed through the edit
+  VM (that would need an injected `VectorTuneupExporter` + coroutine and break `VectorEditViewModelTest`'s
+  Robolectric-free construction). It is hoisted: screen `onExportIconSet` callback → `NodeEditorHost` →
+  `VectorTuneupViewModel.exportIconSet`. Keep export plumbing on the Tune-Up VM side.
+- **"Lossless" depends on absolute, already-cubic geometry** (Phase 1 guarantees it on edit-entry). The
+  quantizer rounds *before* serialization and the `exported_vector_drawable_reimports_geometry_stable` test is
+  the guardrail. `VectorQuantizer.mapCoordinates` assumes a **separable per-axis** transform (true for scale +
+  grid-quantize); `H`/`V` recover their axis by probing `fn` with a `0` on the other axis. **ArcTo radii are
+  left intact** (out of scope) — only the arc endpoint is mapped. Relative commands are mapped coord-by-coord,
+  which is only correct for editor output (all-absolute); a doc full of relative deltas would mis-quantize.
+- **Optical adjust is manual-only** (a per-size uniform `scale` about centre + `paddingOverride`). No shape-aware
+  auto-trim — that's explicitly out of scope and would re-introduce non-determinism into a deterministic export.
+  `paddingOverride` is carried in `OpticalAdjust` but only the keyline overlay consumes it; `derive` ignores it.
+- **Keyline `padding` is a tunable** (Material 1dp keyline vs. live-area inset is easy to get visually wrong).
+  `KeylinePresets.MATERIAL_24` pins `padding=1`; `KeylineGridTest` pins the exact derived rects so a designer
+  tweaks one constant. `forViewport` scales padding too, so a 48 grid is a clean ×2.
+- **Export emits a `.zip`** (one entry per `target×format`), surfaced as `ExportReady(uri, "application/zip")`.
+  `IconSetExporter` is pure (no Android I/O) and re-parseable, so extend it with JVM tests; the zip/URI step is
+  the only Android-coupled part. Filenames are `${baseName}_${dp}.${ext}`.
+- Re-run `*.edit.*` + the new `data/vector/` Phase 3 tests after each step; keep them green (currently **103**
+  edit + **24** pure). The known ~21 `data/notes` `NoteRasterizer` "not mocked" failures are unrelated.
+
+**Watch-outs carried over (Phase 2):**
 - **Clipper choice / deviation:** the plan recommended Martinez–Rueda; I shipped an **arrangement +
   boundary-classification** clipper instead (O(n²) all-pairs split, then per-edge winding sampling,
   then DCEL contour chaining). It is robust on the degenerate cases (shared/collinear/coincident edges,
@@ -453,3 +557,38 @@ Keep this file the *only* thing a fresh session must read to be oriented.
   PathOffset` — all delivered; added `PolygonClipper.selfUnion` and `PathFlattener.flattenCenterline` (not
   named in the plan but minimal). `VectorEditState` needed no transient-message field (no-ops just return
   state unchanged), so it was left untouched.
+
+### Phase 3 — pixel-perfect icon production pipeline (2026-06-05)
+- **Shipped:** four pure `data/vector/` modules (`KeylineGrid` + `KeylinePresets`, `VectorQuantizer`,
+  `IconSizeSet`, `IconSetExporter`) and a pure `ui/components/notes/EditSnap` (`MASK_PIXEL` + quantizers),
+  wired into the Phase 1 editor: `VectorEditState`/`Action`/`Reducer` gained keyline/pixel-snap/optical-adjust;
+  `KeylineOverlay` draws on the canvas; `MultiSizePreviewStrip` + `IconExportPanel` + new screen chips/toggles;
+  and a `.zip` icon-set export through `VectorTuneupExporter.exportIconSet` ⇄ `VectorTuneupViewModel.exportIconSet`
+  ⇄ `NodeEditorHost`. **31 new JVM tests green (24 pure `data/vector`+`EditSnap` + 7 reducer); `*.edit.*` now 103;
+  `:app:assembleDebug` clean.**
+- **Key decisions:**
+  1. **Quantize-on-export, not resample.** Editor geometry is already vector, so the production pass is a pure
+     round-to-grid in the model (`VectorQuantizer.quantize`) + serialization through the *existing* writers — the
+     `exported_vector_drawable_reimports_geometry_stable` test pins losslessness against the real parser.
+  2. **Multi-size = pure uniform scale + manual optical hook.** `IconSizeSet.derive` scales viewport+coords+stroke
+     from the master edge to each target and applies a per-size `OpticalAdjust.scale` about the centre; no automatic,
+     shape-aware trimming (keeps the export deterministic). `deriveAll` feeds both the preview strip and the exporter.
+  3. **`EditSnap` is a sibling, not a `Snap` edit.** A new `MASK_PIXEL=0x8` bit + unconditional quantizers, applied
+     by the reducer as the *final* snap step (after the magnetic `Snap.*` steps), clamped into the artboard.
+  4. **Export hoisted off the edit VM.** To keep `VectorEditViewModel` no-arg-injectable (Robolectric-free test), the
+     `.zip` export is a callback → Tune-Up VM, mirroring how Phase 1f hoisted persistence.
+  5. **`KeylineGrid` is pure geometry shared by overlay + (future) snapper**, expressed on a `24`-normalized edge so
+     every figure scales by ratio; `forViewport` produces the 48/108 grids as clean multiples.
+- **Verified:** 31 JVM tests — keyline rect/circle/corner/cross derivations + `forViewport` ×2; quantize
+  integer-landing / idempotence / viewport-clamp / kind-preservation / unparsed-passthrough / device-pixel step;
+  size derivation 24-identity/48-double/108-ratio/optical-about-centre/`deriveAll`; exporter count/geometry-stable
+  re-import/integer-only-coords/VD≡SVG/batch-well-formed; `EditSnap` round/bounds/idempotent/step; reducer
+  pixel-snap place+move+clamp, snap-bit toggle, keyline toggle, optical-adjust-without-touching-master.
+  Compile + assemble clean.
+- **Not yet verified:** on-device manual interaction (headless build env) — the one open Phase 3 checkbox.
+- **Deviation from plan:** dropped the optional `data/notes/IconSetExportParityTest` contrast fixture — the
+  `IconSetExporterTest.exported_vector_drawable_reimports_geometry_stable` test already proves the lossless path,
+  and a parity test would needlessly couple to the Android-`Context`-bound lossy `NoteVectorDrawableExporter`.
+  `KeylineGrid.shapeFigures()` returns a sealed `List<Figure>` instead of the plan's sketched `List<Any>` (cleaner,
+  test-inspectable). Added `exportSet`'s optional `baseName` param + `VectorTuneupExporter.exportIconSet`'s zip
+  packaging (the plan said "zip/dir") and a `"zip"` managed-extension; all minimal, none anticipated verbatim.

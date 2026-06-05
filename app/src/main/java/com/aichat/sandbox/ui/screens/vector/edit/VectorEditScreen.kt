@@ -15,6 +15,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.PhotoSizeSelectLarge
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -28,6 +30,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -35,6 +40,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.aichat.sandbox.data.vector.edit.AnchorType
 import com.aichat.sandbox.data.vector.edit.EditAnchor
 import com.aichat.sandbox.data.vector.edit.EditSubpath
+import com.aichat.sandbox.data.vector.upsertPath
+import com.aichat.sandbox.ui.components.notes.EditSnap
 import com.aichat.sandbox.ui.components.notes.Snap
 
 /** Navigation route for the standalone node editor. */
@@ -66,10 +73,16 @@ const val ROUTE_VECTOR_EDIT = "vector-edit"
 fun VectorEditScreen(
     onNavigateBack: () -> Unit = {},
     onDone: () -> Unit = {},
+    onExportIconSet: (com.aichat.sandbox.data.vector.IconSetExporter.Spec) -> Unit = {},
     viewModel: VectorEditViewModel = hiltViewModel(),
 ) {
     com.aichat.sandbox.ui.theme.studio.StudioTheme(dark = isSystemInDarkTheme()) {
-        VectorEditScreenContent(onNavigateBack = onNavigateBack, onDone = onDone, viewModel = viewModel)
+        VectorEditScreenContent(
+            onNavigateBack = onNavigateBack,
+            onDone = onDone,
+            onExportIconSet = onExportIconSet,
+            viewModel = viewModel,
+        )
     }
 }
 
@@ -78,9 +91,20 @@ fun VectorEditScreen(
 private fun VectorEditScreenContent(
     onNavigateBack: () -> Unit,
     onDone: () -> Unit,
+    onExportIconSet: (com.aichat.sandbox.data.vector.IconSetExporter.Spec) -> Unit,
     viewModel: VectorEditViewModel,
 ) {
     val state by viewModel.state.collectAsState()
+    var showSizes by remember { mutableStateOf(false) }
+    var showExport by remember { mutableStateOf(false) }
+
+    // The master for previews/export = the document with the in-progress edit folded
+    // in, so size thumbnails and exports reflect uncommitted geometry.
+    val master = remember(state.document, state.editing) { currentMaster(state) }
+    val baseSizeSet = remember(master, state.sizeSet) {
+        state.sizeSet?.copy(master = master)
+            ?: com.aichat.sandbox.data.vector.IconSizeSet(master = master)
+    }
 
     Scaffold(
         topBar = {
@@ -92,6 +116,12 @@ private fun VectorEditScreenContent(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showSizes = !showSizes }) {
+                        Icon(Icons.Filled.PhotoSizeSelectLarge, contentDescription = "Toggle size previews")
+                    }
+                    IconButton(onClick = { showExport = true }) {
+                        Icon(Icons.Filled.Download, contentDescription = "Export icon set")
+                    }
                     IconButton(onClick = viewModel::undo, enabled = state.canUndo) {
                         Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
                     }
@@ -107,7 +137,14 @@ private fun VectorEditScreenContent(
                 },
             )
         },
-        bottomBar = { EditToolbar(state = state, viewModel = viewModel) },
+        bottomBar = {
+            Column {
+                if (showSizes) {
+                    MultiSizePreviewStrip(sizeSet = baseSizeSet, modifier = Modifier.fillMaxWidth())
+                }
+                EditToolbar(state = state, viewModel = viewModel)
+            }
+        },
     ) { padding ->
         Box(
             modifier = Modifier
@@ -127,6 +164,25 @@ private fun VectorEditScreenContent(
             )
         }
     }
+
+    if (showExport) {
+        androidx.compose.material3.ModalBottomSheet(onDismissRequest = { showExport = false }) {
+            IconExportPanel(
+                baseSizeSet = baseSizeSet,
+                onExport = { spec ->
+                    onExportIconSet(spec)
+                    showExport = false
+                },
+            )
+        }
+    }
+}
+
+/** The document with the live editing path folded in (for previews + export). */
+private fun currentMaster(state: VectorEditState): com.aichat.sandbox.data.vector.VectorDocument {
+    val editing = state.editing ?: return state.document
+    val path = com.aichat.sandbox.data.vector.edit.EditablePathSerializer.toVectorPath(editing)
+    return state.document.upsertPath(editing.pathId, path)
 }
 
 /**
@@ -274,6 +330,17 @@ private fun EditToolbar(state: VectorEditState, viewModel: VectorEditViewModel) 
                 SnapChip("Grid", Snap.MASK_GRID, state, viewModel)
                 SnapChip("Angle", Snap.MASK_ANGLE, state, viewModel)
                 SnapChip("Endpoint", Snap.MASK_ENDPOINT, state, viewModel)
+                // Pixel snap quantizes onto the integer icon grid (Phase 3).
+                FilterChip(
+                    selected = state.snapMask and EditSnap.MASK_PIXEL != 0,
+                    onClick = { viewModel.setPixelSnap(state.snapMask and EditSnap.MASK_PIXEL == 0) },
+                    label = { Text("Pixel") },
+                )
+                FilterChip(
+                    selected = state.keyline != null,
+                    onClick = { viewModel.toggleKeyline() },
+                    label = { Text("Keyline") },
+                )
             }
         }
     }

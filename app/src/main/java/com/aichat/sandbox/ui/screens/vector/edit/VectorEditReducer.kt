@@ -1,5 +1,7 @@
 package com.aichat.sandbox.ui.screens.vector.edit
 
+import com.aichat.sandbox.data.vector.IconSizeSet
+import com.aichat.sandbox.data.vector.KeylinePresets
 import com.aichat.sandbox.data.vector.VectorPath
 import com.aichat.sandbox.data.vector.VectorStyle
 import com.aichat.sandbox.data.vector.allPaths
@@ -12,6 +14,7 @@ import com.aichat.sandbox.data.vector.edit.EditablePathFactory
 import com.aichat.sandbox.data.vector.edit.EditablePathSerializer
 import com.aichat.sandbox.data.vector.edit.boolean.PathBoolean
 import com.aichat.sandbox.data.vector.upsertPath
+import com.aichat.sandbox.ui.components.notes.EditSnap
 import com.aichat.sandbox.ui.components.notes.Snap
 import kotlin.math.hypot
 
@@ -57,6 +60,10 @@ class VectorEditReducer {
             is VectorEditAction.BooleanOp -> booleanOp(state, action.kind)
             is VectorEditAction.OutlineStroke -> outlineStroke(state)
             is VectorEditAction.OffsetPath -> offsetPath(state, action.delta)
+
+            is VectorEditAction.ToggleKeyline -> toggleKeyline(state)
+            is VectorEditAction.SetPixelSnap -> setPixelSnap(state, action.enabled)
+            is VectorEditAction.SetOpticalAdjust -> setOpticalAdjust(state, action.target, action.adjust)
 
             is VectorEditAction.Undo -> undo(state)
             is VectorEditAction.Redo -> redo(state)
@@ -149,18 +156,26 @@ class VectorEditReducer {
         if (state.selection.isEmpty) return state
         var adjDx = dx
         var adjDy = dy
-        // When a single anchor is dragged onto the grid, latch it (the multi-select
-        // case is ambiguous, so it translates verbatim).
-        if (state.snapMask and Snap.MASK_GRID != 0 && state.selection.size == 1) {
+        // When a single anchor is dragged, latch it to the grid / pixel grid (the
+        // multi-select case is ambiguous, so it translates verbatim). Pixel-grid is
+        // unconditional and applied last so the dragged anchor lands on integers.
+        if (state.selection.size == 1) {
             val a = editing.subpaths.firstNotNullOfOrNull { sp ->
                 sp.anchors.firstOrNull { it.id in state.selection.anchorIds }
             }
             if (a != null) {
-                val r = Snap.snapToGrid(a.x + dx, a.y + dy)
-                if (r.snapped) {
-                    adjDx = r.x - a.x
-                    adjDy = r.y - a.y
+                var tx = a.x + dx
+                var ty = a.y + dy
+                if (state.snapMask and Snap.MASK_GRID != 0) {
+                    val r = Snap.snapToGrid(tx, ty)
+                    if (r.snapped) { tx = r.x; ty = r.y }
                 }
+                if (state.snapMask and EditSnap.MASK_PIXEL != 0) {
+                    val r = EditSnap.quantizeInBounds(tx, ty, viewportBounds(state))
+                    tx = r.x; ty = r.y
+                }
+                adjDx = tx - a.x
+                adjDy = ty - a.y
             }
         }
         val moved = editing.mapAnchors { a ->
@@ -354,6 +369,35 @@ class VectorEditReducer {
         )
     }
 
+    // ---- Phase 3: pixel-perfect production ----
+
+    /** Toggle the keyline overlay, deriving it from the document viewport when on. */
+    private fun toggleKeyline(state: VectorEditState): VectorEditState =
+        state.copy(
+            keyline = if (state.keyline == null) KeylinePresets.forViewport(state.document.viewport) else null,
+        )
+
+    /** Set or clear the integer/pixel-grid snap bit without disturbing the other masks. */
+    private fun setPixelSnap(state: VectorEditState, enabled: Boolean): VectorEditState =
+        state.copy(
+            snapMask = if (enabled) state.snapMask or EditSnap.MASK_PIXEL
+            else state.snapMask and EditSnap.MASK_PIXEL.inv(),
+        )
+
+    /**
+     * Record a manual optical adjustment for [target]. Creates the size set from the
+     * current document on first use; only the derived previews/export change, so the
+     * master document and the editing slice are left untouched (not undoable).
+     */
+    private fun setOpticalAdjust(
+        state: VectorEditState,
+        target: com.aichat.sandbox.data.vector.IconTarget,
+        adjust: com.aichat.sandbox.data.vector.OpticalAdjust,
+    ): VectorEditState {
+        val base = state.sizeSet ?: IconSizeSet(master = state.document)
+        return state.copy(sizeSet = base.copy(adjust = base.adjust + (target to adjust)))
+    }
+
     private fun BoolOpKind.toOp(): PathBoolean.Op = when (this) {
         BoolOpKind.UNION -> PathBoolean.Op.UNION
         BoolOpKind.SUBTRACT -> PathBoolean.Op.SUBTRACT
@@ -433,7 +477,20 @@ class VectorEditReducer {
                 sy = r.y
             }
         }
+        // Integer/pixel grid is the final, unconditional step: quantize onto the
+        // icon grid and clamp into the artboard so a placed anchor can't drift off.
+        if (mask and EditSnap.MASK_PIXEL != 0) {
+            val r = EditSnap.quantizeInBounds(sx, sy, viewportBounds(state))
+            sx = r.x
+            sy = r.y
+        }
         return sx to sy
+    }
+
+    /** The artboard world-rect `[0, 0, viewportWidth, viewportHeight]` for clamping. */
+    private fun viewportBounds(state: VectorEditState): FloatArray {
+        val vp = state.document.viewport
+        return floatArrayOf(0f, 0f, vp.viewportWidth, vp.viewportHeight)
     }
 
     /** Existing anchor termini (committed + draft) as `[x0, y0, x1, y1, …]` snap targets. */

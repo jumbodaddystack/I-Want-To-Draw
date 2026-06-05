@@ -1,5 +1,7 @@
 package com.aichat.sandbox.ui.screens.vector.edit
 
+import com.aichat.sandbox.data.vector.IconTarget
+import com.aichat.sandbox.data.vector.OpticalAdjust
 import com.aichat.sandbox.data.vector.edit.AnchorType
 
 /**
@@ -96,6 +98,25 @@ sealed interface VectorEditAction {
 
     /** Grow (positive) or shrink (negative) the editing path by [delta] world units. */
     data class OffsetPath(val delta: Float) : VectorEditAction
+
+    // ---- Phase 3: pixel-perfect production (overlay / snap / sizes) ----
+
+    /**
+     * Toggle the Material keyline-grid overlay. Turning it on derives the grid from
+     * the document viewport ([com.aichat.sandbox.data.vector.KeylinePresets.forViewport]);
+     * turning it off clears it. Overlay-only — not undoable, no geometry change.
+     */
+    object ToggleKeyline : VectorEditAction
+
+    /** Set the integer / pixel-grid snap bit ([com.aichat.sandbox.ui.components.notes.EditSnap.MASK_PIXEL]). */
+    data class SetPixelSnap(val enabled: Boolean) : VectorEditAction
+
+    /**
+     * Set the manual [OpticalAdjust] for [target] in the multi-size set (creating
+     * the set from the current document if needed). Adjusts only the derived
+     * previews/export — the master geometry is untouched, so it is not undoable.
+     */
+    data class SetOpticalAdjust(val target: IconTarget, val adjust: OpticalAdjust) : VectorEditAction
 
     // ---- history + write-back ----
 

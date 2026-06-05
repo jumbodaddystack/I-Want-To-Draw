@@ -713,5 +713,6 @@ private fun NodeEditorHost(
             }
             onClose()
         },
+        onExportIconSet = { spec -> tuneupViewModel.exportIconSet(spec) },
     )
 }

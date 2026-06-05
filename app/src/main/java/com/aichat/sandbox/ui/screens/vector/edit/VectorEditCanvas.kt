@@ -89,6 +89,8 @@ fun VectorEditCanvas(
     val anchorColor = MaterialTheme.colorScheme.onSurfaceVariant
     val handleColor = MaterialTheme.colorScheme.tertiary
     val anchorFillWhenIdle = MaterialTheme.colorScheme.surface
+    val keylineLineColor = MaterialTheme.colorScheme.outlineVariant
+    val keylineShapeColor = MaterialTheme.colorScheme.secondary
 
     val density = LocalDensity.current
     val anchorRadiusPx = with(density) { 5.dp.toPx() }
@@ -218,6 +220,17 @@ fun VectorEditCanvas(
             size = Size(vp.viewportWidth * scale, vp.viewportHeight * scale),
             style = Stroke(width = thinStrokePx),
         )
+
+        // Material keyline overlay (Phase 3), beneath the anchor overlay.
+        state.keyline?.let { keyline ->
+            drawKeylineOverlay(
+                keyline = keyline,
+                viewport = viewport,
+                lineColor = keylineLineColor,
+                shapeColor = keylineShapeColor,
+                strokeWidthPx = thinStrokePx * 0.7f,
+            )
+        }
 
         state.editing?.let { editing ->
             drawEditOverlay(

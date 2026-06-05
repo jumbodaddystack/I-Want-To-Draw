@@ -1,5 +1,7 @@
 package com.aichat.sandbox.ui.screens.vector.edit
 
+import com.aichat.sandbox.data.vector.IconSizeSet
+import com.aichat.sandbox.data.vector.KeylineGrid
 import com.aichat.sandbox.data.vector.VectorDocument
 import com.aichat.sandbox.data.vector.edit.EditAnchor
 import com.aichat.sandbox.data.vector.edit.EditablePath
@@ -29,8 +31,12 @@ data class VectorEditState(
     val selection: Selection = Selection(),
     /** A pen subpath being drawn but not yet committed into [editing]. */
     val pendingPen: PenDraft? = null,
-    /** Active snap targets — a bitmask of `Snap.MASK_*`. */
+    /** Active snap targets — a bitmask of `Snap.MASK_*` / `EditSnap.MASK_PIXEL`. */
     val snapMask: Int = 0,
+    /** Material keyline-grid overlay to draw, or null when the overlay is off (Phase 3). */
+    val keyline: KeylineGrid? = null,
+    /** Multi-size artboard set + per-size optical adjustments, or null until requested (Phase 3). */
+    val sizeSet: IconSizeSet? = null,
     /** Inverse snapshots for undo (most recent last), capped at ~200. */
     val undoStack: List<EditSnapshot> = emptyList(),
     /** Snapshots replayed by redo (most recent last). */

@@ -9,6 +9,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -67,6 +69,42 @@ class VectorTuneupExporter @Inject constructor(
         bundleJson: String,
     ): Uri = writeFile(baseName, bundleJson, VectorExportFormat.PROJECT_BUNDLE.extension)
 
+    /**
+     * Phase 3 — render a multi-size, multi-format icon set ([IconSetExporter.exportSet],
+     * lossless) and write every [IconSetExporter.Artifact] into a single shareable
+     * `.zip`. Each artifact becomes one zip entry under its generated filename. The
+     * geometry math is pure; this only adds the file/URI plumbing (mirrors
+     * [exportBundle]'s atomic `.tmp` → rename + prune). Runs on the IO dispatcher.
+     */
+    suspend fun exportIconSet(
+        baseName: String,
+        spec: IconSetExporter.Spec,
+    ): Uri = withContext(Dispatchers.IO) {
+        val artifacts = IconSetExporter.exportSet(spec, baseName = NoteExporter.sanitizeBaseName(baseName))
+        val dir = exportsDir().apply { if (!exists()) mkdirs() }
+        val safeBase = NoteExporter.sanitizeBaseName(baseName)
+        val outName = "$safeBase-${System.currentTimeMillis()}.zip"
+        val finalFile = File(dir, outName)
+        val tmpFile = File(dir, "$outName.tmp")
+        try {
+            ZipOutputStream(FileOutputStream(tmpFile)).use { zip ->
+                for (artifact in artifacts) {
+                    zip.putNextEntry(ZipEntry(artifact.filename))
+                    zip.write(artifact.content.toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                }
+            }
+            if (finalFile.exists()) finalFile.delete()
+            check(tmpFile.renameTo(finalFile)) {
+                "VectorTuneupExporter: rename ${tmpFile.name} → ${finalFile.name} failed"
+            }
+        } finally {
+            if (tmpFile.exists()) tmpFile.delete()
+        }
+        NoteExporter.pruneOld(dir, keep = MAX_KEEP_FILES, extensions = MANAGED_EXTENSIONS)
+        FileProvider.getUriForFile(context, NoteExporter.fileProviderAuthority(context), finalFile)
+    }
+
     private suspend fun writeFile(
         baseName: String,
         content: String,
@@ -100,6 +138,6 @@ class VectorTuneupExporter @Inject constructor(
         /** How many recent vector exports to retain. */
         const val MAX_KEEP_FILES: Int = 20
 
-        val MANAGED_EXTENSIONS: Set<String> = setOf("xml", "svg", "json")
+        val MANAGED_EXTENSIONS: Set<String> = setOf("xml", "svg", "json", "zip")
     }
 }
