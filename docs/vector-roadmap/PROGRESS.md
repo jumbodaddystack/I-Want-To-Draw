@@ -260,22 +260,47 @@ this session; thin Compose/UI tops + Android-coupled tails deferred (headless bu
         consumer works on the expanded doc with zero new writer/preview code**, and master-edit-propagation is just re-expand.
   - [x] Tests: `SymbolResolverTest` (**7**, green) — single-instance expand / unique namespacing / transform+override /
         master-edit-propagates / unresolved-drop+warn / cycle-drop-without-loop / symbol-free-doc identity. `:app:assembleDebug` clean.
-  - [ ] **Room library store** (`VectorSymbol` entity/DAO mirroring `Stamp` + `AppDatabase`/migration/Hilt) + the editor's
-        "insert reusable object" affordance pointing at the symbol library. (Android-coupled DB + Compose — verify on device.)
+  - [x] **Room library store** — `VectorSymbolEntity`/`VectorSymbolDao` mirroring `Stamp`, `AppDatabase` v16→**17**
+        (+ `MIGRATION_16_17` creating `vector_symbols`, schema `17.json` exported), Hilt DAO provider, and
+        `VectorSymbolRepository` (constructor-injected). A pure `VectorSymbolCodec` (geometry⇄XML blob via the editor's
+        lossless VD writer/parser) is the entity⇄`VectorSymbol` boundary. **Tests:** `VectorSymbolCodecTest` (3, green);
+        `:app:assembleDebug` clean.
+  - [ ] The editor's **"insert reusable object"** affordance (creating `InstanceNode`s pointing at the symbol library;
+        export calls `SymbolResolver.expand(doc, repo.loadLibrary())` first). (Compose — verify on device.)
 - **This session:** `:app:assembleDebug` clean; **26 new pure-JVM tests** (12 SF1 + 9 SF4 + 5 SF5a), all green; no regressions in the existing `data.vector.*` / `*.edit.*` / `ui.components.notes.*` suites.
 
 ---
 
 ## 3. Latest handoff (update this each session)
 
-**Last updated:** 2026-06-05 · **Last completed:** Phase 5 sub-feature **5b (semantic AI bitmap tracer)** — `AiBitmapTracer` (vision-gated, always-falls-back-to-local) reusing the `ChatStreamer` + `VectorScene*` pipeline
+**Last updated:** 2026-06-06 · **Last completed:** Phase 5 sub-feature **3 Room tail** — the app-scoped reusable
+vector-symbol **library persistence** (`VectorSymbolEntity`/`Dao`/`Repository` mirroring `Stamp`, DB v16→17 + migration,
+Hilt wiring) on top of a pure `VectorSymbolCodec` (symbol geometry ⇄ one XML blob via the editor's lossless VD writer/parser)
 
-**State of the branch:** Phases 0–4 core + Phase 5 SF1/SF2/SF3/SF4/SF5a merged to main (PRs through #100). Phase **5 (partial)**
-continues on `claude/vector-roadmap-next-phase-7mecR` (this branch): **this session added SF5b (semantic AI tracer) pure core**.
-With this, **all five Phase-5 sub-features now have their pure-JVM cores landed** (only Room/Compose tops remain).
-`:app:assembleDebug` clean; **6 new pure-JVM tests** (`AiBitmapTracerTest`) all green → `data.vector.trace.*` now **11**; the existing
-`data.vector.*` / `*.edit.*` suites re-run green this session (no regressions). The **known** ~21 `data/notes` `Color`/`Log`
-"not mocked" failures are unrelated (present on a clean checkout). No PR open.
+**State of the branch:** Phases 0–4 core + Phase 5 SF1/SF2/SF3-core/SF4/SF5a/SF5b merged to main (PRs through #102). This branch
+`claude/vector-roadmap-next-phase-R03Py` adds the **SF3 Room library store** — the persistence half of the symbol feature whose pure
+resolver (`SymbolResolver.expand`) already exists. `:app:assembleDebug` clean; Room schema **`17.json`** exported and the
+`MIGRATION_16_17` SQL verified byte-equal to Room's generated `createSql`. **3 new pure-JVM tests** (`VectorSymbolCodecTest`) green →
+`data.vector.symbol.*` now **10** (7 resolver + 3 codec); `SymbolResolverTest` re-runs green (no regressions). The **known** ~21
+`data/notes` `Color`/`Log` "not mocked" failures are unrelated (present on a clean checkout). No PR open.
+
+**What the SF3 Room tail delivers (pure `VectorSymbolCodec` is JVM-tested; the Room/Hilt pieces are compile-verified, mechanical mirrors of `Stamp`):**
+- **`data/vector/symbol/VectorSymbolCodec`** (pure, no Android imports) — `encode(symbol): String` serializes a symbol's
+  `viewport` + `root` through the **existing** `AndroidVectorDrawableWriter` (a symbol *is* a mini-document), `decode(id, name, xml)`
+  rebuilds it via `AndroidVectorDrawableParser`. **Identity (`id`/`name`) is NOT baked into the blob** — it comes from the entity's
+  own columns, so a row can be renamed without rewriting geometry. Round-trip invariant (pinned): `encode→decode→encode` is
+  byte-identical; viewport + path command-structure + fill survive (path *ids* are reissued by the VD parser, which is fine —
+  `SymbolResolver` re-namespaces every child on expansion).
+- **`data/model/VectorSymbolEntity`** (`vector_symbols` table: `id` PK / `name` / `vectorXml` / `createdAt` / `lastUsedAt`, index
+  on `lastUsedAt`) + **`data/local/VectorSymbolDao`** (`observeAll` MRU-first Flow / `observeAllOnce` / `getSymbol` / `upsert` /
+  `touchLastUsed` / `rename` / `delete`) — direct mirrors of `Stamp`/`StampDao`.
+- **`data/repository/VectorSymbolRepository`** (`@Singleton`, constructor-injected — **no `@Provides` needed**, Hilt builds it from
+  the `@Inject` ctor) — the entity⇄`VectorSymbol` boundary: `observeAll(): Flow<List<VectorSymbol>>` (decodes), `saveSymbol(symbol)`
+  (encodes), `getSymbol`/`rename`/`delete`/`touchLastUsed`, and **`loadLibrary(): Map<String, VectorSymbol>`** — exactly the map
+  `SymbolResolver.expand(doc, library)` consumes. No file-system side (unlike `StampRepository`'s thumbnail PNG) — geometry lives
+  entirely in the one Room column.
+- **Wiring:** `AppDatabase` gains `VectorSymbolEntity::class` + `vectorSymbolDao()`, **version 16→17**; `Migrations.kt` gains
+  `MIGRATION_16_17` (new table only — existing rows untouched); `AppModule` registers the migration + a `provideVectorSymbolDao`.
 
 **What SF3 delivers (pure JVM — no Android imports anywhere in the new code):**
 - **Model:** `data/vector/symbol/VectorSymbol` (a symbol *is* a mini-document — reuses `VectorViewport` + `VectorGroup`) and
@@ -335,9 +360,12 @@ With this, **all five Phase-5 sub-features now have their pure-JVM cores landed*
 1. **SF5 bitmap-import UI entry:** a paste/import-a-bitmap affordance that decodes to ARGB, builds an `AiBitmapTracer`
    (creds from `PreferencesManager.credentialsFor()`, `AndroidBitmapPngEncoder`), runs `trace`, and hands the resulting
    `VectorPath`s/`VectorDocument` to the Phase-1 node canvas (surface the `warnings`, incl. `TRACE_FELL_BACK_TO_LOCAL`).
-2. **SF3 Room/UI tail:** a `VectorSymbol` Room entity/DAO mirroring `Stamp` (+ `AppDatabase` registration, migration, Hilt
-   module) for an app-scoped symbol library, and the editor's "insert reusable object" affordance (creating `InstanceNode`s;
-   export calls `SymbolResolver.expand` first). The pure resolver is already the engine — this is just persistence + a thin Compose entry.
+2. **SF3 UI tail (Room store now DONE):** only the editor's **"insert reusable object"** Compose affordance remains — a picker
+   over `VectorSymbolRepository.observeAll()` that drops a `VectorNode.InstanceNode(SymbolInstance(symbolId=…))` into the editing
+   document, plus a "save selection as symbol" path (`repo.saveSymbol(VectorSymbol(...))`). **Critical:** any export/preview of a
+   doc holding instances must first run `SymbolResolver.expand(doc, repo.loadLibrary())` (see watch-outs) — the repo's
+   `loadLibrary()` returns exactly that map. The engine + persistence are both done; this is a thin Compose entry + one
+   expand-before-export call.
 3. **Other thin UI/Compose tops:** caps/join/dash/**fill (gradient picker + stop editor)** controls in `VectorPathEditPanel`
    (+ a `VectorManualEdit` op to set `VectorFill`); dash `PathEffect` + outlined-fill draw in `VectorPreviewCanvas`;
    `onKeyEvent` + numeric-transform row on `VectorEditCanvas`.
@@ -356,6 +384,21 @@ With this, **all five Phase-5 sub-features now have their pure-JVM cores landed*
   survives as `VectorPath.name`). Don't assert trace output by `path.id`; use `name` or geometry (the test does).
 - **1 px → 1 viewport unit** (same as the local tracer). Fit a traced doc into a target dp box with the Phase-3
   `IconSizeSet`/`VectorQuantizer` rather than re-deriving a transform.
+
+**Watch-outs for next session (SF3 Room store — what to know before wiring the insert UI):**
+- **The persistence engine is done and JVM-tested at the boundary.** `VectorSymbolRepository` is the only thing the UI touches:
+  `observeAll()` (Flow of decoded symbols for a picker), `saveSymbol(symbol)`, `loadLibrary()` (the resolver map). It's
+  constructor-injected — just `@Inject`-grab it in the Tune-Up/edit VM; do **not** add a `@Provides` (Hilt builds it from the ctor).
+- **Identity lives in the columns, not the blob.** `VectorSymbolCodec.decode(id, name, xml)` takes id/name as args; the XML carries
+  only geometry. So `rename` is a column update (no re-encode), and two saves of the same geometry under different ids don't collide.
+- **The VD parser reissues path ids on decode** (no id attr in VectorDrawable XML) — never assert a loaded symbol's path ids equal
+  the authored ones. It doesn't matter: `SymbolResolver.expand` namespaces every child id (`"${instance.id}/…"`) anyway.
+- **Don't forget expand-before-export.** A document with `InstanceNode`s must run `SymbolResolver.expand(doc, repo.loadLibrary())`
+  before any writer/preview/metrics pass (the writers silently skip unexpanded instances — a symbol "disappears" if you forget).
+  `loadLibrary()` is a one-shot snapshot; re-call it after the library changes.
+- **Migration is additive (new table only).** `MIGRATION_16_17` creates `vector_symbols` and touches nothing else; its SQL is
+  verified byte-equal to Room's generated `17.json` `createSql`. If you add a column, bump to 18 with a fresh `ALTER`/migration —
+  don't edit `MIGRATION_16_17`.
 
 **Watch-outs for next session (SF3 symbols — what to know before extending):**
 - **`SymbolResolver.expand` must run before any export/preview/metrics** on a doc that contains instances — that's the contract
@@ -1028,3 +1071,35 @@ Keep this file the *only* thing a fresh session must read to be oriented.
 - **Deviation from plan:** none material. The plan said "reuse `ApiClient`/`ChatStreamer` + `VectorScene*` compiler; gate on
   `supportsVision`; fall back to local" — delivered exactly. Added `AiTraceConfig` + the `BitmapPngEncoder` seam +
   `AndroidBitmapPngEncoder` + `AiTracePrompts` (none anticipated verbatim, all minimal/additive and mirroring existing patterns).
+
+### Phase 5 — production polish, sub-feature 3 Room tail (reusable symbol library persistence) (2026-06-06)
+- **Shipped (pure `VectorSymbolCodec` is JVM-tested; the Room/Hilt pieces are compile-verified mirrors of `Stamp`):** the
+  app-scoped persistence half of SF3, on top of the already-landed pure `SymbolResolver` engine.
+  - **Codec (pure, no Android imports):** `data/vector/symbol/VectorSymbolCodec` — `encode(symbol): String` writes the symbol's
+    `viewport`+`root` through the existing lossless `AndroidVectorDrawableWriter` (a symbol *is* a mini-document); `decode(id,
+    name, xml)` rebuilds it via `AndroidVectorDrawableParser`. Identity (`id`/`name`) is carried as args, not baked into the blob.
+  - **Room:** `data/model/VectorSymbolEntity` (`vector_symbols`: id PK / name / vectorXml / createdAt / lastUsedAt, lastUsedAt
+    index) + `data/local/VectorSymbolDao` (observeAll MRU-first Flow / observeAllOnce / getSymbol / upsert / touchLastUsed /
+    rename / delete) — direct mirrors of `Stamp`/`StampDao`. `AppDatabase` v16→**17** (+ `vectorSymbolDao()`), `MIGRATION_16_17`
+    (new table only), `AppModule` registers the migration + DAO provider. Schema `17.json` exported.
+  - **Repository:** `data/repository/VectorSymbolRepository` (`@Singleton`, constructor-injected) — entity⇄`VectorSymbol`
+    boundary via the codec; `observeAll(): Flow<List<VectorSymbol>>`, `saveSymbol`, `getSymbol`/`rename`/`delete`/`touchLastUsed`,
+    and `loadLibrary(): Map<String, VectorSymbol>` (exactly what `SymbolResolver.expand` consumes). No file-system side.
+  - **3 new pure-JVM tests** (`VectorSymbolCodecTest`): viewport+geometry round-trip (encode→decode→encode byte-identical),
+    identity-from-args-not-blob, command-structure+fill preserved. `data.vector.symbol.*` now **10**; `:app:assembleDebug` clean.
+- **Key decisions:**
+  1. **A symbol persists as one geometry blob** through the editor's existing lossless VD writer/parser — no symbol-specific
+     serialization format, and the blob is the same XML the rest of the pipeline round-trips.
+  2. **Identity in columns, geometry in the blob** — rename is a column update (no re-encode), and the codec is JVM-testable
+     because the VD writer/parser are pure (the round-trip test runs headless).
+  3. **Repository is the only UI seam** and returns pure-model `VectorSymbol`s + the `loadLibrary()` map, so the insert-UI work
+     never touches Room or the codec directly — it just picks a symbol and calls `expand` before export.
+  4. **Additive, new-table-only migration** keeps every existing row byte-identical; `MIGRATION_16_17` SQL is verified equal to
+     Room's generated `17.json` `createSql`, so the migration validates.
+- **Verified:** 3 JVM tests + `:app:assembleDebug` clean + schema `17.json` exported + migration SQL byte-matches the generated
+  schema. `SymbolResolverTest` re-runs green (no regressions).
+- **Not yet done (deferred to on-device — Compose):** the editor's "insert reusable object" / "save selection as symbol"
+  affordance + the `expand`-before-export call. Tracked as the one remaining open SF3 checkbox in §2.
+- **Deviation from plan:** none material. The plan named a `VectorSymbol` Room store mirroring `Stamp` — delivered. Added the pure
+  `VectorSymbolCodec` (the testable entity⇄model boundary) + `loadLibrary()`/`observeAllOnce()` helpers (none anticipated verbatim,
+  all minimal/additive). No thumbnail/file-system side (a vector symbol needs none — geometry is the blob).

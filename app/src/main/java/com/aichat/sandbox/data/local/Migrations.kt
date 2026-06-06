@@ -542,3 +542,31 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
         db.execSQL("ALTER TABLE `notes` ADD COLUMN `viewportScale` REAL")
     }
 }
+
+/**
+ * Migration from version 16 to 17:
+ * Adds the app-scoped reusable vector-symbol library (Phase 5 sub-feature 3).
+ * A symbol is stored as a single VectorDrawable XML blob (`vectorXml`) plus its
+ * identity columns; mirrors the raster `stamps` table. New table only — existing
+ * rows are untouched.
+ */
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `vector_symbols` (
+                `id` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `vectorXml` TEXT NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                `lastUsedAt` INTEGER,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_vector_symbols_lastUsedAt` " +
+                "ON `vector_symbols` (`lastUsedAt`)",
+        )
+    }
+}
