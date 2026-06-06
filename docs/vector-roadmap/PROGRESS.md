@@ -207,7 +207,7 @@ the two Android-coupled, headless-unverifiable steps are deferred to an on-devic
 - [ ] **UI entry**: a note opens directly onto the Phase-1 node canvas via the bridged document
   (`VectorTuneupScreen` import hook). Needs the running app to verify.
 
-### Phase 5 — production polish — 🟢 IN PROGRESS (SF1/SF2/SF3/SF4/SF5a cores done; SF5b AI-backend + Room/UI tops remain)
+### Phase 5 — production polish — 🟢 IN PROGRESS (all five pure-JVM cores done — SF1–SF5 incl. SF5b AI-backend; only Room/UI Compose tops remain)
 Per `phase-5-production-polish.md`. Five **independent** sub-features; pick by priority. Pure-JVM cores landed
 this session; thin Compose/UI tops + Android-coupled tails deferred (headless build env can't verify them).
 - **SF1 — Stroke styling (dash + variable width):** 🟢 model + geometry + writers done
@@ -225,13 +225,18 @@ this session; thin Compose/UI tops + Android-coupled tails deferred (headless bu
   - [x] `ui/screens/vector/edit/NumericTransformEntry.kt` (`TransformEntry` + `NumericTransform.parse` + `toMoveSelection`).
   - [x] Tests: `EditKeyBindingsTest` (5), `NumericTransformTest` (4) → **9, green**.
   - [ ] `Modifier.onKeyEvent` plumbing on `VectorEditCanvas` + a numeric-transform inspector row (UI — verify on device).
-- **SF5 — AI auto-trace:** 🟢 5a (local tracer) done; 5b (AI backend) deferred
+- **SF5 — AI auto-trace:** 🟢 5a (local tracer) + 5b (semantic AI tracer) done; only the bitmap-import UI entry remains
   - [x] `data/vector/trace/BitmapTracer.kt` (interface + `TraceOptions`/`TraceMode`/`TraceResult`), `data/vector/trace/CurveFitter.kt`
         (Schneider least-squares cubic fit, recursive split + Newton reparam), `data/vector/trace/LocalBitmapTracer.kt`
         (threshold→4-conn components→Moore outline / Zhang–Suen centerline→RDP→cubic fit). Warning codes `TRACE_EMPTY`/`TRACE_FELL_BACK_TO_LOCAL`.
   - [x] Tests: `CurveFitterTest` (2), `LocalBitmapTracerTest` (3) → **5, green**.
-  - [ ] **5b semantic AI tracer** `AiBitmapTracer` (reuse `ApiClient`/`ChatStreamer` + `VectorScene*` compiler; gate on `supportsVision`; fall back to local) + `AiBitmapTracerTest` (fake streamer).
-  - [ ] UI entry: paste/import a bitmap → trace → hand the `VectorDocument` to the node canvas.
+  - [x] **5b semantic AI tracer** `data/vector/trace/AiBitmapTracer.kt` (`AiTraceConfig` creds + `BitmapPngEncoder` fun-interface;
+        reuses `ChatStreamer` + `VectorSceneParser`/`VectorSceneCompiler`; gates on `ModelCapabilities.of(modelId).supportsVision`;
+        **always** falls back to `LocalBitmapTracer` on no-vision / bad-bitmap / encode-fail / stream-error / parse-fail / compile-fail /
+        empty-scene, appending a `TRACE_FELL_BACK_TO_LOCAL` warning) + `AiTracePrompts` (vision system message + user prompt) +
+        `AndroidBitmapPngEncoder` (the lone Android-coupled piece, isolated in its own file). **Tests:** `AiBitmapTracerTest` (6 — fake
+        streamer + fake encoder) → trace tests now **11, green**.
+  - [ ] UI entry: paste/import a bitmap → trace → hand the `VectorDocument` to the node canvas. (UI — verify on device.)
 - **SF2 — Gradients / advanced fills:** 🟢 model + both writers + both parsers + preview done (only the fill-editing UI controls remain)
   - [x] `data/vector/VectorFill.kt` — sealed `VectorFill` (`Solid`/`Linear`/`Radial`/`Sweep`) + `GradientStop`. Coords in **viewport (user-space) units**.
   - [x] `VectorStyle` additive nullable `fill: VectorFill?` (null ⇒ existing scalar `fillColor`/`fillAlpha` untouched, byte-identical).
@@ -263,15 +268,13 @@ this session; thin Compose/UI tops + Android-coupled tails deferred (headless bu
 
 ## 3. Latest handoff (update this each session)
 
-**Last updated:** 2026-06-05 · **Last completed:** Phase 5 sub-feature **3 (reusable vector symbols / master-instance)** — pure model + `VectorNode.InstanceNode` + `SymbolResolver.expand` + full consumer wiring
+**Last updated:** 2026-06-05 · **Last completed:** Phase 5 sub-feature **5b (semantic AI bitmap tracer)** — `AiBitmapTracer` (vision-gated, always-falls-back-to-local) reusing the `ChatStreamer` + `VectorScene*` pipeline
 
-**State of the branch:** Phases 0–4 core + Phase 5 SF1/SF2/SF4/SF5a merged to main (PRs through #100). Phase **5 (partial)**
-continues on `claude/trusting-turing-aWqnj` (this branch): **this session added SF3 (vector symbols) pure core**.
-`:app:assembleDebug` clean; **7 new pure-JVM tests** (`SymbolResolverTest`) all green; the existing
-`data.vector.*` / `*.edit.*` / `ui.components.notes.*` suites are unaffected — every regression-sensitive suite
-(`AndroidVectorDrawableWriterTest`/`VectorSvgWriterTest`/`VectorDrawableOptimizerTest`/`VectorQuantizerTest`/
-`VectorManualEditApplierTest`/`VectorPreviewBuilderTest`/`IconSizeSetTest`/`VectorPathCatalogTest`/`VectorEditPlanApplierTest`/
-`StrokeStyleExportTest`/`VectorFillRoundTripTest`) re-run green this session. The **known** ~21 `data/notes` `Color`/`Log`
+**State of the branch:** Phases 0–4 core + Phase 5 SF1/SF2/SF3/SF4/SF5a merged to main (PRs through #100). Phase **5 (partial)**
+continues on `claude/vector-roadmap-next-phase-7mecR` (this branch): **this session added SF5b (semantic AI tracer) pure core**.
+With this, **all five Phase-5 sub-features now have their pure-JVM cores landed** (only Room/Compose tops remain).
+`:app:assembleDebug` clean; **6 new pure-JVM tests** (`AiBitmapTracerTest`) all green → `data.vector.trace.*` now **11**; the existing
+`data.vector.*` / `*.edit.*` suites re-run green this session (no regressions). The **known** ~21 `data/notes` `Color`/`Log`
 "not mocked" failures are unrelated (present on a clean checkout). No PR open.
 
 **What SF3 delivers (pure JVM — no Android imports anywhere in the new code):**
@@ -312,19 +315,47 @@ continues on `claude/trusting-turing-aWqnj` (this branch): **this session added 
   → Compose `Brush.linearGradient`/`radialGradient`/`sweepGradient` (stops via `parseVectorColor`); `PreparedPreviewPath`
   gained `fillBrush`, drawn over the flat fill in `drawPreparedPath`. `VectorEditCanvas` passes it for the live edit path too.
 
-**→ NEXT ACTION (Phase 5 remaining: SF5b + Room/UI tops — SF3 pure core now done):**
-1. **SF5b — semantic AI tracer** `data/vector/trace/AiBitmapTracer.kt` (reuse `ApiClient`/`ChatStreamer` + `VectorScene*`
-   compiler; gate on `ModelCapabilities.of(modelId).supportsVision`; **always** fall back to `LocalBitmapTracer` on no-vision /
-   no-network / parse-failure) + `AiBitmapTracerTest` with a fake `ChatStreamer`. This is the last pure-JVM-testable Phase-5 core.
-   *(Note: this touches the multi-provider AI client — read the `claude-api` skill / `ModelCapabilities` before wiring, and keep
-   the deterministic `LocalBitmapTracer` as the guaranteed fallback.)*
-2. **SF3 Room/UI tail (verify on device):** a `VectorSymbol` Room entity/DAO mirroring `Stamp` (+ `AppDatabase` registration,
-   migration, Hilt module) for an app-scoped symbol library, and the editor's "insert reusable object" affordance pointing at it
-   (creating `InstanceNode`s; export calls `SymbolResolver.expand` first). The pure resolver is already the engine — this is just
-   persistence + a thin Compose entry.
-3. **Other thin UI/Compose tops (verify on device):** caps/join/dash/**fill (gradient picker + stop editor)** controls in
-   `VectorPathEditPanel` (+ a `VectorManualEdit` op to set `VectorFill`); dash `PathEffect` + outlined-fill draw in
-   `VectorPreviewCanvas`; `onKeyEvent` + numeric-transform row on `VectorEditCanvas`; a bitmap-import → trace → node-canvas entry.
+**What SF5b delivers (pure JVM tracer; `AndroidBitmapPngEncoder` is the lone Android top, `assembleDebug`-clean):**
+- **`AiBitmapTracer`** (`data/vector/trace/`) implements the same `BitmapTracer` interface as `LocalBitmapTracer`, so it's a
+  drop-in semantic backend. It gates on `ModelCapabilities.of(config.modelId).supportsVision`, PNG-encodes the ARGB bitmap,
+  sends it as a **multimodal** `Message` (image data-URI in `ImageMetadata`, exactly like `NoteAiService`) over the multi-provider
+  `ChatStreamer`, buffers the streamed reply, and runs it through the **existing** `VectorSceneParser.parse` →
+  `VectorSceneCompiler.compile` pipeline (so the model only ever emits a validated `vector-scene`, never raw XML), returning the
+  compiled `document.allPaths()` as the `TraceResult`.
+- **The local tracer is the guaranteed fallback** for every failure mode — no-vision model, empty/malformed bitmap,
+  encode-failure, stream error, unparseable reply, compile failure, or an empty compiled scene — each runs `LocalBitmapTracer`
+  and appends a `TRACE_FELL_BACK_TO_LOCAL` warning. A trace **never hard-fails**.
+- **`AiTraceConfig`** (modelId/baseUrl/apiKey, resolved by the caller via `PreferencesManager.credentialsFor()`) and a
+  **`BitmapPngEncoder`** fun-interface keep the tracer JVM-testable: production wires `AndroidBitmapPngEncoder`
+  (`android.graphics.Bitmap` → PNG, in its own file), tests inject a fake encoder + fake `ChatStreamer`.
+- **`AiTracePrompts`** — vision system message (the `vector-scene` schema, 1 px = 1 viewport unit) + per-mode user prompt
+  (OUTLINE → filled shapes, CENTERLINE → stroked lines).
+
+**→ NEXT ACTION (Phase 5 remaining — all pure cores done; only Android/Compose tops left, verify on device):**
+1. **SF5 bitmap-import UI entry:** a paste/import-a-bitmap affordance that decodes to ARGB, builds an `AiBitmapTracer`
+   (creds from `PreferencesManager.credentialsFor()`, `AndroidBitmapPngEncoder`), runs `trace`, and hands the resulting
+   `VectorPath`s/`VectorDocument` to the Phase-1 node canvas (surface the `warnings`, incl. `TRACE_FELL_BACK_TO_LOCAL`).
+2. **SF3 Room/UI tail:** a `VectorSymbol` Room entity/DAO mirroring `Stamp` (+ `AppDatabase` registration, migration, Hilt
+   module) for an app-scoped symbol library, and the editor's "insert reusable object" affordance (creating `InstanceNode`s;
+   export calls `SymbolResolver.expand` first). The pure resolver is already the engine — this is just persistence + a thin Compose entry.
+3. **Other thin UI/Compose tops:** caps/join/dash/**fill (gradient picker + stop editor)** controls in `VectorPathEditPanel`
+   (+ a `VectorManualEdit` op to set `VectorFill`); dash `PathEffect` + outlined-fill draw in `VectorPreviewCanvas`;
+   `onKeyEvent` + numeric-transform row on `VectorEditCanvas`.
+   *(With every pure-JVM core landed, what's left is exclusively device-verifiable UI/persistence — the right work for an on-device session.)*
+
+**Watch-outs for next session (SF5b AI tracer — what to know before wiring the UI):**
+- **The tracer is provider-agnostic by construction.** It goes through `ChatStreamer` (which `ApiClient` routes to OpenAI/
+  Anthropic/Gemini), so there's no Anthropic-specific code; do not hardcode a provider or model id. The caller supplies
+  `AiTraceConfig` from the user's selected model + `PreferencesManager.credentialsFor()`.
+- **`AndroidBitmapPngEncoder` is the only Android-coupled piece** and can't be JVM-unit-tested (it uses `Bitmap`). It's
+  deliberately isolated in its own file so `AiBitmapTracer` itself imports zero Android — keep new tracer logic Android-free
+  and behind the `BitmapPngEncoder` seam.
+- **The fallback is silent-by-design but visible-by-warning.** A user who points a non-vision model at the tracer still gets a
+  result (the local trace) plus a `TRACE_FELL_BACK_TO_LOCAL` warning — the UI should surface `TraceResult.warnings`.
+- **Compile already round-trips through the VD writer/parser,** which **reissues path ids** (id ≠ the scene object id; the id
+  survives as `VectorPath.name`). Don't assert trace output by `path.id`; use `name` or geometry (the test does).
+- **1 px → 1 viewport unit** (same as the local tracer). Fit a traced doc into a target dp box with the Phase-3
+  `IconSizeSet`/`VectorQuantizer` rather than re-deriving a transform.
 
 **Watch-outs for next session (SF3 symbols — what to know before extending):**
 - **`SymbolResolver.expand` must run before any export/preview/metrics** on a doc that contains instances — that's the contract
@@ -962,3 +993,38 @@ Keep this file the *only* thing a fresh session must read to be oriented.
 - **Deviation from plan:** none material. The plan sketched `VectorFill.Solid(color, alpha)`; shipped as written. Colors
   normalize through an SVG hop (opaque 8-digit → 6-digit) — documented as a watch-out rather than a deviation, since it's
   inherent to the SVG `stop-opacity` representation.
+
+### Phase 5 — production polish, sub-feature 5b (semantic AI bitmap tracer) (2026-06-05)
+- **Shipped (pure JVM tracer; one isolated Android encoder, `assembleDebug`-clean):** the AI backend for SF5's auto-trace —
+  point a vision model at a bitmap and get back editable cubic `VectorPath`s, with the deterministic local tracer as a
+  guaranteed fallback.
+  - **`data/vector/trace/AiBitmapTracer.kt`** — implements the same `BitmapTracer` interface as `LocalBitmapTracer` (drop-in
+    backend). `trace()` gates on `ModelCapabilities.of(config.modelId).supportsVision`; PNG-encodes the ARGB bitmap via an
+    injected `BitmapPngEncoder`; sends it as a **multimodal** `Message` (image data-URI in `ImageMetadata`, mirroring
+    `NoteAiService`) over the multi-provider `ChatStreamer`; buffers the streamed reply; and runs it through the **existing**
+    `VectorSceneParser.parse` → `VectorSceneCompiler.compile` pipeline (the same one `VectorRedrawAiService` uses), returning
+    `compiled.document.allPaths()` as the `TraceResult`. `AiTraceConfig` (modelId/baseUrl/apiKey) carries the credentials;
+    `AiTracePrompts` carries the vision system message + per-mode user prompt.
+  - **`AndroidBitmapPngEncoder.kt`** — the lone Android-coupled piece (`Bitmap` → PNG), in its own file so the tracer imports
+    zero Android.
+  - **6 new pure-JVM tests** (`AiBitmapTracerTest`, fake `ChatStreamer` + fake encoder): vision happy-path (scene → compiled
+    paths, multimodal message carries the image + trace system prompt, never XML); and the five fallbacks (no-vision model not
+    contacted, stream error, unparseable reply, encoder failure not contacted, empty compiled scene) each producing a local
+    result + `TRACE_FELL_BACK_TO_LOCAL`. `data.vector.trace.*` now **11, green**; `:app:assembleDebug` clean.
+- **Key decisions:**
+  1. **Same interface, swappable backend.** `AiBitmapTracer : BitmapTracer` so the UI can pick local vs. AI without branching;
+     the AI path *is* the local path plus a model round-trip in front.
+  2. **The local tracer is the hard floor.** Every failure mode (no-vision / bad-bitmap / encode-fail / stream-error /
+     parse-fail / compile-fail / empty-scene) falls back to `LocalBitmapTracer` and appends `TRACE_FELL_BACK_TO_LOCAL` — a trace
+     never throws or returns nothing for a reason the user can't see.
+  3. **Reuse the redraw pipeline, not a new one.** The model emits a validated `vector-scene` (never raw XML); `VectorSceneParser`
+     bounds-checks every object and `VectorSceneCompiler` round-trips it through the VD writer/parser, so the tracer inherits all
+     of Phase-5's scene-safety for free.
+  4. **JVM-testable by construction.** Credentials in `AiTraceConfig` + PNG behind a `BitmapPngEncoder` fun-interface (the
+     `NoteImageRenderer` pattern) keep `AiBitmapTracer` Android-free and unit-testable with fakes.
+- **Verified:** 6 JVM tests + `:app:assembleDebug`; the `data.vector.*` / `*.edit.*` suites re-ran green (no regressions).
+- **Not yet done (deferred to on-device — Android/Compose):** the bitmap-import UI entry (paste/import → decode to ARGB →
+  `AiBitmapTracer.trace` → hand to the node canvas, surfacing warnings). Tracked as the one open SF5 checkbox in §2.
+- **Deviation from plan:** none material. The plan said "reuse `ApiClient`/`ChatStreamer` + `VectorScene*` compiler; gate on
+  `supportsVision`; fall back to local" — delivered exactly. Added `AiTraceConfig` + the `BitmapPngEncoder` seam +
+  `AndroidBitmapPngEncoder` + `AiTracePrompts` (none anticipated verbatim, all minimal/additive and mirroring existing patterns).
