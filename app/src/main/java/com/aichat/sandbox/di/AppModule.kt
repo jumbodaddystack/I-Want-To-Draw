@@ -20,12 +20,14 @@ import com.aichat.sandbox.data.local.MIGRATION_12_13
 import com.aichat.sandbox.data.local.MIGRATION_13_14
 import com.aichat.sandbox.data.local.MIGRATION_14_15
 import com.aichat.sandbox.data.local.MIGRATION_15_16
+import com.aichat.sandbox.data.local.MIGRATION_16_17
 import com.aichat.sandbox.data.local.NoteAudioDao
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.local.NoteFrameDao
 import com.aichat.sandbox.data.local.NoteSearchDao
 import com.aichat.sandbox.data.local.NotebookDao
 import com.aichat.sandbox.data.local.StampDao
+import com.aichat.sandbox.data.local.VectorSymbolDao
 import com.aichat.sandbox.data.local.VectorTuneupDao
 import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.NoteAiService
@@ -68,6 +70,7 @@ object AppModule {
             MIGRATION_13_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
         ).build()
     }
 
@@ -114,6 +117,11 @@ object AppModule {
     @Provides
     fun provideVectorTuneupDao(database: AppDatabase): VectorTuneupDao {
         return database.vectorTuneupDao()
+    }
+
+    @Provides
+    fun provideVectorSymbolDao(database: AppDatabase): VectorSymbolDao {
+        return database.vectorSymbolDao()
     }
 
     @Provides
