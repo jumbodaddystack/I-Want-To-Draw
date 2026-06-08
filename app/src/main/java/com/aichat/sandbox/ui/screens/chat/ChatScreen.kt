@@ -63,6 +63,7 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     chatId: String,
     onNavigateBack: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -70,6 +71,19 @@ fun ChatScreen(
     val chat = uiState.chat
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    // Whether the list is parked at (or near) the bottom. Drives auto-follow:
+    // we only yank to the latest message when the user is already there, so
+    // scrolling up to re-read history during a stream isn't fought. A small
+    // threshold keeps "follow" feeling sticky right at the bottom edge.
+    val isAtBottom by remember {
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            val last = layout.visibleItemsInfo.lastOrNull()
+                ?: return@derivedStateOf true
+            last.index >= layout.totalItemsCount - 2
+        }
+    }
     // Sketch attachment state (sub-phase 3.4) lives in the composition so
     // the surface is torn down with the screen. Items / undo are cleared on
     // close so reopening starts blank.
@@ -88,7 +102,9 @@ fun ChatScreen(
             if (uiState.executingTool != null) targetIndex++
             // Account for streaming content
             if (uiState.streamingContent.isNotEmpty()) targetIndex++
-            if (targetIndex > 0) {
+            // Only auto-follow when the user is already at the bottom, so
+            // scrolling up to read earlier turns mid-stream isn't overridden.
+            if (targetIndex > 0 && isAtBottom) {
                 listState.animateScrollToItem(targetIndex - 1)
             }
         }
@@ -245,6 +261,44 @@ fun ChatScreen(
                 }
             }
 
+            // "Jump to latest" — shown only while the user has scrolled up
+            // away from the tail (e.g. reading history mid-stream). Tapping
+            // returns to the newest item.
+            if (!isAtBottom && uiState.messages.isNotEmpty()) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shadowElevation = 3.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp),
+                    onClick = {
+                        scope.launch {
+                            val target = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                            listState.animateScrollToItem(target)
+                        }
+                    },
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            "Jump to latest",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+            }
+
             // Error snackbar
             uiState.error?.let { error ->
                 Snackbar(
@@ -252,6 +306,11 @@ fun ChatScreen(
                         .align(Alignment.BottomCenter)
                         .padding(16.dp),
                     action = {
+                        TextButton(onClick = { viewModel.retryLastSend() }) {
+                            Text("Retry")
+                        }
+                    },
+                    dismissAction = {
                         TextButton(onClick = { viewModel.dismissError() }) {
                             Text("Dismiss")
                         }
@@ -272,6 +331,13 @@ fun ChatScreen(
                 title = title,
                 onUnpin = { viewModel.unpinNote() },
             )
+        }
+
+        // Missing-key guidance: a new user — or one who switched to a provider
+        // they haven't keyed — sees this instead of dead-ending on a 401. It
+        // links straight to Settings and sits just above the composer.
+        if (uiState.needsApiKey) {
+            MissingApiKeyBanner(onOpenSettings = onOpenSettings)
         }
 
         // Input bar
@@ -321,6 +387,30 @@ fun ChatScreen(
             customModels = customModels,
             onAddCustomModel = { viewModel.addCustomModel(it) },
             onRemoveCustomModel = { viewModel.removeCustomModel(it) }
+        )
+    }
+
+    // Confirm-before-destroy for message edits that would truncate the
+    // conversation (the edited message plus every reply after it).
+    uiState.pendingEditConfirm?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissPendingEdit() },
+            title = { Text("Edit message?") },
+            text = {
+                Text(
+                    "This removes the ${pending.followingCount} following " +
+                        "message${if (pending.followingCount == 1) "" else "s"} " +
+                        "and regenerates the reply."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.confirmPendingEdit() }) {
+                    Text("Edit & regenerate", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissPendingEdit() }) { Text("Cancel") }
+            },
         )
     }
 
@@ -403,6 +493,42 @@ private fun PinnedNoteChip(title: String, onUnpin: () -> Unit) {
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
+        }
+    }
+}
+
+/**
+ * Inline banner shown above the composer when the current model's provider has
+ * no API key. Replaces the old dead-end (type → send → raw 401) with a clear
+ * next step: a one-tap route to Settings. The composer stays usable.
+ */
+@Composable
+private fun MissingApiKeyBanner(onOpenSettings: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.VpnKey,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "No API key for this model's provider. Add one to start chatting.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onOpenSettings) { Text("Settings") }
         }
     }
 }
@@ -1126,6 +1252,7 @@ private fun ChatSettingsPanel(
     val builtInModels = ApiProvider.defaults.flatMap { it.models }
     val allModels = builtInModels + customModels.filter { it !in builtInModels }
     val context = LocalContext.current
+    var showClearConfirm by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1250,7 +1377,40 @@ private fun ChatSettingsPanel(
                     onCheckedChange = { onToggleTools() }
                 )
             }
+
+            Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // Clear conversation — wired to the existing clearHistory path,
+            // gated behind a confirm so one tap can't wipe a thread by mistake.
+            TextButton(onClick = { showClearConfirm = true }) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Clear conversation", color = MaterialTheme.colorScheme.error)
+            }
         }
+    }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("Clear conversation?") },
+            text = { Text("All messages in this chat will be permanently removed. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearConfirm = false
+                    onClearHistory()
+                    onDismiss()
+                }) { Text("Clear", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 

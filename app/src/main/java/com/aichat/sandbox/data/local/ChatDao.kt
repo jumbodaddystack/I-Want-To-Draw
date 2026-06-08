@@ -58,6 +58,16 @@ interface ChatDao {
     @Query("DELETE FROM messages WHERE chatId = :chatId AND createdAt >= :timestamp")
     suspend fun deleteMessagesFrom(chatId: String, timestamp: Long)
 
+    /**
+     * Delete an explicit set of messages by id. Used by message-edit so the
+     * "remove this message and everything after it" cut is deterministic —
+     * unlike [deleteMessagesFrom], which keys off `createdAt` and can over- or
+     * under-delete when several messages share the same millisecond (tool
+     * loops insert in bursts).
+     */
+    @Query("DELETE FROM messages WHERE id IN (:ids)")
+    suspend fun deleteMessagesByIds(ids: List<String>)
+
     // Full-text search (1.5)
     @Query("""
         SELECT m.* FROM messages m

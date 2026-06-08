@@ -164,6 +164,13 @@ fun NoteEditorScreen(
     fun saveAndExit() {
         scope.launch {
             viewModel.commitTextEdit()
+            // Don't persist a never-touched new note — backing out of a fresh,
+            // empty note shouldn't leave a junk "Untitled" row in the list.
+            // (commitTextEdit ran first, so typed-but-uncommitted text counts.)
+            if (viewModel.isBlankNewNote()) {
+                onNavigateBack()
+                return@launch
+            }
             // Persist the current viewport for icons so reopening restores the
             // exact view (pan + zoom) rather than getting "lost" on the canvas.
             val vp = viewportController

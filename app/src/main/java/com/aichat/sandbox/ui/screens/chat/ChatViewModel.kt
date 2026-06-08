@@ -72,6 +72,27 @@ data class ChatUiState(
      * list doesn't have to round-trip through the UI state.
      */
     val showPinNotePicker: Boolean = false,
+    /**
+     * True when the provider for the current chat's model has no API key set.
+     * Drives a persistent inline banner that links to Settings, so a new user
+     * isn't dead-ended on a raw 401. Re-evaluated whenever the model changes.
+     */
+    val needsApiKey: Boolean = false,
+    /**
+     * Set when a message edit would delete following messages — drives a
+     * confirm dialog before the destructive truncate-and-regenerate. `null`
+     * means no pending confirmation.
+     */
+    val pendingEditConfirm: PendingEditConfirm? = null,
+)
+
+/**
+ * A message edit awaiting user confirmation. [followingCount] is the number of
+ * messages after the edited one that will be removed when the edit proceeds.
+ */
+data class PendingEditConfirm(
+    val newContent: String,
+    val followingCount: Int,
 )
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -147,6 +168,13 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getChatById(chatId).collect { chat ->
                 _uiState.update { it.copy(chat = chat) }
+                // Re-check credentials whenever the chat (and thus its model)
+                // changes so the "add an API key" banner reflects the model in
+                // use — switching to a provider you haven't keyed surfaces it.
+                if (chat != null) {
+                    val hasKey = preferencesManager.hasApiKeyFor(chat.model)
+                    _uiState.update { it.copy(needsApiKey = !hasKey) }
+                }
             }
         }
         viewModelScope.launch {
@@ -227,6 +255,14 @@ class ChatViewModel @Inject constructor(
         val imageUris = _uiState.value.attachedImages.toList()
 
         viewModelScope.launch {
+            // Pre-flight the credentials so we never fire a request that's
+            // guaranteed to 401. Surface the inline "add a key" banner instead
+            // and leave the conversation untouched (no half-sent user turn).
+            if (!preferencesManager.hasApiKeyFor(chat.model)) {
+                _uiState.update { it.copy(needsApiKey = true) }
+                return@launch
+            }
+
             // Encode images to base64 if present
             val hasImages = imageUris.isNotEmpty()
             var metadata: String? = null
@@ -260,7 +296,7 @@ class ChatViewModel @Inject constructor(
                 repository.updateChat(chat.copy(title = title))
             }
 
-            _uiState.update { it.copy(isLoading = true, error = null, streamingContent = "", retryAttempt = 0) }
+            _uiState.update { it.copy(isLoading = true, error = null, streamingContent = "", retryAttempt = 0, needsApiKey = false) }
 
             // Get all messages including the new one
             val allMessages = _uiState.value.messages + userMessage
@@ -478,31 +514,101 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Re-send the conversation after a failed turn. On error the user's
+     * message is already persisted (the assistant reply never arrived), so the
+     * current history already ends with it — we just re-run the stream loop
+     * rather than making the user retype. No-op if there's nothing to send.
+     */
+    fun retryLastSend() {
+        val chat = _uiState.value.chat ?: return
+        if (_uiState.value.isLoading) return
+        val messages = _uiState.value.messages
+        if (messages.isEmpty()) return
+        _uiState.update { it.copy(isLoading = true, error = null, streamingContent = "", retryAttempt = 0) }
+        streamWithToolLoop(chat, messages)
+    }
+
     fun startEditing(message: Message) {
         _uiState.update { it.copy(editingMessageId = message.id, editingContent = message.content) }
+        // 3.3: re-attach a multimodal message's images so editing it doesn't
+        // silently drop them. The originals only survive as base64 data URIs
+        // in the message metadata, so decode each back into a cache file the
+        // existing send-time encoder ([encodeImageToBase64]) can re-open.
+        if (message.contentType == "multimodal" && message.metadata != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val meta = try {
+                    gson.fromJson(message.metadata, ImageMetadata::class.java)
+                } catch (_: Exception) { null }
+                val uris = meta?.images.orEmpty().mapNotNull { dataUriToCacheFile(it.dataUri) }
+                if (uris.isNotEmpty()) withContext(Dispatchers.Main) {
+                    // Only apply if the user is still editing the same message.
+                    if (_uiState.value.editingMessageId == message.id) {
+                        _uiState.update { it.copy(attachedImages = uris) }
+                    }
+                }
+            }
+        }
     }
 
     fun cancelEditing() {
-        _uiState.update { it.copy(editingMessageId = null, editingContent = null) }
+        // Drop any images we re-attached for the edit so they can't leak into
+        // a subsequent fresh message.
+        _uiState.update { it.copy(editingMessageId = null, editingContent = null, attachedImages = emptyList()) }
     }
 
     fun submitEdit(newContent: String) {
-        val chat = _uiState.value.chat ?: return
         val editingId = _uiState.value.editingMessageId ?: return
         if (newContent.isBlank()) return
 
-        val editedMessage = _uiState.value.messages.find { it.id == editingId } ?: return
+        val messages = _uiState.value.messages
+        val idx = messages.indexOfFirst { it.id == editingId }
+        if (idx < 0) return
+
+        // Everything strictly after the edited message is removed when the edit
+        // goes through. Confirm first when that would destroy replies; if the
+        // edited message is the last one, there's nothing to lose — just go.
+        val followingCount = messages.size - idx - 1
+        if (followingCount > 0) {
+            _uiState.update {
+                it.copy(pendingEditConfirm = PendingEditConfirm(newContent.trim(), followingCount))
+            }
+        } else {
+            performEdit(newContent.trim())
+        }
+    }
+
+    /** Proceed with a previously-confirmed destructive edit. */
+    fun confirmPendingEdit() {
+        val pending = _uiState.value.pendingEditConfirm ?: return
+        _uiState.update { it.copy(pendingEditConfirm = null) }
+        performEdit(pending.newContent)
+    }
+
+    /** Dismiss the edit-confirm dialog and stay in edit mode. */
+    fun dismissPendingEdit() {
+        _uiState.update { it.copy(pendingEditConfirm = null) }
+    }
+
+    /**
+     * Truncate the conversation at the edited message and re-send the new
+     * content. Deletes by an explicit id set (not by `createdAt`) so messages
+     * that share a millisecond — common when a tool loop inserts in bursts —
+     * can't be over- or under-deleted.
+     */
+    private fun performEdit(newContent: String) {
+        val editingId = _uiState.value.editingMessageId ?: return
+        val messages = _uiState.value.messages
+        val idx = messages.indexOfFirst { it.id == editingId }
+        if (idx < 0) return
+        val idsToDelete = messages.drop(idx).map { it.id }
 
         viewModelScope.launch {
-            // Delete all messages at or after the edited message's timestamp
-            // (this removes the old version and any subsequent assistant replies)
-            repository.deleteMessagesFrom(chatId, editedMessage.createdAt)
-
-            // Clear editing state
+            repository.deleteMessagesByIds(idsToDelete)
+            // Clear editing state but keep any re-attached images so they ride
+            // along on the re-send, then reuse the normal send flow.
             _uiState.update { it.copy(editingMessageId = null, editingContent = null) }
-
-            // Send the edited content as a new message (reuses existing sendMessage flow)
-            sendMessage(newContent.trim())
+            sendMessage(newContent)
         }
     }
 
@@ -650,6 +756,27 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Decode a `data:image/...;base64,...` URI back into a cache file and
+     * return its file Uri, so a re-attached image (from editing a multimodal
+     * message) flows through the same [encodeImageToBase64] path as a freshly
+     * picked photo. Returns null on any malformed/unreadable input.
+     */
+    private fun dataUriToCacheFile(dataUri: String): Uri? {
+        return try {
+            val comma = dataUri.indexOf(',')
+            if (comma < 0 || !dataUri.startsWith("data:")) return null
+            val bytes = Base64.decode(dataUri.substring(comma + 1), Base64.DEFAULT)
+            if (bytes.isEmpty()) return null
+            val dir = File(appContext.cacheDir, EDIT_IMAGE_CACHE_DIR).apply { mkdirs() }
+            val file = File(dir, "edit-${UUID.randomUUID()}.jpg")
+            file.outputStream().use { it.write(bytes) }
+            Uri.fromFile(file)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun encodeImageToBase64(uri: Uri): ImageAttachment? {
         return try {
             val inputStream = appContext.contentResolver.openInputStream(uri) ?: return null
@@ -769,6 +896,7 @@ class ChatViewModel @Inject constructor(
         const val MAX_MESSAGE_LENGTH = 100_000
         const val MAX_TOOL_ROUNDS = 10
         private const val SKETCH_CACHE_DIR = "chat-sketches"
+        private const val EDIT_IMAGE_CACHE_DIR = "chat-edit-images"
 
         /**
          * Cap on OCR text injected into the system prompt for non-vision

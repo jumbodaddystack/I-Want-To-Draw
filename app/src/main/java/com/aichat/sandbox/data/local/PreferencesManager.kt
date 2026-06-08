@@ -224,6 +224,14 @@ class PreferencesManager @Inject constructor(
         return ProviderCredentials(baseUrl = baseUrl, apiKey = apiKey)
     }
 
+    /**
+     * True when the provider resolved for [modelId] has a non-blank API key.
+     * Lets the chat layer pre-flight a send and guide the user to Settings
+     * instead of firing a request that's guaranteed to 401.
+     */
+    suspend fun hasApiKeyFor(modelId: String): Boolean =
+        credentialsFor(modelId).apiKey.isNotBlank()
+
     private fun apiKeyPrefFor(providerName: String) = when (providerName) {
         ApiProvider.Anthropic.name -> ANTHROPIC_API_KEY
         ApiProvider.Google.name -> GOOGLE_API_KEY

@@ -84,6 +84,12 @@ class ChatRepository @Inject constructor(
         chatDao.deleteMessagesFrom(chatId, timestamp)
     }
 
+    /** Deterministic message deletion by id — see [ChatDao.deleteMessagesByIds]. */
+    suspend fun deleteMessagesByIds(ids: List<String>) {
+        if (ids.isEmpty()) return
+        chatDao.deleteMessagesByIds(ids)
+    }
+
     // Auto-title generation (1.6)
     suspend fun generateTitle(
         model: String,

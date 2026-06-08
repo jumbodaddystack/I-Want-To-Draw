@@ -2468,6 +2468,19 @@ class NoteEditorViewModel @Inject constructor(
         com.aichat.sandbox.data.notes.NoteRasterizer.computeBounds(items.toList())
             ?: NoteExporter.defaultPaperBounds()
 
+    /**
+     * True for a brand-new note the user never put anything into — no drawn
+     * items, no audio, and no real title. The editor uses this to avoid
+     * persisting a junk "Untitled" row when the user opens a fresh note and
+     * immediately backs out. Existing notes (opened by id) always return false,
+     * so this never interferes with autosave of real content.
+     */
+    fun isBlankNewNote(): Boolean =
+        routeArg == NOTE_ID_NEW &&
+            items.isEmpty() &&
+            audioClips.value.isEmpty() &&
+            _note.value.title.isBlank()
+
     suspend fun save(): String {
         val current = _note.value
         val sanitizedTitle = current.title.ifBlank { DEFAULT_TITLE }

@@ -172,7 +172,12 @@ fun AppNavigation(
                 val chatId = backStackEntry.arguments?.getString("chatId") ?: return@composable
                 ChatScreen(
                     chatId = chatId,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    onOpenSettings = {
+                        navController.navigate(Screen.Settings.route) {
+                            launchSingleTop = true
+                        }
+                    },
                 )
             }
             composable(Screen.Notes.route) {
