@@ -146,6 +146,13 @@ class NoteEditorViewModel @Inject constructor(
     private val _note = MutableStateFlow(emptyNote(resolvedNoteId))
     val note: StateFlow<Note> = _note.asStateFlow()
 
+    // In-flight initial DB load for an existing note. save() awaits it so a
+    // back-press (or share / AI ask, which also save) racing the load can't
+    // persist the still-empty item list over the note's real content —
+    // saveNoteWithLayers deletes-then-reinserts, so an early save would wipe
+    // the note.
+    private var initialLoad: kotlinx.coroutines.Job? = null
+
     val items: SnapshotStateList<NoteItem> = mutableStateListOf()
 
     /** Tool palette state — selection, per-tool color / width, area-eraser radius. */
@@ -1077,7 +1084,7 @@ class NoteEditorViewModel @Inject constructor(
             }
         }
         if (routeArg != NOTE_ID_NEW) {
-            viewModelScope.launch {
+            initialLoad = viewModelScope.launch {
                 val loadedNote = repository.getNote(routeArg)
                 if (loadedNote != null) _note.value = loadedNote
                 val loaded = repository.getItems(routeArg)
@@ -2528,6 +2535,10 @@ class NoteEditorViewModel @Inject constructor(
             _note.value.title.isBlank()
 
     suspend fun save(): String {
+        // An explicit save racing the initial DB load would persist the
+        // still-empty item list over the note's real content (the DAO save
+        // deletes-then-reinserts) — wait for the load to land first.
+        initialLoad?.join()
         // The explicit save persists everything itself — a pending debounced
         // autosave would only repeat the work (or land after navigate-back).
         autosaveJob?.cancel()

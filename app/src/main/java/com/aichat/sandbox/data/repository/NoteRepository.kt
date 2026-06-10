@@ -204,13 +204,7 @@ class NoteRepository @Inject constructor(
             return@withContext null
         }
         val path = finalFile.absolutePath
-        // Re-fetch in case the note was edited between the read and the write
-        // — we only want to overwrite `thumbnailPath`, not whatever the user
-        // changed in the meantime.
-        val latest = noteDao.getNote(noteId)
-        if (latest != null && latest.thumbnailPath != path) {
-            noteDao.upsertNote(latest.copy(thumbnailPath = path))
-        }
+        noteDao.updateThumbnailPath(noteId, path)
         path
     }
 

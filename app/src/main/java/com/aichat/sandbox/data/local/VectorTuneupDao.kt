@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import com.aichat.sandbox.data.model.VectorTuneupProjectEntity
 import com.aichat.sandbox.data.model.VectorTuneupVersionEntity
 import kotlinx.coroutines.flow.Flow
@@ -65,7 +66,9 @@ interface VectorTuneupDao {
     )
     suspend fun getOriginalVersion(projectId: String): VectorTuneupVersionEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // Upsert, not @Insert(REPLACE): REPLACE deletes the conflicting project
+    // row first, which cascade-deletes the project's version history.
+    @Upsert
     suspend fun upsertProject(project: VectorTuneupProjectEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

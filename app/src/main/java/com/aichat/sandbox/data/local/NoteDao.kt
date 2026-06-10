@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Upsert
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.model.NoteLayer
@@ -49,8 +50,23 @@ interface NoteDao {
     @Query("SELECT * FROM note_items WHERE noteId = :noteId ORDER BY zIndex ASC")
     suspend fun getItems(noteId: String): List<NoteItem>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    /**
+     * MUST stay [Upsert] (insert-or-UPDATE), never `@Insert(REPLACE)`:
+     * SQLite's `INSERT OR REPLACE` deletes the conflicting row before
+     * re-inserting, which fires the `ON DELETE CASCADE` on note_items /
+     * note_layers / note_frames / note_audio and silently wipes the note's
+     * entire content.
+     */
+    @Upsert
     suspend fun upsertNote(note: Note)
+
+    /**
+     * Partial update for the thumbnail pipeline — only touches
+     * `thumbnailPath` so a concurrent editor save can't be clobbered by a
+     * stale full-row write.
+     */
+    @Query("UPDATE notes SET thumbnailPath = :path WHERE id = :noteId")
+    suspend fun updateThumbnailPath(noteId: String, path: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertItems(items: List<NoteItem>)

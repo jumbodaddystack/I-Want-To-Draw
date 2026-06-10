@@ -16,7 +16,9 @@ interface ChatDao {
     @Query("SELECT * FROM chats WHERE id = :chatId")
     fun getChatByIdFlow(chatId: String): Flow<Chat?>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // Upsert, not @Insert(REPLACE): REPLACE deletes the conflicting chats row
+    // first, which cascade-deletes every message in the chat.
+    @Upsert
     suspend fun insertChat(chat: Chat)
 
     @Update

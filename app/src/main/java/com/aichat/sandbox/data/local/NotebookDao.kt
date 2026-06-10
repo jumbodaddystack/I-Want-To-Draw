@@ -1,9 +1,8 @@
 package com.aichat.sandbox.data.local
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import com.aichat.sandbox.data.model.Notebook
 import kotlinx.coroutines.flow.Flow
 
@@ -16,7 +15,7 @@ interface NotebookDao {
     @Query("SELECT * FROM notebooks WHERE id = :id")
     suspend fun getNotebook(id: String): Notebook?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(notebook: Notebook)
 
     @Query("UPDATE notebooks SET title = :title, updatedAt = :updatedAt WHERE id = :id")
