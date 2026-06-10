@@ -167,7 +167,10 @@ fun NoteEditorScreen(
             // Don't persist a never-touched new note — backing out of a fresh,
             // empty note shouldn't leave a junk "Untitled" row in the list.
             // (commitTextEdit ran first, so typed-but-uncommitted text counts.)
+            // The autosave may already have written a row for content the user
+            // has since undone — discard it so it doesn't resurrect.
             if (viewModel.isBlankNewNote()) {
+                viewModel.discardAutosavedIfBlank()
                 onNavigateBack()
                 return@launch
             }

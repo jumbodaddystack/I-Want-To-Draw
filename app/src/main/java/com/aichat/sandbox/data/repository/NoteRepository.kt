@@ -2,6 +2,7 @@ package com.aichat.sandbox.data.repository
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.local.NoteFrameDao
 import com.aichat.sandbox.data.model.Note
@@ -9,13 +10,16 @@ import com.aichat.sandbox.data.model.NoteFrame
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.data.notes.HandwritingOcr
+import com.aichat.sandbox.data.notes.LayerIntegrity
 import com.aichat.sandbox.data.notes.NoteRasterizer
 import com.aichat.sandbox.data.notes.OcrResult
 import com.aichat.sandbox.data.notes.ThumbnailRenderer
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -84,6 +88,18 @@ class NoteRepository @Inject constructor(
         items: List<NoteItem>,
         layers: List<NoteLayer>,
     ) = withContext(Dispatchers.IO) {
+        // `note_items.layerId` has no SQL FK to `note_layers`, and LayerLookup
+        // tolerates orphans at render time — so drift between the editor state
+        // and the persisted aggregate would otherwise go unnoticed forever.
+        // Save anyway (the data is still renderable), but leave a trail.
+        val drift = LayerIntegrity.findDrift(note, items, layers)
+        if (drift.isNotEmpty()) {
+            Log.w(
+                TAG,
+                "saveNoteWithLayers(${note.id}): ${drift.size} integrity issue(s) — " +
+                    drift.joinToString("; "),
+            )
+        }
         noteDao.saveNoteWithLayers(note, items, layers)
     }
 
@@ -127,9 +143,28 @@ class NoteRepository @Inject constructor(
      * Schedule a thumbnail render on the repository's background scope. Safe to
      * call from a ViewModel's `save()` path — the work outlives the ViewModel
      * because the scope is singleton-scoped.
+     *
+     * Failures are non-fatal (the note row is already saved; the list falls
+     * back to the stub) but they are logged, and the render is retried once —
+     * a transient disk/decode hiccup shouldn't leave a stale thumbnail until
+     * the next save.
      */
     fun renderThumbnailAsync(noteId: String) {
-        backgroundScope.launch { renderThumbnail(noteId) }
+        backgroundScope.launch {
+            try {
+                renderThumbnail(noteId)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                Log.w(TAG, "thumbnail render failed for note $noteId, retrying once", t)
+                delay(ASYNC_RETRY_DELAY_MS)
+                try {
+                    renderThumbnail(noteId)
+                } catch (t2: Throwable) {
+                    if (t2 is CancellationException) throw t2
+                    Log.e(TAG, "thumbnail render failed for note $noteId after retry", t2)
+                }
+            }
+        }
     }
 
     /**
@@ -253,7 +288,19 @@ class NoteRepository @Inject constructor(
         val last = lastOcrAt[noteId]
         if (last != null && now - last < OCR_DEBOUNCE_MS) return false
         lastOcrAt[noteId] = now
-        backgroundScope.launch { runOcr(noteId) }
+        backgroundScope.launch {
+            try {
+                runOcr(noteId)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                // Non-fatal by design (the note saved fine, ocrText just goes
+                // stale), but swallowing it silently makes "why is search not
+                // finding my note" undiagnosable. No retry — recognizer
+                // failures are typically persistent (model not downloaded)
+                // and the next save re-triggers OCR anyway.
+                Log.e(TAG, "background OCR failed for note $noteId", t)
+            }
+        }
         return true
     }
 
@@ -262,9 +309,14 @@ class NoteRepository @Inject constructor(
     private fun thumbnailFile(noteId: String): File = File(thumbnailDir(), "$noteId.png")
 
     companion object {
+        private const val TAG: String = "NoteRepository"
+
         private const val STROKE_KIND: String = "stroke"
 
         /** Per-note debounce window applied by [runOcrAsync]. */
         const val OCR_DEBOUNCE_MS: Long = 2_000L
+
+        /** Pause before [renderThumbnailAsync]'s single retry. */
+        private const val ASYNC_RETRY_DELAY_MS: Long = 500L
     }
 }

@@ -52,6 +52,9 @@ import com.aichat.sandbox.ui.components.notes.ToolPaletteState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -163,6 +166,34 @@ class NoteEditorViewModel @Inject constructor(
 
     private val _canRedo = MutableStateFlow(false)
     val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
+
+    // ── In-session autosave ──────────────────────────────────────────────
+    //
+    // Historically the note persisted only on close / share / AI submit, so a
+    // crash mid-session lost everything since open. Every content mutation
+    // now schedules a debounced background persist via [scheduleAutosave];
+    // rapid edits (a stroke burst, per-keystroke title edits) coalesce into
+    // one DB write [AUTOSAVE_DEBOUNCE_MS] after the last one.
+
+    /** Pending debounced autosave; cancelled and re-armed on every edit. */
+    private var autosaveJob: Job? = null
+
+    /** Serializes [persistSnapshot] so an in-flight autosave can't interleave
+     *  with an explicit save (back-press / share). */
+    private val persistMutex = Mutex()
+
+    /**
+     * Gate: autosave must not run before the initial load finishes — for an
+     * existing note the in-memory state is an empty placeholder until the DB
+     * read lands, and persisting that would wipe the real content.
+     */
+    @Volatile
+    private var initialLoadComplete = false
+
+    /** True once any save (auto or explicit) has written a row for this note.
+     *  Lets the editor clean up an autosaved row if the user empties a brand-new
+     *  note (e.g. draws, undoes, backs out) — see [discardAutosavedIfBlank]. */
+    private var persistedOnce = false
 
     // ── Selection state (sub-phase 1.8) ──────────────────────────────────
     //
@@ -337,6 +368,7 @@ class NoteEditorViewModel @Inject constructor(
         )
         _layers.value = current + layer
         _activeLayerId.value = layer.id
+        scheduleAutosave()
     }
 
     fun toggleLayerVisible(layer: NoteLayer) =
@@ -360,6 +392,7 @@ class NoteEditorViewModel @Inject constructor(
                 else -> it
             }
         }
+        scheduleAutosave()
     }
 
     fun moveLayerDown(layer: NoteLayer) {
@@ -374,6 +407,7 @@ class NoteEditorViewModel @Inject constructor(
                 else -> it
             }
         }
+        scheduleAutosave()
     }
 
     /**
@@ -399,10 +433,12 @@ class NoteEditorViewModel @Inject constructor(
         }
         _layers.value = survivors
         if (_activeLayerId.value == layer.id) _activeLayerId.value = replacementId
+        scheduleAutosave()
     }
 
     private fun updateLayer(id: String, mutate: (NoteLayer) -> NoteLayer) {
         _layers.value = _layers.value.map { if (it.id == id) mutate(it) else it }
+        scheduleAutosave()
     }
 
     /** Layer id new strokes / shapes should inherit. Falls back to "no layer". */
@@ -1082,12 +1118,17 @@ class NoteEditorViewModel @Inject constructor(
                 if (notebookId != null) {
                     _notebook.value = notebookRepository.getNotebook(notebookId)
                 }
+                // Autosave stays gated until here — persisting the empty
+                // placeholder note before this load lands would wipe the
+                // real content.
+                initialLoadComplete = true
             }
         } else {
             // Brand-new note: seed a default "Ink" layer so the first stroke
             // has somewhere to land. Layer is persisted at save() time.
             addLayer("Ink")
             if (entrySource == ENTRY_SOURCE_ICON) seedIconArtboard()
+            initialLoadComplete = true
         }
         // Seed the active brush preset once presets stream in.
         viewModelScope.launch {
@@ -1099,6 +1140,7 @@ class NoteEditorViewModel @Inject constructor(
 
     fun setTitle(title: String) {
         _note.update { it.copy(title = title) }
+        scheduleAutosave()
     }
 
     // ── Colour picker (sub-phase 5.3) ────────────────────────────────────
@@ -1147,6 +1189,7 @@ class NoteEditorViewModel @Inject constructor(
     fun setBackgroundStyle(style: String) {
         if (_note.value.backgroundStyle == style) return
         _note.update { it.copy(backgroundStyle = style) }
+        scheduleAutosave()
     }
 
     /**
@@ -1189,6 +1232,7 @@ class NoteEditorViewModel @Inject constructor(
         while (past.size > UNDO_STACK_CAP) past.removeFirst()
         future.clear()
         updateUndoRedoState()
+        scheduleAutosave()
     }
 
     fun undo() {
@@ -1201,6 +1245,7 @@ class NoteEditorViewModel @Inject constructor(
         }
         future.addLast(action)
         updateUndoRedoState()
+        scheduleAutosave()
     }
 
     fun redo() {
@@ -1211,6 +1256,7 @@ class NoteEditorViewModel @Inject constructor(
         }
         past.addLast(action)
         updateUndoRedoState()
+        scheduleAutosave()
     }
 
     private fun updateUndoRedoState() {
@@ -2482,6 +2528,64 @@ class NoteEditorViewModel @Inject constructor(
             _note.value.title.isBlank()
 
     suspend fun save(): String {
+        // The explicit save persists everything itself — a pending debounced
+        // autosave would only repeat the work (or land after navigate-back).
+        autosaveJob?.cancel()
+        autosaveJob = null
+        val id = persistSnapshot()
+        // Fire-and-forget on the repository's singleton-scoped background scope
+        // so the user isn't held on the editor while we rasterize — and so the
+        // job survives this ViewModel being cleared on navigate-back.
+        repository.renderThumbnailAsync(id)
+        // Same survival guarantee for OCR. Internally debounced to a 2s window
+        // (NoteRepository.OCR_DEBOUNCE_MS) so a save burst — e.g. drag-saves,
+        // background-style toggle, back-press — coalesces into one ML Kit call.
+        repository.runOcrAsync(id)
+        return id
+    }
+
+    /**
+     * Debounced in-session autosave. Armed by every content mutation (stroke
+     * commit, erase, undo/redo, text/title/background/layer/frame edits); a
+     * burst of edits collapses into one [persistSnapshot] call
+     * [AUTOSAVE_DEBOUNCE_MS] after the last one. Skips blank brand-new notes
+     * so backing out of an untouched note still leaves no junk row, and stays
+     * inert until the initial DB load completes.
+     *
+     * Runs on [viewModelScope], so an autosave that hasn't fired by the time
+     * the user navigates back is cancelled — that's fine, because the exit
+     * path runs an explicit [save] first.
+     */
+    private fun scheduleAutosave() {
+        if (!initialLoadComplete) return
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            delay(AUTOSAVE_DEBOUNCE_MS)
+            if (isBlankNewNote()) return@launch
+            persistSnapshot()
+        }
+    }
+
+    /**
+     * Clean up after autosave when the user empties a brand-new note and backs
+     * out (draw → undo → back): the exit path skips the save for blank new
+     * notes, but an autosaved row may already exist — delete it so the list
+     * doesn't resurrect content the user undid. No-op in every other case.
+     */
+    suspend fun discardAutosavedIfBlank() {
+        autosaveJob?.cancel()
+        autosaveJob = null
+        if (persistedOnce && isBlankNewNote()) {
+            repository.deleteNote(resolvedNoteId)
+        }
+    }
+
+    /**
+     * Persist the full in-memory snapshot (note row + items + layers +
+     * frames). Shared by the explicit [save] path and the debounced autosave;
+     * [persistMutex] keeps the two from interleaving their DAO transactions.
+     */
+    private suspend fun persistSnapshot(): String = persistMutex.withLock {
         val current = _note.value
         val sanitizedTitle = current.title.ifBlank { DEFAULT_TITLE }
         // Sub-phase 5.2: serialize the undo/redo log alongside the note row.
@@ -2521,16 +2625,13 @@ class NoteEditorViewModel @Inject constructor(
         // Sub-phase 8.1 — flush the frame list. Lives in its own table to
         // keep the items / layers transaction small.
         repository.saveFrames(toPersist.id, _frames.value)
-        _note.value = toPersist
-        // Fire-and-forget on the repository's singleton-scoped background scope
-        // so the user isn't held on the editor while we rasterize — and so the
-        // job survives this ViewModel being cleared on navigate-back.
-        repository.renderThumbnailAsync(toPersist.id)
-        // Same survival guarantee for OCR. Internally debounced to a 2s window
-        // (NoteRepository.OCR_DEBOUNCE_MS) so a save burst — e.g. drag-saves,
-        // background-style toggle, back-press — coalesces into one ML Kit call.
-        repository.runOcrAsync(toPersist.id)
-        return toPersist.id
+        // The sanitized "Untitled" fallback is for the DB row only — keep the
+        // user's (possibly blank) in-memory title. An autosave mid-session must
+        // not visibly stomp the title field, and `isBlankNewNote` relies on a
+        // blank title to know the discard-on-exit path still applies.
+        _note.value = toPersist.copy(title = current.title)
+        persistedOnce = true
+        toPersist.id
     }
 
     private fun zIndexFor(tool: String?): Int =
@@ -2562,6 +2663,13 @@ class NoteEditorViewModel @Inject constructor(
     )
 
     companion object {
+        /**
+         * Quiet window after the last content mutation before the debounced
+         * autosave fires. Long enough that a multi-stroke burst coalesces into
+         * one write, short enough that a crash loses seconds, not a session.
+         */
+        const val AUTOSAVE_DEBOUNCE_MS = 3_000L
+
         /**
          * Highlighter strokes start at a large negative index so a note can
          * accumulate ~1M highlighter items before colliding with the ink tier.
