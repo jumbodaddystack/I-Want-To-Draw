@@ -100,6 +100,8 @@ fun NoteEditorScreen(
     val selectionMatrix by viewModel.selectionMatrix.collectAsState()
     val textEditTarget by viewModel.textEditTarget.collectAsState()
     val stickyEditTarget by viewModel.stickyEditTarget.collectAsState()
+    // Sub-phase 12.3 — non-null while a single path is in node-edit mode.
+    val nodeEditTarget by viewModel.nodeEditTarget.collectAsState()
     val aiSheetState by viewModel.aiSheetState.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
     val chats by viewModel.chats.collectAsState()
@@ -241,6 +243,9 @@ fun NoteEditorScreen(
         snapshotFlow { viewModel.palette.selected }.collectLatest { tool ->
             if (tool != Tool.TEXT) viewModel.commitTextEdit()
             if (tool != Tool.STICKY) viewModel.commitStickyEdit()
+            // 12.3 — picking any tool backs out of node-edit mode (each
+            // gesture already committed, so this is non-destructive).
+            viewModel.exitNodeEdit()
         }
     }
 
@@ -689,7 +694,31 @@ fun NoteEditorScreen(
                     onAlign = viewModel::alignSelection,
                     onDistribute = viewModel::distributeSelection,
                     onReorder = viewModel::reorderSelection,
+                    // Phase 12.3 — node editing for a single selected path.
+                    canEditNodes = viewModel.selectionIsSinglePath(),
+                    onEditNodes = viewModel::enterNodeEdit,
                 )
+                // Sub-phase 12.3 — node-edit overlay replaces the selection
+                // overlay (the selection cleared when node editing began).
+                val nodeEditItem = nodeEditTarget?.let { id ->
+                    viewModel.items.firstOrNull { it.id == id }
+                }
+                if (!presenting && nodeEditItem != null) {
+                    PathNodeEditor(
+                        item = nodeEditItem,
+                        viewport = viewportController,
+                        onPreview = { payload ->
+                            viewModel.previewPathNodeEdit(nodeEditItem.id, payload)
+                        },
+                        onGestureEnd = { before, description ->
+                            viewModel.commitPathNodeGesture(nodeEditItem.id, before, description)
+                        },
+                        onImmediateEdit = { payload, description ->
+                            viewModel.applyPathNodeEdit(nodeEditItem.id, payload, description)
+                        },
+                        onDone = viewModel::exitNodeEdit,
+                    )
+                }
                 val target = textEditTarget
                 val vp = viewportController
                 if (target != null && vp != null) {

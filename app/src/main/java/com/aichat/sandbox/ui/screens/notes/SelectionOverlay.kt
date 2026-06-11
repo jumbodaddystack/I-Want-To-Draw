@@ -27,8 +27,10 @@ import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.GroupWork
 import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.Polyline
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -120,6 +122,11 @@ fun SelectionOverlay(
     onAlign: ((AlignmentMath.AlignEdge) -> Unit)? = null,
     onDistribute: ((AlignmentMath.Axis) -> Unit)? = null,
     onReorder: ((ZOrderMath.Op) -> Unit)? = null,
+    // Phase 12.3/12.4 — node editing (single path selected) + convert.
+    canEditNodes: Boolean = false,
+    onEditNodes: (() -> Unit)? = null,
+    canConvertToPath: Boolean = false,
+    onConvertToPath: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (selection.isEmpty() || worldBounds == null || viewport == null) return
@@ -344,6 +351,10 @@ fun SelectionOverlay(
             onAlign = onAlign,
             onDistribute = onDistribute,
             onReorder = onReorder,
+            canEditNodes = canEditNodes,
+            onEditNodes = onEditNodes,
+            canConvertToPath = canConvertToPath,
+            onConvertToPath = onConvertToPath,
             modifier = Modifier.layout { measurable, constraints ->
                 val placeable = measurable.measure(
                     Constraints(
@@ -492,6 +503,10 @@ private fun FloatingSelectionMenu(
     onAlign: ((AlignmentMath.AlignEdge) -> Unit)? = null,
     onDistribute: ((AlignmentMath.Axis) -> Unit)? = null,
     onReorder: ((ZOrderMath.Op) -> Unit)? = null,
+    canEditNodes: Boolean = false,
+    onEditNodes: (() -> Unit)? = null,
+    canConvertToPath: Boolean = false,
+    onConvertToPath: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -539,6 +554,22 @@ private fun FloatingSelectionMenu(
                     icon = Icons.Filled.Bookmark,
                     label = "Save stamp",
                     onClick = onSaveAsStamp,
+                )
+            }
+            // Phase 12.3 — node-edit mode for a single selected path.
+            if (canEditNodes && onEditNodes != null) {
+                MenuButton(
+                    icon = Icons.Filled.Polyline,
+                    label = "Edit nodes",
+                    onClick = onEditNodes,
+                )
+            }
+            // Phase 12.4 — shape→path / stroke→path conversion.
+            if (canConvertToPath && onConvertToPath != null) {
+                MenuButton(
+                    icon = Icons.Filled.Timeline,
+                    label = "To path",
+                    onClick = onConvertToPath,
                 )
             }
             // Phase 10.2/10.3 — restyle existing shapes (fill + line style).

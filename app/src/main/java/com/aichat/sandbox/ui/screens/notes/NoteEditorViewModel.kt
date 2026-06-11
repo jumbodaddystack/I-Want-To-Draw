@@ -1651,10 +1651,91 @@ class NoteEditorViewModel @Inject constructor(
     }
 
     fun clearSelection() {
+        // 12.3 — node-edit mode rides on the selection lifecycle: anything
+        // that clears the selection (stray stroke, presentation start) also
+        // backs out of node editing.
+        _nodeEditTarget.value = null
         if (_selection.value.isEmpty()) return
         _selection.value = emptySet()
         _selectionWorldBounds.value = null
         _selectionMatrix.value = StrokeTransform.IDENTITY
+    }
+
+    // ── Path node editing (sub-phase 12.3) ───────────────────────────────
+    //
+    // A single selected path can enter node-edit mode: the editor swaps the
+    // selection overlay for [PathNodeEditor], drags live-mutate the item's
+    // payload (no undo entries), and each finished gesture commits exactly
+    // one CompositeEdit with the gesture-start payload as `before`.
+
+    private val _nodeEditTarget = MutableStateFlow<String?>(null)
+    val nodeEditTarget: StateFlow<String?> = _nodeEditTarget.asStateFlow()
+
+    /** True when the selection is exactly one path item (gates "Edit nodes"). */
+    fun selectionIsSinglePath(): Boolean {
+        val ids = _selection.value
+        if (ids.size != 1) return false
+        val id = ids.first()
+        return items.any { it.id == id && it.kind == PathCodec.KIND }
+    }
+
+    fun enterNodeEdit() {
+        val ids = _selection.value
+        if (ids.size != 1) return
+        val item = items.firstOrNull { it.id == ids.first() } ?: return
+        if (item.kind != PathCodec.KIND) return
+        clearSelection()
+        _nodeEditTarget.value = item.id
+    }
+
+    fun exitNodeEdit() {
+        _nodeEditTarget.value = null
+    }
+
+    /**
+     * Live drag preview: replace the item's payload directly, bypassing the
+     * undo log. The matching [commitPathNodeGesture] turns the whole drag
+     * into one undo entry.
+     */
+    fun previewPathNodeEdit(itemId: String, payload: PathCodec.PathPayload) {
+        val idx = items.indexOfFirst { it.id == itemId }
+        if (idx < 0 || items[idx].kind != PathCodec.KIND) return
+        items[idx] = items[idx].copy(payload = PathCodec.encode(payload))
+    }
+
+    /**
+     * End-of-gesture commit: the item currently holds the live-previewed
+     * "after" payload; [beforePayload] is the gesture-start snapshot. The
+     * item is restored to `before` first so [apply]'s replay leaves the
+     * list exactly as a later undo/redo round-trip would.
+     */
+    fun commitPathNodeGesture(itemId: String, beforePayload: ByteArray, description: String) {
+        val idx = items.indexOfFirst { it.id == itemId }
+        if (idx < 0) return
+        val after = items[idx]
+        if (after.payload.contentEquals(beforePayload)) return
+        val before = after.copy(payload = beforePayload)
+        items[idx] = before
+        apply(EditorAction.CompositeEdit(
+            description = description,
+            added = emptyList(),
+            removed = emptyList(),
+            modified = listOf(before to after),
+        ))
+    }
+
+    /** Tap-like node edit (insert / delete / toggle) — commits immediately. */
+    fun applyPathNodeEdit(itemId: String, payload: PathCodec.PathPayload, description: String) {
+        val item = items.firstOrNull { it.id == itemId } ?: return
+        if (item.kind != PathCodec.KIND) return
+        val encoded = PathCodec.encode(payload)
+        if (encoded.contentEquals(item.payload)) return
+        apply(EditorAction.CompositeEdit(
+            description = description,
+            added = emptyList(),
+            removed = emptyList(),
+            modified = listOf(item to item.copy(payload = encoded)),
+        ))
     }
 
     /**
