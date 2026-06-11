@@ -3,6 +3,7 @@ package com.aichat.sandbox.ui.components.notes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -17,17 +19,20 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingFlat
-import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.BorderColor
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
-import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.HorizontalRule
 import androidx.compose.material.icons.filled.Pentagon
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.outlined.Backspace
 import androidx.compose.material.icons.outlined.Circle
-import androidx.compose.material.icons.outlined.Highlight
-import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -37,6 +42,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,32 +103,126 @@ fun ToolPalette(
     }
 }
 
+/**
+ * One-row tool bar: the three ink tools, a grouped eraser button, lasso,
+ * text, a grouped shapes button and the frame tool. Every button is icon-only
+ * (the old 13 text-chips scrolled off-screen and hid most tools); equal
+ * weights keep the whole roster visible on a 360 dp phone. Grouped buttons
+ * re-select their last-used variant on tap and open a picker on long-press
+ * (or on tap while already active).
+ */
 @Composable
 private fun ToolRow(state: ToolPaletteState) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Tool.entries.forEach { tool ->
-            ToolChip(
-                tool = tool,
-                selected = state.selected == tool,
-                enabled = tool.enabledInPalette,
-                onSelect = { state.select(tool) },
-            )
-        }
+        ToolIconButton(state, Tool.PEN, Modifier.weight(1f))
+        ToolIconButton(state, Tool.HIGHLIGHTER, Modifier.weight(1f))
+        ToolIconButton(state, Tool.PENCIL, Modifier.weight(1f))
+        GroupedToolButton(
+            state = state,
+            groupTools = listOf(Tool.ERASER_STROKE, Tool.ERASER_AREA),
+            lastUsed = state.lastEraserTool,
+            // One fixed glyph for the group: the variant distinction lives in
+            // the picker, where the two get their proper names.
+            groupIcon = { Icons.Outlined.Backspace },
+            groupDescription = "Eraser",
+            modifier = Modifier.weight(1f),
+        )
+        ToolIconButton(state, Tool.LASSO, Modifier.weight(1f))
+        ToolIconButton(state, Tool.TEXT, Modifier.weight(1f))
+        GroupedToolButton(
+            state = state,
+            groupTools = listOf(Tool.LINE, Tool.RECT, Tool.ELLIPSE, Tool.ARROW, Tool.POLYGON),
+            lastUsed = state.lastShapeTool,
+            // The group button wears the last-used shape's glyph so the next
+            // tap's outcome is visible before tapping.
+            groupIcon = { state.lastShapeTool.icon() },
+            groupDescription = "Shapes",
+            modifier = Modifier.weight(1f),
+        )
+        ToolIconButton(state, Tool.FRAME, Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun ToolChip(
+private fun ToolIconButton(
+    state: ToolPaletteState,
     tool: Tool,
+    modifier: Modifier = Modifier,
+) {
+    ToolButtonShell(
+        selected = state.selected == tool,
+        icon = tool.icon(),
+        contentDescription = tool.displayName,
+        onClick = { state.select(tool) },
+        modifier = modifier,
+    )
+}
+
+/**
+ * Grouped tool button (eraser variants / shape roster). Tap re-selects the
+ * group's last-used tool; tap-while-active or long-press opens the variant
+ * picker.
+ */
+@Composable
+private fun GroupedToolButton(
+    state: ToolPaletteState,
+    groupTools: List<Tool>,
+    lastUsed: Tool,
+    groupIcon: () -> ImageVector,
+    groupDescription: String,
+    modifier: Modifier = Modifier,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    val groupActive = state.selected in groupTools
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        ToolButtonShell(
+            selected = groupActive,
+            icon = groupIcon(),
+            contentDescription = groupDescription,
+            onClick = {
+                if (groupActive) menuExpanded = true
+                else state.select(lastUsed)
+            },
+            onLongClick = { menuExpanded = true },
+        )
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+        ) {
+            groupTools.forEach { tool ->
+                DropdownMenuItem(
+                    text = { Text(tool.displayName) },
+                    leadingIcon = {
+                        Icon(tool.icon(), contentDescription = null)
+                    },
+                    trailingIcon = {
+                        if (state.selected == tool) {
+                            Icon(Icons.Filled.Check, contentDescription = "Selected")
+                        }
+                    },
+                    onClick = {
+                        state.select(tool)
+                        menuExpanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** Shared visual for tool buttons: 48 dp target, accent-filled circle when active. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ToolButtonShell(
     selected: Boolean,
-    enabled: Boolean,
-    onSelect: () -> Unit,
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
 ) {
     // Studio Bench signature moment: the active tool fills with the electric
     // accent ("glowing active-tool state"), so you feel which tool is live
@@ -130,38 +233,42 @@ private fun ToolChip(
     } else {
         com.aichat.sandbox.ui.theme.studio.StudioLightColors
     }
-    FilterChip(
-        selected = selected,
-        enabled = enabled,
-        onClick = onSelect,
-        label = { Text(tool.displayName) },
-        leadingIcon = {
+    Box(
+        modifier = modifier
+            .height(48.dp)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(
+                    if (selected) studio.accentSignature else Color.Transparent
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(
-                imageVector = tool.icon(),
-                contentDescription = tool.displayName,
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = if (selected) studio.onAccent
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp),
             )
-        },
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = studio.accentSignature,
-            selectedLabelColor = studio.onAccent,
-            selectedLeadingIconColor = studio.onAccent,
-        ),
-        border = FilterChipDefaults.filterChipBorder(
-            enabled = enabled,
-            selected = selected,
-            borderColor = studio.hairline,
-            selectedBorderColor = studio.accentSignature,
-        ),
-    )
+        }
+    }
 }
 
 private fun Tool.icon(): ImageVector = when (this) {
-    Tool.PEN -> Icons.Filled.Create
-    Tool.HIGHLIGHTER -> Icons.Filled.Brush
+    // Distinct glyphs per ink tool — Pen and Pencil used to share two nearly
+    // identical pencil icons, and Lasso wore the Highlight glyph while the
+    // Highlighter wore Brush.
+    Tool.PEN -> Icons.Filled.Draw
+    Tool.HIGHLIGHTER -> Icons.Filled.BorderColor
     Tool.PENCIL -> Icons.Filled.Edit
-    Tool.ERASER_STROKE -> Icons.Outlined.RadioButtonUnchecked
-    Tool.ERASER_AREA -> Icons.Outlined.RadioButtonUnchecked
-    Tool.LASSO -> Icons.Outlined.Highlight
+    Tool.ERASER_STROKE -> Icons.Outlined.Backspace
+    Tool.ERASER_AREA -> Icons.Outlined.Backspace
+    Tool.LASSO -> Icons.Filled.Gesture
     Tool.TEXT -> Icons.Filled.TextFields
     Tool.LINE -> Icons.Filled.HorizontalRule
     Tool.RECT -> Icons.Filled.CheckBoxOutlineBlank
@@ -192,7 +299,7 @@ private fun InkConfigRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ToolPaletteState.DEFAULT_COLOR_SWATCHES.forEach { swatch ->
@@ -217,17 +324,43 @@ private fun InkConfigRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = "Width",
-                style = MaterialTheme.typography.labelMedium,
-            )
+            // Live nib preview — a dot at the active colour whose diameter
+            // tracks the slider, so "what will this stroke look like" is
+            // answered before touching the canvas.
+            WidthPreviewDot(widthPx = activeWidth, colorArgb = activeColor)
             Slider(
                 value = activeWidth,
                 onValueChange = { state.setWidth(activeInk, it) },
                 valueRange = ToolPaletteState.WIDTH_MIN_PX..ToolPaletteState.WIDTH_MAX_PX,
                 modifier = Modifier.weight(1f),
             )
+            Text(
+                text = "%.1f".format(activeWidth),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
+    }
+}
+
+@Composable
+private fun WidthPreviewDot(widthPx: Float, colorArgb: Int) {
+    // Map the 0.5–10 px width range onto a 4–24 dp dot: exact pixel size
+    // would be invisible at the thin end, so the mapping favours legibility
+    // over physical accuracy.
+    val fraction = (widthPx - ToolPaletteState.WIDTH_MIN_PX) /
+        (ToolPaletteState.WIDTH_MAX_PX - ToolPaletteState.WIDTH_MIN_PX)
+    val diameter = (4f + fraction * 20f).dp
+    Box(
+        modifier = Modifier.size(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(diameter)
+                .clip(CircleShape)
+                .background(Color(colorArgb)),
+        )
     }
 }
 
@@ -351,23 +484,32 @@ private fun ColorSwatch(
     val color = Color(colorArgb)
     val ring = MaterialTheme.colorScheme.primary
     val idleOutline = MaterialTheme.colorScheme.outline
+    // Gesture target is the full 44 dp box; the visible swatch stays a
+    // compact 28 dp circle. The bare 28 dp circles were well under the
+    // touch-target minimum and easy to fat-finger.
     Box(
         modifier = Modifier
-            .size(28.dp)
-            .clip(CircleShape)
-            .background(color)
-            .border(
-                width = if (selected) 2.dp else 1.dp,
-                color = if (selected) ring else idleOutline,
-                shape = CircleShape,
-            )
+            .size(44.dp)
             .pointerInput(colorArgb) {
                 detectTapGestures(
                     onTap = { onSelect() },
                     onLongPress = { onLongPress() },
                 )
-            }
-    )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(color)
+                .border(
+                    width = if (selected) 2.dp else 1.dp,
+                    color = if (selected) ring else idleOutline,
+                    shape = CircleShape,
+                ),
+        )
+    }
 }
 
 @Composable
@@ -380,26 +522,32 @@ private fun CustomColorTile(
     val idleOutline = MaterialTheme.colorScheme.outline
     Box(
         modifier = Modifier
-            .size(28.dp)
-            .clip(CircleShape)
-            .background(
-                if (showingCustom && customColorArgb != null) Color(customColorArgb)
-                else MaterialTheme.colorScheme.surfaceVariant
-            )
-            .border(
-                width = if (showingCustom) 2.dp else 1.dp,
-                color = if (showingCustom) ring else idleOutline,
-                shape = CircleShape,
-            )
+            .size(44.dp)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = Icons.Filled.Add,
-            contentDescription = "Custom colour",
-            tint = if (showingCustom) Color.White
-            else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(16.dp),
-        )
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(
+                    if (showingCustom && customColorArgb != null) Color(customColorArgb)
+                    else MaterialTheme.colorScheme.surfaceVariant
+                )
+                .border(
+                    width = if (showingCustom) 2.dp else 1.dp,
+                    color = if (showingCustom) ring else idleOutline,
+                    shape = CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = "Custom colour",
+                tint = if (showingCustom) Color.White
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
 }

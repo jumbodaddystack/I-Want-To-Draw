@@ -18,10 +18,12 @@ import com.aichat.sandbox.data.model.VectorTuneupProjectEntity
 import com.aichat.sandbox.data.model.VectorTuneupVersionEntity
 
 // Note: `notes_ocr_fts` (Phase 9.3) is intentionally NOT a registered
-// entity. It's a virtual FTS4 table managed entirely by `MIGRATION_11_12`
-// (creation + triggers) and queried via raw SQL through `NoteSearchDao`.
-// Decoupling from Room's `@Fts4(contentEntity = ...)` mechanism avoids
-// trigger-name collisions with the explicit sync triggers we install.
+// entity. It's a virtual FTS4 table managed entirely by raw SQL — see
+// `createNotesSearchIndex` in Migrations.kt (run from `MIGRATION_17_18` on
+// upgrade and from AppModule's database `onCreate` callback on fresh
+// installs) — and queried through `NoteSearchDao`. Decoupling from Room's
+// `@Fts4(contentEntity = ...)` mechanism avoids trigger-name collisions
+// with the explicit sync triggers we install.
 @Database(
     entities = [
         Chat::class,
@@ -39,7 +41,7 @@ import com.aichat.sandbox.data.model.VectorTuneupVersionEntity
         VectorTuneupVersionEntity::class,
         VectorSymbolEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

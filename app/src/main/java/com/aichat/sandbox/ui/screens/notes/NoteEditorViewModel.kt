@@ -33,6 +33,7 @@ import com.aichat.sandbox.data.notes.NoteSvgExporter
 import com.aichat.sandbox.data.notes.PdfLayout
 import com.aichat.sandbox.data.notes.PendingDraftStore
 import com.aichat.sandbox.data.notes.RecentColorsStore
+import com.aichat.sandbox.data.notes.ToolPalettePrefsStore
 import com.aichat.sandbox.data.repository.BrushPresetRepository
 import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
@@ -49,10 +50,14 @@ import com.aichat.sandbox.ui.components.notes.TextItemCodec
 import com.aichat.sandbox.ui.components.notes.TextItemRenderer
 import com.aichat.sandbox.ui.components.notes.Tool
 import com.aichat.sandbox.ui.components.notes.ToolPaletteState
+import androidx.compose.runtime.snapshotFlow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -115,6 +120,7 @@ class NoteEditorViewModel @Inject constructor(
     private val noteSvgExporter: NoteSvgExporter,
     private val noteVectorDrawableExporter: com.aichat.sandbox.data.notes.NoteVectorDrawableExporter,
     private val recentColorsStore: RecentColorsStore,
+    private val palettePrefsStore: ToolPalettePrefsStore,
     private val brushPresets: BrushPresetRepository,
     private val noteImageStore: NoteImageStore,
     private val stampRepository: StampRepository,
@@ -1142,6 +1148,72 @@ class NoteEditorViewModel @Inject constructor(
             brushPresetList.collect { all ->
                 if (all.isNotEmpty()) seedActiveBrushPresetIfNeeded(all)
             }
+        }
+        restoreAndPersistPalette()
+    }
+
+    /**
+     * Restore the persisted palette (selected tool, per-tool colour/width,
+     * eraser radius), then mirror every subsequent change back to
+     * [ToolPalettePrefsStore] on a short debounce so the next editor open
+     * lands on the user's last setup instead of Pen / black / 4 px.
+     *
+     * `entryStylus` deep-links keep their pinned PEN selection — only the
+     * colour/width slots are restored for those.
+     */
+    @OptIn(FlowPreview::class)
+    private fun restoreAndPersistPalette() {
+        viewModelScope.launch {
+            val saved = palettePrefsStore.prefs.first()
+            palette.restore(
+                selectedToolId = if (entryStylus) null else saved.selectedToolId,
+                inkColors = saved.inkColors,
+                inkWidths = saved.inkWidths,
+                areaEraserRadiusPx = saved.areaEraserRadiusPx,
+            )
+            val inkTools = listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.PENCIL)
+            snapshotFlow {
+                PaletteSnapshot(
+                    selectedToolId = palette.selected.id,
+                    inkColors = inkTools.associate { it.id to palette.colorFor(it) },
+                    inkWidths = inkTools.associate { it.id to palette.widthFor(it) },
+                    areaEraserRadiusPx = palette.areaEraserRadiusPx,
+                )
+            }
+                // The first emission is the state we just restored.
+                .drop(1)
+                .debounce(PALETTE_PERSIST_DEBOUNCE_MS)
+                .collect { snap ->
+                    palettePrefsStore.savePalette(
+                        selectedToolId = snap.selectedToolId,
+                        inkColors = snap.inkColors,
+                        inkWidths = snap.inkWidths,
+                        areaEraserRadiusPx = snap.areaEraserRadiusPx,
+                    )
+                }
+        }
+    }
+
+    private data class PaletteSnapshot(
+        val selectedToolId: String,
+        val inkColors: Map<String, Int>,
+        val inkWidths: Map<String, Float>,
+        val areaEraserRadiusPx: Float,
+    )
+
+    // ── "Draw with finger" (user setting) ────────────────────────────────
+
+    val fingerDrawing: StateFlow<Boolean> = palettePrefsStore.prefs
+        .map { it.fingerDrawing }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
+    fun setFingerDrawing(enabled: Boolean) {
+        viewModelScope.launch {
+            palettePrefsStore.setFingerDrawing(enabled)
         }
     }
 
@@ -2578,6 +2650,24 @@ class NoteEditorViewModel @Inject constructor(
     }
 
     /**
+     * Flush a pending debounced autosave immediately. Called from the screen
+     * on lifecycle ON_STOP: with only the 3-second debounce, backgrounding the
+     * app and getting process-killed inside that window silently drops the
+     * last edits. No-op when nothing is pending — the content is then already
+     * persisted (or the note is a blank new one the exit path will handle).
+     */
+    fun flushPendingSave() {
+        val pending = autosaveJob ?: return
+        autosaveJob = null
+        pending.cancel()
+        if (!initialLoadComplete) return
+        viewModelScope.launch {
+            if (isBlankNewNote()) return@launch
+            persistSnapshot()
+        }
+    }
+
+    /**
      * Clean up after autosave when the user empties a brand-new note and backs
      * out (draw → undo → back): the exit path skips the save for blank new
      * notes, but an autosaved row may already exist — delete it so the list
@@ -2680,6 +2770,13 @@ class NoteEditorViewModel @Inject constructor(
          * one write, short enough that a crash loses seconds, not a session.
          */
         const val AUTOSAVE_DEBOUNCE_MS = 3_000L
+
+        /**
+         * Quiet window before palette changes (tool / colour / width) are
+         * written back to [ToolPalettePrefsStore] — a width-slider drag emits
+         * dozens of states; one DataStore write at the end is plenty.
+         */
+        const val PALETTE_PERSIST_DEBOUNCE_MS = 500L
 
         /**
          * Highlighter strokes start at a large negative index so a note can

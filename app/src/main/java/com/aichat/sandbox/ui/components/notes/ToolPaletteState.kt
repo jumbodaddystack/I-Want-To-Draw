@@ -49,6 +49,11 @@ enum class Tool(
         get() = this == LINE || this == RECT || this == ELLIPSE ||
             this == ARROW || this == POLYGON
     val isFrame: Boolean get() = this == FRAME
+
+    companion object {
+        /** Resolve a persisted [id] back to its enum, or null for unknown ids. */
+        fun fromId(id: String?): Tool? = entries.firstOrNull { it.id == id }
+    }
 }
 
 /**
@@ -56,9 +61,9 @@ enum class Tool(
  * Eraser radius is also held here so the area eraser can be tuned without
  * touching the surface.
  *
- * Lifetime: this lives in the editor's ViewModel — choices persist while the
- * editor is open but are intentionally not written to disk in v1 (saving
- * tool presets across sessions is explicitly out of scope for sub-phase 1.6).
+ * Lifetime: this lives in the editor's ViewModel. Choices survive across
+ * sessions via `ToolPalettePrefsStore` — the ViewModel calls [restore] with
+ * the persisted snapshot on open and writes changes back on a debounce.
  */
 class ToolPaletteState {
 
@@ -85,11 +90,21 @@ class ToolPaletteState {
     var lastInkTool: Tool by mutableStateOf(Tool.PEN)
         private set
 
+    /** Most-recent eraser — the grouped eraser button re-selects this on tap. */
+    var lastEraserTool: Tool by mutableStateOf(Tool.ERASER_STROKE)
+        private set
+
+    /** Most-recent shape — the grouped shapes button re-selects this on tap. */
+    var lastShapeTool: Tool by mutableStateOf(Tool.LINE)
+        private set
+
     fun select(tool: Tool) {
         if (!tool.enabledInPalette) return
         if (selected == tool) return
         selected = tool
         if (tool.isInk) lastInkTool = tool
+        if (tool.isEraser) lastEraserTool = tool
+        if (tool.isShape) lastShapeTool = tool
     }
 
     fun colorFor(tool: Tool): Int = colors[tool] ?: Color.BLACK
@@ -112,6 +127,27 @@ class ToolPaletteState {
     /** Color shown on the swatch row — follows whichever ink tool was last active. */
     fun activeInkColor(): Int = colors[lastInkTool] ?: Color.BLACK
     fun activeInkWidth(): Float = widths[lastInkTool] ?: 4f
+
+    /**
+     * Apply a persisted snapshot. Unknown tool ids and missing fields are
+     * skipped so stale prefs (e.g. a removed tool) degrade to the defaults
+     * instead of failing. Widths/radius re-run their normal clamps.
+     */
+    fun restore(
+        selectedToolId: String?,
+        inkColors: Map<String, Int>,
+        inkWidths: Map<String, Float>,
+        areaEraserRadiusPx: Float?,
+    ) {
+        for ((id, color) in inkColors) {
+            Tool.fromId(id)?.let { setColor(it, color) }
+        }
+        for ((id, width) in inkWidths) {
+            Tool.fromId(id)?.let { setWidth(it, width) }
+        }
+        areaEraserRadiusPx?.let { setAreaEraserRadius(it) }
+        Tool.fromId(selectedToolId)?.let { select(it) }
+    }
 
     companion object {
         const val WIDTH_MIN_PX = 0.5f

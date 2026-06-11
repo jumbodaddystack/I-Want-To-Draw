@@ -30,8 +30,10 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Polyline
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,6 +49,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -115,9 +120,11 @@ fun NoteEditorScreen(
     val audioPosition by viewModel.audioPlayer.positionMs.collectAsState()
     val audioPlaybackState by viewModel.audioPlayer.state.collectAsState()
     val audioActiveClip by viewModel.audioPlayer.activeClip.collectAsState()
+    val fingerDrawing by viewModel.fingerDrawing.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
+    var panelsMenuExpanded by remember { mutableStateOf(false) }
     var pdfDialogVisible by remember { mutableStateOf(false) }
     var vectorXmlDialogVisible by remember { mutableStateOf(false) }
     // Live preview + skipped-item count for the vector-XML export dialog,
@@ -186,6 +193,18 @@ fun NoteEditorScreen(
     }
 
     BackHandler(onBack = ::saveAndExit)
+
+    // Backgrounding the app (home button, app switch) flushes any pending
+    // debounced autosave — otherwise a process kill inside the 3-second
+    // debounce window silently drops the last edits.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) viewModel.flushPendingSave()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Switching away from the TEXT tool commits any in-flight edit so the
     // user doesn't see a stale editor floating over their ink stroke. The
@@ -308,54 +327,71 @@ fun NoteEditorScreen(
                             contentDescription = if (note.isIcon) "Edit icon with AI" else "Ask AI about this note",
                         )
                     }
-                    // Sub-phase 8.2 — frame navigator toggle.
-                    // In notebook mode we surface a Pages rail instead so
-                    // the canvas only carries one strip at a time.
-                    if (notebook != null) {
-                        IconButton(onClick = viewModel::togglePageRail) {
+                    // Panels group — frames/pages, stamps and layers fold into
+                    // one menu so the bar keeps room for the title on phones
+                    // (eight standalone actions used to squeeze it out
+                    // entirely). The zoom chip moved onto the canvas itself.
+                    Box {
+                        IconButton(onClick = { panelsMenuExpanded = true }) {
                             Icon(
                                 imageVector = Icons.Filled.Dashboard,
-                                contentDescription = "Pages",
+                                contentDescription = "Panels",
                             )
                         }
-                    } else {
-                        IconButton(onClick = viewModel::toggleFrameNavigator) {
-                            Icon(
-                                imageVector = Icons.Filled.Dashboard,
-                                contentDescription = "Frames",
+                        DropdownMenu(
+                            expanded = panelsMenuExpanded,
+                            onDismissRequest = { panelsMenuExpanded = false },
+                        ) {
+                            // Sub-phase 8.2 — frame navigator. In notebook
+                            // mode we surface a Pages rail instead so the
+                            // canvas only carries one strip at a time.
+                            if (notebook != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Pages") },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.Dashboard, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        panelsMenuExpanded = false
+                                        viewModel.togglePageRail()
+                                    },
+                                )
+                            } else {
+                                DropdownMenuItem(
+                                    text = { Text("Frames") },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.Dashboard, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        panelsMenuExpanded = false
+                                        viewModel.toggleFrameNavigator()
+                                    },
+                                )
+                            }
+                            // Sub-phase 8.3 — stamp drawer.
+                            DropdownMenuItem(
+                                text = { Text("Stamps") },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Bookmark, contentDescription = null)
+                                },
+                                onClick = {
+                                    panelsMenuExpanded = false
+                                    viewModel.openStampDrawer()
+                                },
+                            )
+                            // Sub-phase 6.4 — layers panel.
+                            DropdownMenuItem(
+                                text = { Text("Layers") },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Layers, contentDescription = null)
+                                },
+                                onClick = {
+                                    panelsMenuExpanded = false
+                                    viewModel.toggleLayersPanel()
+                                },
                             )
                         }
                     }
-                    // Sub-phase 8.3 — stamp drawer.
-                    IconButton(onClick = viewModel::openStampDrawer) {
-                        Icon(
-                            imageVector = Icons.Filled.Bookmark,
-                            contentDescription = "Stamps",
-                        )
-                    }
-                    // Sub-phase 6.4 — layers panel toggle.
-                    IconButton(onClick = viewModel::toggleLayersPanel) {
-                        Icon(
-                            imageVector = Icons.Filled.Layers,
-                            contentDescription = "Layers",
-                        )
-                    }
-                    // Phase 5.4 — zoom chip + Fit / 100% / Center popover.
-                    // Bounds are recomputed lazily on each menu open so the
-                    // user doesn't pay for a scan on every TopAppBar
-                    // recomposition.
-                    ZoomChrome(
-                        viewport = viewportController,
-                        canvasSize = canvasSize,
-                        contentBoundsProvider = {
-                            val bounds = viewModel.computeBoundsForExport()
-                            // The exporter returns a default A4-ish rect for
-                            // empty notes; fit-on-empty would be visually
-                            // confusing, so collapse those to null.
-                            if (viewModel.items.isEmpty()) null else bounds
-                        },
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                    )
                     IconButton(onClick = viewModel::undo, enabled = canUndo) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Undo,
@@ -380,6 +416,10 @@ fun NoteEditorScreen(
                             current = note.backgroundStyle,
                             hasActiveFrame = currentFrameId != null,
                             isIcon = note.isIcon,
+                            fingerDrawing = fingerDrawing,
+                            onToggleFingerDrawing = {
+                                viewModel.setFingerDrawing(!fingerDrawing)
+                            },
                             onResizeArtboard = {
                                 menuExpanded = false
                                 canvasSizeDialogVisible = true
@@ -521,12 +561,31 @@ fun NoteEditorScreen(
                     onFrameDrawn = viewModel::onFrameDrawn,
                     onFrameTap = viewModel::onFrameTap,
                     recordingStartedAt = recordingStartedAt,
+                    fingerInkEnabled = fingerDrawing,
                     // Icons are a bounded canvas: clip ink to the artboard.
                     artboardClipBounds = if (note.isIcon) {
                         viewModel.currentFrameBounds()
                     } else {
                         null
                     },
+                )
+                // Phase 5.4 — zoom chip + Fit / 100% / Center popover. Lives
+                // on the canvas (not the TopAppBar) so the bar keeps room for
+                // the title. Bounds are recomputed lazily on each menu open
+                // so the user doesn't pay for a scan per recomposition.
+                ZoomChrome(
+                    viewport = viewportController,
+                    canvasSize = canvasSize,
+                    contentBoundsProvider = {
+                        val bounds = viewModel.computeBoundsForExport()
+                        // The exporter returns a default A4-ish rect for
+                        // empty notes; fit-on-empty would be visually
+                        // confusing, so collapse those to null.
+                        if (viewModel.items.isEmpty()) null else bounds
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
                 // Sub-phase 8.1 — frame rectangles + name labels rendered
                 // above the canvas.
@@ -986,6 +1045,8 @@ private fun EditorOverflowMenu(
     current: String,
     hasActiveFrame: Boolean,
     isIcon: Boolean,
+    fingerDrawing: Boolean,
+    onToggleFingerDrawing: () -> Unit,
     onResizeArtboard: () -> Unit,
     onDismiss: () -> Unit,
     onBackgroundSelect: (String) -> Unit,
@@ -1033,6 +1094,24 @@ private fun EditorOverflowMenu(
                 Icon(Icons.Filled.MoreVert, contentDescription = null)
             },
             onClick = onToggleBrushSheet,
+        )
+        // "Draw with finger" — lets phones without a stylus ink at all.
+        // Off: classic routing (finger pans, stylus inks). On: one finger
+        // inks, two fingers pan/zoom; a stylus still takes priority.
+        DropdownMenuItem(
+            text = { Text("Draw with finger") },
+            leadingIcon = {
+                Icon(Icons.Filled.TouchApp, contentDescription = null)
+            },
+            trailingIcon = {
+                if (fingerDrawing) {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = "Enabled",
+                    )
+                }
+            },
+            onClick = onToggleFingerDrawing,
         )
         HorizontalDivider()
         Text(

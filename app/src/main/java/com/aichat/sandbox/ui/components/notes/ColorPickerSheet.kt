@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -26,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -159,6 +163,7 @@ fun ColorPickerSheet(
                 hex = hexText,
                 error = hexError,
                 previewArgb = currentColor,
+                initialArgb = initialColorArgb,
                 onHexChanged = { text ->
                     hexText = text
                     val parsed = parseHex(text)
@@ -172,6 +177,14 @@ fun ColorPickerSheet(
                         lightness = hsl.lightness
                         alpha = (parsed ushr 24) / 255f
                     }
+                },
+                onRestoreInitial = {
+                    hue = initialHsl.hue
+                    saturation = initialHsl.saturation
+                    lightness = initialHsl.lightness
+                    alpha = (initialColorArgb ushr 24) / 255f
+                    hexError = false
+                    hexText = formatHex(initialColorArgb)
                 },
             )
 
@@ -201,18 +214,27 @@ private fun RecentsRow(
             style = MaterialTheme.typography.labelMedium,
         )
         Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
         ) {
             recents.take(RecentColorsStoreLimit).forEach { argb ->
+                // Full-height 28 dp tap target around the 24 dp visual — the
+                // bare circles were the smallest targets on the sheet.
                 Box(
                     modifier = Modifier
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(Color(argb))
-                        .border(0.5.dp, Color.Black.copy(alpha = 0.25f), CircleShape)
+                        .size(28.dp)
                         .clickable { onPick(argb) },
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(Color(argb))
+                            .border(0.5.dp, Color.Black.copy(alpha = 0.25f), CircleShape),
+                    )
+                }
             }
         }
     }
@@ -387,27 +409,36 @@ private fun AlphaSlider(
             text = "Alpha ${(alpha * 100).toInt()}%",
             style = MaterialTheme.typography.labelMedium,
         )
-        // The slider's underlying gradient hints at the current colour at
-        // both ends — transparent on the left, opaque on the right.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(20.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(
-                            Color.hsl(hue, saturation, lightness, 0f),
-                            Color.hsl(hue, saturation, lightness, 1f),
+        // One control: the transparent → opaque gradient *is* the slider
+        // track (the slider's own track is made transparent and the thumb
+        // rides directly on the gradient). The old layout stacked a
+        // decorative gradient strip above a plain slider, which read as two
+        // disconnected rows.
+        Box(contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(20.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.hsl(hue, saturation, lightness, 0f),
+                                Color.hsl(hue, saturation, lightness, 1f),
+                            ),
                         ),
                     ),
+            )
+            Slider(
+                value = alpha,
+                onValueChange = onAlphaChanged,
+                valueRange = 0f..1f,
+                colors = SliderDefaults.colors(
+                    activeTrackColor = Color.Transparent,
+                    inactiveTrackColor = Color.Transparent,
                 ),
-        )
-        Slider(
-            value = alpha,
-            onValueChange = onAlphaChanged,
-            valueRange = 0f..1f,
-        )
+            )
+        }
     }
 }
 
@@ -416,7 +447,9 @@ private fun HexRow(
     hex: String,
     error: Boolean,
     previewArgb: Int,
+    initialArgb: Int,
     onHexChanged: (String) -> Unit,
+    onRestoreInitial: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -438,13 +471,29 @@ private fun HexRow(
             ),
             modifier = Modifier.weight(1f),
         )
-        Box(
+        // Old-vs-new comparison swatch: left half is the colour the sheet
+        // opened with (tap to restore it), right half tracks the live pick —
+        // a single preview circle gave nothing to compare against.
+        Row(
             modifier = Modifier
-                .size(40.dp)
+                .size(48.dp)
                 .clip(CircleShape)
-                .background(Color(previewArgb))
-                .border(1.dp, Color.Black.copy(alpha = 0.25f), CircleShape),
-        )
+                .border(1.dp, Color.Black.copy(alpha = 0.25f), CircleShape)
+                .clickable(onClick = onRestoreInitial),
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(Color(initialArgb)),
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(Color(previewArgb)),
+            )
+        }
     }
 }
 

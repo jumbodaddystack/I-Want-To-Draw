@@ -570,3 +570,75 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
         )
     }
 }
+
+/**
+ * (Re)build the notes search index — v2 shape: `FTS4(title, ocrText)` so a
+ * note is findable by its title, not just by recognized handwriting.
+ *
+ * Shared between [MIGRATION_17_18] (upgrades) and the database `onCreate`
+ * callback in `AppModule` (fresh installs). The original v12 index existed
+ * only inside `MIGRATION_11_12`, which fresh installs never run — so any
+ * database born at version ≥ 12 was missing the table entirely and note
+ * search threw "no such table". Routing creation through this helper closes
+ * that gap. Idempotent: drops and rebuilds the table + triggers, reseeding
+ * from `notes`.
+ */
+fun createNotesSearchIndex(db: SupportSQLiteDatabase) {
+    db.execSQL("DROP TRIGGER IF EXISTS notes_fts_ai")
+    db.execSQL("DROP TRIGGER IF EXISTS notes_fts_ad")
+    db.execSQL("DROP TRIGGER IF EXISTS notes_fts_au")
+    db.execSQL("DROP TABLE IF EXISTS notes_ocr_fts")
+    db.execSQL(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS `notes_ocr_fts`
+            USING FTS4(`title` TEXT NOT NULL, `ocrText` TEXT NOT NULL)
+        """.trimIndent()
+    )
+    // Seed every row (not just OCR-bearing ones) so title-only notes are
+    // searchable too. Empty strings never match a `term*` prefix query.
+    db.execSQL(
+        """
+        INSERT INTO `notes_ocr_fts`(`docid`, `title`, `ocrText`)
+            SELECT `rowid`, COALESCE(`title`, ''), COALESCE(`ocrText`, '')
+            FROM `notes`
+        """.trimIndent()
+    )
+    db.execSQL(
+        """
+        CREATE TRIGGER IF NOT EXISTS notes_fts_ai AFTER INSERT ON notes BEGIN
+            INSERT INTO notes_ocr_fts(docid, title, ocrText)
+                VALUES(new.rowid, COALESCE(new.title, ''), COALESCE(new.ocrText, ''));
+        END;
+        """.trimIndent()
+    )
+    db.execSQL(
+        """
+        CREATE TRIGGER IF NOT EXISTS notes_fts_ad AFTER DELETE ON notes BEGIN
+            DELETE FROM notes_ocr_fts WHERE docid = old.rowid;
+        END;
+        """.trimIndent()
+    )
+    // Covers both full-row updates (Room @Upsert's conflict path) and the
+    // partial `NoteDao.updateOcrText` UPDATE.
+    db.execSQL(
+        """
+        CREATE TRIGGER IF NOT EXISTS notes_fts_au
+        AFTER UPDATE OF title, ocrText ON notes BEGIN
+            DELETE FROM notes_ocr_fts WHERE docid = old.rowid;
+            INSERT INTO notes_ocr_fts(docid, title, ocrText)
+                VALUES(new.rowid, COALESCE(new.title, ''), COALESCE(new.ocrText, ''));
+        END;
+        """.trimIndent()
+    )
+}
+
+/**
+ * Migration from version 17 to 18:
+ * Rebuilds `notes_ocr_fts` with a `title` column so note search matches
+ * titles as well as handwriting OCR text. See [createNotesSearchIndex].
+ */
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        createNotesSearchIndex(db)
+    }
+}

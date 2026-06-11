@@ -91,6 +91,16 @@ class DrawingSurface(context: Context) : View(context) {
      */
     var sketchMode: Boolean = false
 
+    /**
+     * "Draw with finger" (user setting). When enabled, a single finger inks
+     * through the same path as the stylus while two fingers still pan/zoom —
+     * a second finger landing mid-stroke abandons the stroke and hands the
+     * gesture to the viewport. A stylus keeps absolute priority either way.
+     * Off by default: the classic routing (finger = viewport) is what S-Pen
+     * users expect for palm rejection.
+     */
+    var fingerInkEnabled: Boolean = false
+
     private var sceneBitmap: Bitmap? = null
     private var sceneCanvas: Canvas? = null
     private var sceneDirty = true
@@ -287,6 +297,10 @@ class DrawingSurface(context: Context) : View(context) {
     private var panLastX: Float = 0f
     private var panLastY: Float = 0f
     private var pinchLastDist: Float = 0f
+    // Pinch focal-point tracking — moving both fingers together pans, so the
+    // viewport stays reachable when finger drawing claims the one-finger drag.
+    private var pinchLastFocalX: Float = 0f
+    private var pinchLastFocalY: Float = 0f
 
     // ── Text-tool tap detection (sub-phase 1.9) ──────────────────────────
     // Below the slop a single-pointer DOWN/UP counts as a tap and fires
@@ -549,7 +563,39 @@ class DrawingSurface(context: Context) : View(context) {
             gestureMode = GestureMode.NONE
             return handleStylusEvent(event, stylusIdx)
         }
+        if (fingerInkEnabled) {
+            return handleFingerInkEvent(event)
+        }
         return handleViewportEvent(event)
+    }
+
+    /**
+     * "Draw with finger" routing: a single finger inks exactly like a stylus;
+     * a second finger landing mid-stroke abandons the stroke and converts the
+     * gesture into a viewport pinch (zoom + two-finger pan). The pinch stays
+     * sticky until every pointer lifts so a finger that lingers after the
+     * zoom can't leave a stray mark.
+     */
+    private fun handleFingerInkEvent(event: MotionEvent): Boolean {
+        if (gestureMode != GestureMode.NONE) {
+            // Mid-viewport gesture (pinch, or pan after one finger lifted) —
+            // keep feeding the viewport until ACTION_UP resets the mode.
+            return handleViewportEvent(event)
+        }
+        return when (event.actionMasked) {
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // Second finger arrived: this is a zoom, not a stroke.
+                cancelLiveStroke()
+                if (event.pointerCount >= 2) {
+                    pinchLastDist = pointerDistance(event, 0, 1)
+                    pinchLastFocalX = (event.getX(0) + event.getX(1)) * 0.5f
+                    pinchLastFocalY = (event.getY(0) + event.getY(1)) * 0.5f
+                    gestureMode = GestureMode.PINCH
+                }
+                true
+            }
+            else -> handleStylusEvent(event, 0)
+        }
     }
 
     private fun handleTextToolEvent(event: MotionEvent): Boolean {
@@ -688,19 +734,24 @@ class DrawingSurface(context: Context) : View(context) {
                 true
             }
             MotionEvent.ACTION_CANCEL -> {
-                liveSampleCount = 0
-                lassoCount = 0
-                clearPredicted()
-                if (strokeTool.isEraser && pendingErase.isNotEmpty()) {
-                    // Undo the visual erase — items return to the scene.
-                    pendingErase.clear()
-                    sceneDirty = true
-                }
-                invalidate()
+                cancelLiveStroke()
                 true
             }
             else -> false
         }
+    }
+
+    /** Abandon the in-flight stroke / lasso / pending erase without committing. */
+    private fun cancelLiveStroke() {
+        liveSampleCount = 0
+        lassoCount = 0
+        clearPredicted()
+        if (strokeTool.isEraser && pendingErase.isNotEmpty()) {
+            // Undo the visual erase — items return to the scene.
+            pendingErase.clear()
+            sceneDirty = true
+        }
+        invalidate()
     }
 
     private fun appendLassoVertex(event: MotionEvent, idx: Int) {
@@ -770,6 +821,8 @@ class DrawingSurface(context: Context) : View(context) {
             MotionEvent.ACTION_POINTER_DOWN -> {
                 if (event.pointerCount >= 2) {
                     pinchLastDist = pointerDistance(event, 0, 1)
+                    pinchLastFocalX = (event.getX(0) + event.getX(1)) * 0.5f
+                    pinchLastFocalY = (event.getY(0) + event.getY(1)) * 0.5f
                     gestureMode = GestureMode.PINCH
                 }
                 true
@@ -786,13 +839,21 @@ class DrawingSurface(context: Context) : View(context) {
                     GestureMode.PINCH -> {
                         if (event.pointerCount >= 2) {
                             val newDist = pointerDistance(event, 0, 1)
+                            val focalX = (event.getX(0) + event.getX(1)) * 0.5f
+                            val focalY = (event.getY(0) + event.getY(1)) * 0.5f
                             if (pinchLastDist > 1f && newDist > 1f) {
                                 val factor = newDist / pinchLastDist
-                                val focalX = (event.getX(0) + event.getX(1)) * 0.5f
-                                val focalY = (event.getY(0) + event.getY(1)) * 0.5f
                                 viewport.applyZoom(focalX, focalY, factor)
                             }
+                            // Two fingers translating together = pan. Without
+                            // this, finger-drawing mode would have no way to
+                            // move around the canvas.
+                            val fdx = focalX - pinchLastFocalX
+                            val fdy = focalY - pinchLastFocalY
+                            if (fdx != 0f || fdy != 0f) viewport.applyPan(fdx, fdy)
                             pinchLastDist = newDist
+                            pinchLastFocalX = focalX
+                            pinchLastFocalY = focalY
                         }
                     }
                     GestureMode.NONE -> Unit
@@ -1537,6 +1598,9 @@ fun DrawingSurfaceView(
     onTextTap: (worldX: Float, worldY: Float) -> Unit,
     modifier: Modifier = Modifier,
     sketchMode: Boolean = false,
+    // "Draw with finger" user setting — single finger inks, two fingers
+    // pan/zoom. Ignored while a stylus pointer is active.
+    fingerInkEnabled: Boolean = false,
     snapMask: Int = Snap.MASK_ANGLE or Snap.MASK_ENDPOINT,
     layers: List<NoteLayer> = emptyList(),
     activeTextureId: String? = null,
@@ -1582,6 +1646,7 @@ fun DrawingSurfaceView(
         },
         update = { view ->
             view.sketchMode = sketchMode
+            view.fingerInkEnabled = fingerInkEnabled
             view.recordingStartedAt = recordingStartedAt
             view.strokeListener = { item -> currentOnCommit(item) }
             view.eraseListener = { ids -> currentOnErase(ids) }

@@ -8,18 +8,22 @@ import androidx.room.SkipQueryVerification
 interface NoteSearchDao {
 
     /**
-     * Sub-phase 9.3 — cross-note + cross-notebook OCR search.
+     * Sub-phase 9.3 — cross-note + cross-notebook search over `title` +
+     * handwriting OCR text (the index gained the title column in v18).
      *
      * Joins `notes_ocr_fts` back to `notes` to pull the metadata the UI
      * needs to render the row. The FTS4 `snippet()` builtin returns a
-     * highlighted excerpt with `<b>` markers around matched terms.
+     * highlighted excerpt with `<b>` markers around matched terms; the `-1`
+     * column argument lets it pick whichever column actually matched, so a
+     * title-only hit shows the highlighted title instead of an empty string.
      *
      * Pattern argument follows FTS4 MATCH syntax — typical use is a
      * pre-sanitized `prefix*` term per word.
      *
-     * `notes_ocr_fts` is created in `MIGRATION_11_12` and not registered as
-     * a Room entity, so Room's compile-time query verifier doesn't know
-     * the table exists. `@SkipQueryVerification` bypasses that check.
+     * `notes_ocr_fts` is created by `createNotesSearchIndex` (Migrations.kt)
+     * and not registered as a Room entity, so Room's compile-time query
+     * verifier doesn't know the table exists. `@SkipQueryVerification`
+     * bypasses that check.
      */
     @SkipQueryVerification
     @Query(
