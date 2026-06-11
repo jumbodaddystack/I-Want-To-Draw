@@ -6,9 +6,9 @@
 
 ## Status
 
-- **Current phase:** Phase 11 — sub-phases 11.1–11.5 code-complete (build green, JVM suites green). Stickies: `"sticky"` kind + `StickyCodec` (rect, 8 preset fills, auto-shrink body via `StickyRenderer`), `Tool.STICKY` tap-drops a 160×160 sticky and opens the inline editor (reused `TextItemEditor`); fill persists in the palette prefs. Connectors: `"connector"` kind + `ConnectorCodec` (from/to id+anchor bindings, fallback endpoints, arrow flags, strokeStyle) with **render-time** endpoint resolution via the pure `ConnectorResolver` — drags never touch the undo log, a deleted target falls back to stored geometry (undo re-binds); `Tool.CONNECTOR` binds via nearest edge anchor with hover anchor dots. Both kinds ride `ItemTransformer`, lasso/eraser hit-tests, duplicate/paste/stamp re-keying, `NoteRasterizer`, SVG export and `VectorCanvasJson` (`n_`/`c_` short ids). Hold-to-snap: pure `ShapeRecognizer` (line / ellipse / rect / closed polygon, conservative null on scribbles), ≥600 ms stillness before lift on PEN/PENCIL triggers a `CompositeEdit("Recognized …")` replacement — one undo restores the raw ink. Templates: `NoteTemplates` builders (Brainstorm / Kanban / Mind map / Cornell) seeded via `note/new?template=` from the notes list's New menu, fresh-ID'd, no DB change. Presentation: `presentationIndex` stepper over ordinal-ordered frames with `flyTo`, hidden chrome, prev/counter/next/exit strip, stylus barrel-button advance, and fading laser ink on the front buffer (never committed).
-- **Next sub-phase:** device verification — 10.7 plus a Phase 11 pass on hardware (stickies/connectors/recognition/templates/present) — then Phase 12 (vector pen & node editing) starting at 12.1 `"path"` item kind.
-- **Last verified device pass:** n/a (10.7 pending; Phase 11 device pass pending).
+- **Current phase:** Phase 12 — sub-phases 12.1–12.5 code-complete (build green, JVM suites green). Paths: `"path"` kind + `PathCodec` (anchors with **relative** handle deltas, corner/smooth/symmetric types, trailing optional `fillArgb` / `strokeStyle` / `capJoin`), exact cubic-extrema bounds, flatten-based eraser/lasso hit-tests, `PathRenderer` (cubicTo + fill pass + dash/cap/join), branches in `ItemTransformer` / `EditPreviewController` / `NoteRasterizer` / duplicate / stamp re-key. Pen: `Tool.PATH_PEN` in the shapes group — tap = corner anchor, press-drag pulls symmetric handles, tap-first-anchor closes, tool-switch commits, two-finger pinch survives between taps. Node editor: "Edit nodes" on a single selected path opens `PathNodeEditor` (drag anchors/handles, double-tap corner⇄smooth, tap-curve insert via de Casteljau split, long-press delete); drags live-mutate the payload and land as **one CompositeEdit per gesture** (`PathNodeMath` is pure + tested). Convert: "To path" replaces selected shapes/strokes in one `CompositeEdit` — exact anchors for line/rect/polygon, kappa cubics for rounded rects + (rotated) ellipses, arrows as shaft + filled head, strokes via shared RDP + Schneider least-squares fit with smooth/corner classification and closed-loop detection. Parity: Style popover restyles paths, SVG `<path d=>` with dash/cap/join, VectorDrawable `pathData` cubics (not skipped), `VectorCanvasJson` `p_` ids with anchors/closed/fill. Side fix: `NoteRasterizer` colour literals made `computeBounds` JVM-pure — 17 of the ~22 documented "not mocked" failures now pass (5 remain, see `VECTOR_WHITEBOARD_PHASE_12.md`).
+- **Next sub-phase:** device verification — 10.7 plus Phase 11 + Phase 12 passes on hardware (stickies/connectors/recognition/templates/present + pen/node-edit/convert/exports) — then Phase 13 (boolean ops & gradients) starting at 13.1, writing `VECTOR_WHITEBOARD_PHASE_13.md` first.
+- **Last verified device pass:** n/a (10.7 pending; Phase 11 + 12 device passes pending).
 
 ## Phase index
 
@@ -16,7 +16,7 @@
 | --- | --- | --- | --- |
 | 10 | Shared vector foundations (fill, stroke style, grouping, align, z-order) | [`VECTOR_WHITEBOARD_PHASE_10.md`](./VECTOR_WHITEBOARD_PHASE_10.md) | 7 |
 | 11 | Whiteboard primitives (stickies, connectors, recognition, templates, presenting) | [`VECTOR_WHITEBOARD_PHASE_11.md`](./VECTOR_WHITEBOARD_PHASE_11.md) | 5 |
-| 12 | Vector pen & node editing (path item kind) | `VECTOR_WHITEBOARD_PHASE_12.md` (write at phase start) | 5 |
+| 12 | Vector pen & node editing (path item kind) | [`VECTOR_WHITEBOARD_PHASE_12.md`](./VECTOR_WHITEBOARD_PHASE_12.md) | 5 |
 | 13 | Boolean ops & gradients | `VECTOR_WHITEBOARD_PHASE_13.md` (write at phase start) | 3 |
 | 14 | Polish & differentiators | `VECTOR_WHITEBOARD_PHASE_14.md` (write at phase start) | 4 |
 
@@ -46,13 +46,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 - [x] **11.4** Starter templates — code-defined `NoteTemplate` builders (brainstorm grid, kanban, mind map, Cornell notes) stamped into a fresh note (frames + shapes + stickies + text, re-ID'd à la `StampPayloadCodec`); surfaced on the new-note flow; no DB change
 - [x] **11.5** Presentation mode — full-screen stepper over `NoteFrame`s in ordinal order via `ViewportController.flyTo`; stylus button advances; transient "laser" ink drawn on the front buffer, never committed
 
-### Phase 12 — Vector pen & node editing
+### Phase 12 — Vector pen & node editing · [`details`](./VECTOR_WHITEBOARD_PHASE_12.md)
 
-- [ ] **12.1** `"path"` item kind + `PathCodec` — `[version:u8][flags:u8 (closed)][count:u16]` then per-anchor `(x, y, inDx, inDy, outDx, outDy, type:u8 corner/smooth/symmetric)`, trailing `fillArgb:i32` + `strokeStyle:u8` following the ShapeCodec trailing-optional-fields convention; `PathRenderer` (cubicTo), bounds, transform, hit-test
-- [ ] **12.2** Pen tool — `Tool.PATH_PEN`: tap = corner anchor, drag = pulled handles, tap-first-anchor = close, tool-switch = commit; front-buffer preview like the polygon tool
-- [ ] **12.3** Node editor — single selected path enters a node-edit overlay mode in `SelectionOverlay`: drag anchors/handles, double-tap toggles corner/smooth, insert/delete anchors; one `CompositeEdit` per gesture
-- [ ] **12.4** Convert — shape→path (exact anchors for rect/ellipse/polygon/line/arrow) and stroke→path (RDP simplification + least-squares cubic fit, pure JVM, heavily unit tested); both on the selection menu
-- [ ] **12.5** Stroke styling completeness — cap/join on paths, dash on paths, export parity (`NoteSvgExporter` `d=` output, VectorDrawable `pathData`); `VectorCanvasJson` + `EditOpsParser` gain the path kind so AI edits keep working
+- [x] **12.1** `"path"` item kind + `PathCodec` — `[version:u8][flags:u8 (closed)][count:u16]` then per-anchor `(x, y, inDx, inDy, outDx, outDy, type:u8 corner/smooth/symmetric)`, trailing `fillArgb:i32` + `strokeStyle:u8` (+ `capJoin:u8`) following the ShapeCodec trailing-optional-fields convention; `PathRenderer` (cubicTo), bounds, transform, hit-test
+- [x] **12.2** Pen tool — `Tool.PATH_PEN`: tap = corner anchor, drag = pulled handles, tap-first-anchor = close, tool-switch = commit; front-buffer preview like the polygon tool
+- [x] **12.3** Node editor — single selected path enters a node-edit overlay mode (`PathNodeEditor`, opened from the selection menu): drag anchors/handles, double-tap toggles corner/smooth, insert/delete anchors; one `CompositeEdit` per gesture (`PathNodeMath` pure + tested)
+- [x] **12.4** Convert — shape→path (exact anchors for rect/ellipse/polygon/line/arrow) and stroke→path (RDP simplification + least-squares cubic fit, pure JVM, heavily unit tested); both on the selection menu ("To path")
+- [x] **12.5** Stroke styling completeness — cap/join on paths, dash on paths, export parity (`NoteSvgExporter` `d=` output, VectorDrawable `pathData`); `VectorCanvasJson` gains the path kind (`p_` ids) so AI edits keep working (`EditOpsParser` is id-agnostic; the preview controller routes paths through `ItemTransformer`)
 
 ### Phase 13 — Boolean ops & gradients
 

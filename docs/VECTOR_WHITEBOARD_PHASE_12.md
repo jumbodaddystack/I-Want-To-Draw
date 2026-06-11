@@ -1,5 +1,35 @@
 # Phase 12 — Vector pen & node editing
 
+## Status: 12.1–12.5 code-complete
+
+All five sub-phases implemented and committed on this branch; build green,
+JVM suites green. On-device verification is pending (runs together with
+10.7 / the Phase 11 pass on real hardware). Implementation notes /
+deviations from the spec below:
+
+- **`capJoin` shipped with the codec from 12.1** — the byte is part of
+  `PathCodec`'s initial schema (still a trailing optional, still decodes
+  round/round when absent); 12.5 added the palette chips, renderer wiring
+  and export attributes. No payload written by 12.1–12.4 needs migration.
+- **Node editing is modal** — the overlay consumes the canvas's touches
+  until **Done** (or a tool switch / anything that clears the selection
+  backs out). Pan/zoom is unavailable while node-editing; position the
+  view first.
+- **Pen cap/join is session-only** — not persisted in
+  `ToolPalettePrefsStore` (fill + line style are, via the shared shape
+  slots). Defaults are round/round.
+- **Stroke→path conversion keeps no fill** — the converted path is the
+  user's line, nothing more (same philosophy as 11.3 recognition).
+  Closed shapes carry their fill into the payload.
+- **Arrow→path emits two items** (shaft + closed filled head): the codec
+  is single-subpath by design.
+- **Side fix** — `NoteRasterizer`'s grid/paper colours became raw ARGB
+  literals (not `android.graphics.Color` statics), making
+  `computeBounds` JVM-pure. 17 of the ~22 documented pre-existing
+  "not mocked" unit-test failures now pass; the remaining 5
+  (`NoteSvgExporterTest` ×1, `NoteVectorDrawableExporterTest` ×3,
+  `NoteAiServiceTest` ×1) genuinely call `Color.alpha` / `Log` at runtime.
+
 > A first-class bezier **path** item on the existing notes canvas: a `"path"`
 > `NoteItem.kind` + binary codec, a pen tool that places anchors and pulls
 > handles, a node-edit overlay for a selected path, shape→path and
