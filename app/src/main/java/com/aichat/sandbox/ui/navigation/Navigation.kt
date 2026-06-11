@@ -188,6 +188,11 @@ fun AppNavigation(
                     onNewNote = {
                         navController.navigate("note/$NOTE_ID_NEW")
                     },
+                    // Sub-phase 11.4 — starter templates ride the new-note
+                    // route as an optional query arg.
+                    onNewNoteFromTemplate = { templateId ->
+                        navController.navigate("note/$NOTE_ID_NEW?template=$templateId")
+                    },
                     onOpenNotebook = { noteId ->
                         navController.navigate("note/$noteId")
                     },
@@ -212,7 +217,7 @@ fun AppNavigation(
             // optional, so a bare `note/new` (used by the in-app FAB before
             // it grew query args, plus shortcuts.xml fallbacks) still matches.
             composable(
-                route = "note/new?source={source}&stylus={stylus}",
+                route = "note/new?source={source}&stylus={stylus}&template={template}",
                 arguments = listOf(
                     navArgument("source") {
                         type = NavType.StringType
@@ -222,6 +227,12 @@ fun AppNavigation(
                     navArgument("stylus") {
                         type = NavType.BoolType
                         defaultValue = false
+                    },
+                    // Sub-phase 11.4 — optional starter-template id.
+                    navArgument("template") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
                     },
                 ),
             ) {

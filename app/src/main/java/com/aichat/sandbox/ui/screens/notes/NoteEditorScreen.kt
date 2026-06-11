@@ -31,7 +31,11 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Polyline
+import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -95,6 +99,7 @@ fun NoteEditorScreen(
     val selectionWorldBounds by viewModel.selectionWorldBounds.collectAsState()
     val selectionMatrix by viewModel.selectionMatrix.collectAsState()
     val textEditTarget by viewModel.textEditTarget.collectAsState()
+    val stickyEditTarget by viewModel.stickyEditTarget.collectAsState()
     val aiSheetState by viewModel.aiSheetState.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
     val chats by viewModel.chats.collectAsState()
@@ -111,6 +116,10 @@ fun NoteEditorScreen(
     val frames by viewModel.frames.collectAsState()
     val currentFrameId by viewModel.currentFrameId.collectAsState()
     val frameNavigatorOpen by viewModel.frameNavigatorOpen.collectAsState()
+    // Sub-phase 11.5 — non-null while presenting; indexes the ordinal-sorted
+    // frame deck. All editor chrome hides and the stylus becomes a laser.
+    val presentationIndex by viewModel.presentationIndex.collectAsState()
+    val presenting = presentationIndex != null
     val stamps by viewModel.stamps.collectAsState()
     val stampDrawerOpen by viewModel.stampDrawerOpen.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
@@ -194,7 +203,23 @@ fun NoteEditorScreen(
         }
     }
 
-    BackHandler(onBack = ::saveAndExit)
+    BackHandler {
+        // Back exits the presentation first; only a second back leaves the note.
+        if (presenting) viewModel.exitPresentation() else saveAndExit()
+    }
+
+    // Fly the viewport to the active presentation frame whenever the stepper
+    // moves (and on entry). Ordinal order is the deck order.
+    LaunchedEffect(presentationIndex, canvasSize) {
+        val index = presentationIndex ?: return@LaunchedEffect
+        val vp = viewportController ?: return@LaunchedEffect
+        if (canvasSize == IntSize.Zero) return@LaunchedEffect
+        val frame = viewModel.presentationFrames().getOrNull(index) ?: return@LaunchedEffect
+        vp.flyTo(
+            bounds = frame.bounds(),
+            canvasSize = floatArrayOf(canvasSize.width.toFloat(), canvasSize.height.toFloat()),
+        )
+    }
 
     // Backgrounding the app (home button, app switch) flushes any pending
     // debounced autosave — otherwise a process kill inside the 3-second
@@ -215,6 +240,7 @@ fun NoteEditorScreen(
     LaunchedEffect(viewModel) {
         snapshotFlow { viewModel.palette.selected }.collectLatest { tool ->
             if (tool != Tool.TEXT) viewModel.commitTextEdit()
+            if (tool != Tool.STICKY) viewModel.commitStickyEdit()
         }
     }
 
@@ -288,6 +314,9 @@ fun NoteEditorScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
+            // 11.5 — presenting hides the whole header; the presentation
+            // control strip (bottom-centre overlay) is the only chrome.
+            if (!presenting) {
             // Compact custom header instead of TopAppBar: M3 1.2 pins the
             // bar at 64 dp and the OutlinedTextField title needs 56 dp more
             // vertical room than its text — together that read as a band of
@@ -531,9 +560,15 @@ fun NoteEditorScreen(
                                     )
                                 }
                             },
+                            canPresent = frames.isNotEmpty(),
+                            onPresent = {
+                                menuExpanded = false
+                                viewModel.startPresentation()
+                            },
                         )
                     }
                 }
+            }
             }
         }
     ) { padding ->
@@ -570,11 +605,14 @@ fun NoteEditorScreen(
                     selectedIds = selection,
                     selectionMatrix = selectionMatrix,
                     editingTextId = (textEditTarget as? TextEditTarget.Existing)?.itemId,
+                    editingStickyId = stickyEditTarget?.itemId,
                     onStrokeCommitted = viewModel::addItem,
                     onItemsErased = viewModel::removeItems,
                     onLassoCompleted = viewModel::onLassoCompleted,
                     onSelectionShouldClear = viewModel::clearSelection,
                     onTextTap = viewModel::onTextToolTap,
+                    onStickyTap = viewModel::onStickyToolTap,
+                    onStrokeHoldRecognized = viewModel::onStrokeHoldRecognized,
                     modifier = Modifier.fillMaxSize(),
                     snapMask = snapMask,
                     layers = layers,
@@ -590,12 +628,15 @@ fun NoteEditorScreen(
                     } else {
                         null
                     },
+                    // 11.5 — stylus = laser, barrel button = next frame.
+                    presentationMode = presenting,
+                    onPresentationAdvance = { viewModel.stepPresentation(1) },
                 )
                 // Phase 5.4 — zoom chip + Fit / 100% / Center popover. Lives
                 // on the canvas (not the TopAppBar) so the bar keeps room for
                 // the title. Bounds are recomputed lazily on each menu open
                 // so the user doesn't pay for a scan per recomposition.
-                ZoomChrome(
+                if (!presenting) ZoomChrome(
                     viewport = viewportController,
                     canvasSize = canvasSize,
                     contentBoundsProvider = {
@@ -610,13 +651,14 @@ fun NoteEditorScreen(
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
                 // Sub-phase 8.1 — frame rectangles + name labels rendered
-                // above the canvas.
-                FrameOverlay(
+                // above the canvas. Hidden while presenting so the audience
+                // sees content, not scaffolding.
+                if (!presenting) FrameOverlay(
                     frames = frames,
                     currentFrameId = currentFrameId,
                     viewport = viewportController,
                 )
-                SelectionOverlay(
+                if (!presenting) SelectionOverlay(
                     selection = selection,
                     worldBounds = selectionWorldBounds,
                     viewport = viewportController,
@@ -666,11 +708,28 @@ fun NoteEditorScreen(
                         onCommit = viewModel::commitTextEdit,
                     )
                 }
+                // Sub-phase 11.1 — inline sticky body editor. Reuses the
+                // text-item editor overlay anchored at the sticky's text
+                // inset; the surface keeps drawing the rect underneath and
+                // suppresses the rasterized body while this is open.
+                val stickyTarget = stickyEditTarget
+                if (stickyTarget != null && vp != null) {
+                    TextItemEditor(
+                        initialBody = stickyTarget.initialBody,
+                        screenOriginX = vp.worldToScreenX(stickyTarget.worldX),
+                        screenOriginY = vp.worldToScreenY(stickyTarget.worldY),
+                        fontSizePx = stickyTarget.fontSize * vp.scale,
+                        alignment = com.aichat.sandbox.ui.components.notes.TextItemCodec.ALIGN_LEFT,
+                        maxWidthPx = stickyTarget.maxWidthWorld * vp.scale,
+                        onBodyChanged = viewModel::onStickyEditBodyChanged,
+                        onCommit = viewModel::commitStickyEdit,
+                    )
+                }
             }
             // Sub-phase 9.4 — audio recordings strip (playback + scrubber).
             // Hidden until at least one clip exists; the record button below
             // surfaces independent of clip count.
-            AudioPlaybackBar(
+            if (!presenting) AudioPlaybackBar(
                 clips = audioClips,
                 activeClipPath = audioActiveClip,
                 playbackState = audioPlaybackState,
@@ -685,7 +744,7 @@ fun NoteEditorScreen(
             // outer Surface bleeds its background through the navigation-bar
             // inset; the inner Column applies that inset to its content so
             // controls stay above the system nav bar.
-            Surface(
+            if (!presenting) Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .onSizeChanged { paletteHeightPx = it.height },
@@ -766,8 +825,27 @@ fun NoteEditorScreen(
                 )
             }
         }
+        // Sub-phase 11.5 — presentation control strip: prev / counter / next
+        // / exit, floating bottom-centre over the otherwise chrome-free canvas.
+        if (presenting) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.navigationBars),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                PresentationControls(
+                    index = presentationIndex ?: 0,
+                    count = frames.size,
+                    onPrev = { viewModel.stepPresentation(-1) },
+                    onNext = { viewModel.stepPresentation(1) },
+                    onExit = viewModel::exitPresentation,
+                    modifier = Modifier.padding(bottom = 24.dp),
+                )
+            }
+        }
         // Sub-phase 9.4 — record button anchored above the AI side sheet.
-        Box(
+        if (!presenting) Box(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.navigationBars),
@@ -1094,8 +1172,22 @@ private fun EditorOverflowMenu(
     onSendToChat: () -> Unit,
     onExportFramePng: () -> Unit,
     onExportFrameSvg: () -> Unit,
+    canPresent: Boolean = false,
+    onPresent: () -> Unit = {},
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        // Sub-phase 11.5 — full-screen frame stepper. Gated on having at
+        // least one frame: a frameless note has nothing to step through.
+        if (canPresent) {
+            DropdownMenuItem(
+                text = { Text("Present") },
+                leadingIcon = {
+                    Icon(Icons.Filled.Slideshow, contentDescription = null)
+                },
+                onClick = onPresent,
+            )
+            HorizontalDivider()
+        }
         if (isIcon) {
             Text(
                 text = "Icon",
@@ -1347,6 +1439,48 @@ private fun AiEditPreviewBanner(
                     TextButton(onClick = onReject) { Text("Reject") }
                     androidx.compose.material3.Button(onClick = onAccept) { Text("Accept") }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Sub-phase 11.5 — floating presentation control strip. Deliberately the
+ * only chrome on screen while presenting: previous / "n of N" counter /
+ * next / exit. The stylus barrel button and laser ink live on the surface.
+ */
+@Composable
+private fun PresentationControls(
+    index: Int,
+    count: Int,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onExit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+        tonalElevation = 4.dp,
+        shadowElevation = 8.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            IconButton(onClick = onPrev, enabled = index > 0) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous frame")
+            }
+            Text(
+                text = "${index + 1} / $count",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            IconButton(onClick = onNext, enabled = index < count - 1) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Next frame")
+            }
+            IconButton(onClick = onExit) {
+                Icon(Icons.Filled.Close, contentDescription = "Exit presentation")
             }
         }
     }

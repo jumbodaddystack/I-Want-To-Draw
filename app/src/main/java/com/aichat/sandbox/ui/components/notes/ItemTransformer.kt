@@ -19,7 +19,21 @@ object ItemTransformer {
         TextItemCodec.KIND -> transformText(item, matrix)
         Shape.KIND -> transformShape(item, matrix)
         NoteItem.KIND_IMAGE -> transformImage(item, matrix)
+        StickyCodec.KIND -> transformSticky(item, matrix)
+        ConnectorCodec.KIND -> transformConnector(item, matrix)
         else -> item
+    }
+
+    private fun transformSticky(item: NoteItem, m: FloatArray): NoteItem {
+        val payload = StickyCodec.decode(item.payload)
+        return item.copy(payload = StickyCodec.encode(StickyCodec.transform(payload, m)))
+    }
+
+    // 11.2 — transforming a connector moves only its fallback endpoints;
+    // bound ends re-resolve from their items' current bounds at render time.
+    private fun transformConnector(item: NoteItem, m: FloatArray): NoteItem {
+        val payload = ConnectorCodec.decode(item.payload)
+        return item.copy(payload = ConnectorCodec.encode(ConnectorCodec.transform(payload, m)))
     }
 
     private fun transformImage(item: NoteItem, m: FloatArray): NoteItem {

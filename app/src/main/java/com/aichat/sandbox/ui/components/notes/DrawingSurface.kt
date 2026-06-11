@@ -253,6 +253,22 @@ class DrawingSurface(context: Context) : View(context) {
     /** Invoked once per committed stroke (or shape). Caller assigns noteId / zIndex. */
     var strokeListener: ((NoteItem) -> Unit)? = null
 
+    /**
+     * Sub-phase 11.3 — fired right after [strokeListener] when the stylus was
+     * held still ≥ [ShapeRecognizer.HOLD_DURATION_MS] before lifting on a
+     * PEN / PENCIL stroke. The receiver runs [ShapeRecognizer] and, on a hit,
+     * replaces the (already-committed) raw stroke with the shape as one
+     * CompositeEdit so undo restores the ink.
+     */
+    var strokeHoldRecognizeListener: ((NoteItem) -> Unit)? = null
+
+    // Hold-to-snap tracking: the uptime + screen position of the last sample
+    // that moved more than the touch slop. A lift whose event time is ≥
+    // HOLD_DURATION_MS past this means "drew, then held still".
+    private var strokeLastMoveUptime: Long = 0L
+    private var strokeLastMoveX: Float = 0f
+    private var strokeLastMoveY: Float = 0f
+
     /** Invoked at the end of an eraser swipe with all matched item ids. */
     var eraseListener: ((List<String>) -> Unit)? = null
 
@@ -296,6 +312,13 @@ class DrawingSurface(context: Context) : View(context) {
      * no palm rejection conflicts.
      */
     var textTapListener: ((worldX: Float, worldY: Float) -> Unit)? = null
+
+    /**
+     * Sub-phase 11.1 — fired when the user taps the canvas with the STICKY
+     * tool active. The receiver drops a fresh sticky at the tap point or
+     * opens the inline editor for the sticky already under it.
+     */
+    var stickyTapListener: ((worldX: Float, worldY: Float) -> Unit)? = null
 
     // Viewport gesture state — only used for finger input (stylus has its own branch).
     private enum class GestureMode { NONE, PAN, PINCH }
@@ -343,6 +366,7 @@ class DrawingSurface(context: Context) : View(context) {
             decodedCache.keys.retainAll(keep)
         }
         TextItemRenderer.evictUnused(keep)
+        StickyRenderer.evictUnused(keep)
         pendingErase.clear()
         sceneDirty = true
         invalidate()
@@ -411,6 +435,19 @@ class DrawingSurface(context: Context) : View(context) {
         invalidate()
     }
 
+    /**
+     * Sub-phase 11.1 — sticky whose body is being edited in the Compose
+     * overlay. The rect keeps rendering; only the laid-out text is hidden.
+     */
+    private var editingStickyId: String? = null
+
+    fun setEditingStickyId(id: String?) {
+        if (editingStickyId == id) return
+        editingStickyId = id
+        sceneDirty = true
+        invalidate()
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         if (w <= 0 || h <= 0) return
         val previous = sceneBitmap
@@ -458,6 +495,10 @@ class DrawingSurface(context: Context) : View(context) {
             drawShapePreview(canvas)
         }
 
+        if (connectorInProgress) {
+            drawConnectorPreview(canvas)
+        }
+
         drawSnapMarker(canvas)
 
         if (strokeTool.isInk && (liveSampleCount > 0 || predictedSampleCount > 0)) {
@@ -490,6 +531,10 @@ class DrawingSurface(context: Context) : View(context) {
                 )
             }
             canvas.restore()
+        }
+
+        if (presentationMode) {
+            drawLaser(canvas)
         }
 
         if (hoverVisible) {
@@ -543,23 +588,40 @@ class DrawingSurface(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (presentationMode) {
+            // Sub-phase 11.5 — presenting: the stylus draws transient laser
+            // ink (never committed); fingers keep pan / pinch so the
+            // presenter can still move around inside a frame.
+            val stylusIdx = stylusPointerIndex(event)
+            if (stylusIdx >= 0) {
+                gestureMode = GestureMode.NONE
+                return handleLaserEvent(event, stylusIdx)
+            }
+            return handleViewportEvent(event)
+        }
         if (sketchMode) {
             // Fixed-size sheet canvas: every pointer is ink, no viewport
             // gestures. Pressure / tilt fall back to finger defaults when
             // not reported.
             return handleStylusEvent(event, 0)
         }
-        if (paletteTool.isText) {
+        if (paletteTool.isText || paletteTool.isSticky) {
             // Text tool: tap (stylus or finger) → create / edit text item.
             // Two-finger pinch still works so the user can zoom while in
             // text mode; pan is disabled because every move-with-one-finger
             // would otherwise either pan or commit a stray tap.
+            // The sticky tool (11.1) shares the exact same tap state machine;
+            // only the UP dispatch differs.
             return handleTextToolEvent(event)
         }
         if (paletteTool.isShape) {
             // Phase 6.2 — shape tools accept any pointer (stylus or finger)
             // and emit a rubber-band preview between ACTION_DOWN / UP.
             return handleShapeToolEvent(event)
+        }
+        if (paletteTool.isConnector) {
+            // Sub-phase 11.2 — drag between items to bind a connector.
+            return handleConnectorToolEvent(event)
         }
         if (paletteTool.isFrame) {
             // Sub-phase 8.1 — frame tool: drag a rectangle to create, tap
@@ -653,7 +715,11 @@ class DrawingSurface(context: Context) : View(context) {
                 if (textTapActive && gestureMode == GestureMode.NONE) {
                     val wx = viewport.screenToWorldX(event.x)
                     val wy = viewport.screenToWorldY(event.y)
-                    textTapListener?.invoke(wx, wy)
+                    if (paletteTool.isSticky) {
+                        stickyTapListener?.invoke(wx, wy)
+                    } else {
+                        textTapListener?.invoke(wx, wy)
+                    }
                 }
                 textTapActive = false
                 gestureMode = GestureMode.NONE
@@ -701,6 +767,9 @@ class DrawingSurface(context: Context) : View(context) {
                     motionPredictor?.record(event)
                     if (strokeTool.isEraser) eraseAtLastSample()
                 }
+                strokeLastMoveUptime = event.eventTime
+                strokeLastMoveX = event.getX(idx)
+                strokeLastMoveY = event.getY(idx)
                 invalidate()
                 true
             }
@@ -731,6 +800,14 @@ class DrawingSurface(context: Context) : View(context) {
                 appendStylusSample(event, idx)
                 if (strokeTool.isEraser) eraseAtLastSample()
                 if (strokeTool.isInk) updatePredictedFromPredictor() else clearPredicted()
+                // 11.3 — only movement beyond the touch slop resets the hold
+                // timer, so the natural micro-jitter of a held stylus still
+                // counts as "still".
+                if (hypot(event.getX(idx) - strokeLastMoveX, event.getY(idx) - strokeLastMoveY) > tapSlopPx) {
+                    strokeLastMoveUptime = event.eventTime
+                    strokeLastMoveX = event.getX(idx)
+                    strokeLastMoveY = event.getY(idx)
+                }
                 invalidate()
                 true
             }
@@ -739,7 +816,10 @@ class DrawingSurface(context: Context) : View(context) {
                 when {
                     strokeTool.isLasso -> commitLassoLoop()
                     strokeTool.isEraser -> commitEraseStroke()
-                    else -> commitLiveStroke()
+                    else -> commitLiveStroke(
+                        holdRecognition = (strokeTool == Tool.PEN || strokeTool == Tool.PENCIL) &&
+                            event.eventTime - strokeLastMoveUptime >= ShapeRecognizer.HOLD_DURATION_MS,
+                    )
                 }
                 true
             }
@@ -970,7 +1050,7 @@ class DrawingSurface(context: Context) : View(context) {
         predictedSampleCount = 0
     }
 
-    private fun commitLiveStroke() {
+    private fun commitLiveStroke(holdRecognition: Boolean = false) {
         if (liveSampleCount < 1) {
             invalidate()
             return
@@ -1014,6 +1094,10 @@ class DrawingSurface(context: Context) : View(context) {
         committedItems = committedItems + item
         sceneDirty = true
         strokeListener?.invoke(item)
+        // 11.3 — recognition runs *after* the normal commit so the raw ink
+        // is already an undoable item; the receiver's replacement edit is a
+        // second entry and one undo restores the stroke.
+        if (holdRecognition) strokeHoldRecognizeListener?.invoke(item)
         liveSampleCount = 0
         invalidate()
     }
@@ -1066,6 +1150,19 @@ class DrawingSurface(context: Context) : View(context) {
                     val sb = ShapeCodec.boundsOf(shape) ?: continue
                     if (!HitTest.bboxContainsPoint(sb, px, py, radius)) false
                     else HitTest.shapeContainsPoint(shape, px, py, radius)
+                }
+                // 11.1/11.2 — stickies erase via their rect; connectors via
+                // the resolved segment (line hit-test with eraser radius).
+                StickyCodec.KIND -> {
+                    val sb = StickyCodec.boundsOf(StickyCodec.decode(item.payload))
+                    px >= sb[0] - radius && px <= sb[2] + radius &&
+                        py >= sb[1] - radius && py <= sb[3] + radius
+                }
+                ConnectorCodec.KIND -> {
+                    val ep = resolveConnector(ConnectorCodec.decode(item.payload))
+                    HitTest.shapeContainsPoint(
+                        Shape.Line(ep[0], ep[1], ep[2], ep[3]), px, py, radius,
+                    )
                 }
                 else -> false
             }
@@ -1141,6 +1238,21 @@ class DrawingSurface(context: Context) : View(context) {
             TextItemCodec.KIND -> TextItemRenderer.draw(canvas, item, textScratchMatrix)
             Shape.KIND -> ShapeRenderer.draw(canvas, item, replayPaint)
             NoteItem.KIND_IMAGE -> filesDir?.let { ImageRenderer.draw(canvas, item, it) }
+            // 11.1 — while the Compose editor owns a sticky's body, the rect
+            // still renders (so the board doesn't lose the note) but the text
+            // is suppressed to avoid double-rendering under the editor.
+            StickyCodec.KIND -> StickyRenderer.draw(
+                canvas, item, drawBody = item.id != editingStickyId,
+            )
+            // 11.2 — bound endpoints re-resolve from the current item set on
+            // every rasterize, so dragging a bound item carries the
+            // connector along without ever touching its payload.
+            ConnectorCodec.KIND -> {
+                val payload = ConnectorCodec.decode(item.payload)
+                ConnectorRenderer.draw(
+                    canvas, item, payload, resolveConnector(payload), replayPaint, scratchPath,
+                )
+            }
         }
         if (needsLayer) canvas.restore()
     }
@@ -1272,6 +1384,306 @@ class DrawingSurface(context: Context) : View(context) {
             }
             else -> false
         }
+    }
+
+    // ── Presentation laser (sub-phase 11.5) ──────────────────────────────
+    //
+    // Transient "laser pointer" ink drawn on the front buffer while
+    // presenting: world-coord polylines with a red glow that fade out
+    // ~900 ms after the stylus lifts and are never committed (no
+    // strokeListener, no undo entry). A stylus barrel-button press advances
+    // the presentation instead of drawing.
+
+    /** Presentation mode: stylus = laser, barrel button = advance. */
+    var presentationMode: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            laserStrokes.clear()
+            activeLaser = null
+            invalidate()
+        }
+
+    /** Fired on a stylus barrel-button press while presenting. */
+    var presentationAdvanceListener: (() -> Unit)? = null
+
+    private class LaserStroke(
+        val points: ArrayList<Float> = ArrayList(64),
+        var endedAt: Long = 0L,
+    )
+
+    private val laserStrokes = ArrayList<LaserStroke>()
+    private var activeLaser: LaserStroke? = null
+    private val laserPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+        isAntiAlias = true
+    }
+    private val laserPath = Path()
+
+    private fun handleLaserEvent(event: MotionEvent, idx: Int): Boolean {
+        return when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if ((event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0) {
+                    // Barrel button = next frame; no laser for this contact.
+                    activeLaser = null
+                    presentationAdvanceListener?.invoke()
+                    return true
+                }
+                val stroke = LaserStroke()
+                stroke.points.add(viewport.screenToWorldX(event.getX(idx)))
+                stroke.points.add(viewport.screenToWorldY(event.getY(idx)))
+                activeLaser = stroke
+                laserStrokes.add(stroke)
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val stroke = activeLaser ?: return true
+                for (h in 0 until event.historySize) {
+                    stroke.points.add(viewport.screenToWorldX(event.getHistoricalX(idx, h)))
+                    stroke.points.add(viewport.screenToWorldY(event.getHistoricalY(idx, h)))
+                }
+                stroke.points.add(viewport.screenToWorldX(event.getX(idx)))
+                stroke.points.add(viewport.screenToWorldY(event.getY(idx)))
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_UP -> {
+                activeLaser?.endedAt = android.os.SystemClock.uptimeMillis()
+                activeLaser = null
+                postInvalidateOnAnimation()
+                true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                activeLaser?.let { laserStrokes.remove(it) }
+                activeLaser = null
+                invalidate()
+                true
+            }
+            else -> false
+        }
+    }
+
+    private fun drawLaser(canvas: Canvas) {
+        if (laserStrokes.isEmpty()) return
+        val now = android.os.SystemClock.uptimeMillis()
+        laserStrokes.removeAll { it.endedAt != 0L && now - it.endedAt > LASER_FADE_MS }
+        if (laserStrokes.isEmpty()) {
+            invalidate()
+            return
+        }
+        canvas.save()
+        canvas.translate(viewport.offsetX, viewport.offsetY)
+        canvas.scale(viewport.scale, viewport.scale)
+        val scale = viewport.scale.coerceAtLeast(MIN_DIV_SCALE)
+        var anyFading = false
+        for (stroke in laserStrokes) {
+            if (stroke.points.size < 4) continue
+            val alphaFraction = if (stroke.endedAt == 0L) 1f else {
+                anyFading = true
+                (1f - (now - stroke.endedAt).toFloat() / LASER_FADE_MS).coerceIn(0f, 1f)
+            }
+            laserPath.reset()
+            laserPath.moveTo(stroke.points[0], stroke.points[1])
+            var i = 2
+            while (i < stroke.points.size) {
+                laserPath.lineTo(stroke.points[i], stroke.points[i + 1])
+                i += 2
+            }
+            // Glow pass then core pass — both width-constant in screen px.
+            laserPaint.color = LASER_GLOW_COLOR
+            laserPaint.alpha = (LASER_GLOW_ALPHA * alphaFraction).toInt()
+            laserPaint.strokeWidth = LASER_GLOW_WIDTH_PX / scale
+            canvas.drawPath(laserPath, laserPaint)
+            laserPaint.color = LASER_CORE_COLOR
+            laserPaint.alpha = (255 * alphaFraction).toInt()
+            laserPaint.strokeWidth = LASER_CORE_WIDTH_PX / scale
+            canvas.drawPath(laserPath, laserPaint)
+        }
+        canvas.restore()
+        if (anyFading) postInvalidateOnAnimation()
+    }
+
+    // ── Connector tool routing (sub-phase 11.2) ──────────────────────────
+    //
+    // Press near a bindable item (shape / sticky / image / text) → the start
+    // binds to its nearest edge anchor; drag previews the segment and
+    // highlights the hover candidate's anchors; release near another item
+    // binds the end. Either endpoint may stay free. The committed payload
+    // stores the *resolved* coordinates as fallback so the geometry stays
+    // sane if a binding target is later deleted.
+
+    private var connectorInProgress: Boolean = false
+    private var connectorStartX: Float = 0f
+    private var connectorStartY: Float = 0f
+    private var connectorEndX: Float = 0f
+    private var connectorEndY: Float = 0f
+    private var connectorFromId: String? = null
+    private var connectorFromAnchor: Byte = ConnectorCodec.ANCHOR_CENTER
+    /** Hover candidate's bounds — anchor dots render while dragging over it. */
+    private var connectorHoverBounds: FloatArray? = null
+
+    private fun handleConnectorToolEvent(event: MotionEvent): Boolean {
+        return when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (selectedIds.isNotEmpty()) selectionShouldClearListener?.invoke()
+                val wx = viewport.screenToWorldX(event.x)
+                val wy = viewport.screenToWorldY(event.y)
+                val candidate = findBindableItemAt(wx, wy)
+                if (candidate != null) {
+                    val bounds = candidate.second
+                    connectorFromId = candidate.first.id
+                    connectorFromAnchor = ConnectorResolver.nearestAnchor(bounds, wx, wy)
+                    val p = ConnectorResolver.anchorPoint(bounds, connectorFromAnchor)
+                    connectorStartX = p[0]; connectorStartY = p[1]
+                } else {
+                    connectorFromId = null
+                    connectorFromAnchor = ConnectorCodec.ANCHOR_CENTER
+                    connectorStartX = wx; connectorStartY = wy
+                }
+                connectorEndX = connectorStartX
+                connectorEndY = connectorStartY
+                connectorHoverBounds = null
+                connectorInProgress = true
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!connectorInProgress) return true
+                connectorEndX = viewport.screenToWorldX(event.x)
+                connectorEndY = viewport.screenToWorldY(event.y)
+                val hover = findBindableItemAt(connectorEndX, connectorEndY)
+                connectorHoverBounds =
+                    hover?.takeIf { it.first.id != connectorFromId }?.second
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (connectorInProgress) commitConnector()
+                connectorInProgress = false
+                connectorHoverBounds = null
+                invalidate()
+                true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                connectorInProgress = false
+                connectorHoverBounds = null
+                invalidate()
+                true
+            }
+            else -> false
+        }
+    }
+
+    private fun commitConnector() {
+        var toId: String? = null
+        var toAnchor: Byte = ConnectorCodec.ANCHOR_CENTER
+        var endX = connectorEndX
+        var endY = connectorEndY
+        val target = findBindableItemAt(connectorEndX, connectorEndY)
+        if (target != null && target.first.id != connectorFromId) {
+            toId = target.first.id
+            toAnchor = ConnectorResolver.nearestAnchor(target.second, connectorEndX, connectorEndY)
+            val p = ConnectorResolver.anchorPoint(target.second, toAnchor)
+            endX = p[0]; endY = p[1]
+        }
+        // A near-zero-length segment isn't a connector — a stray tap with
+        // the tool active shouldn't litter the board.
+        val length = hypot(endX - connectorStartX, endY - connectorStartY)
+        if (length < MIN_CONNECTOR_LENGTH_WORLD) return
+        val payload = ConnectorCodec.ConnectorPayload(
+            fromItemId = connectorFromId,
+            fromAnchor = connectorFromAnchor,
+            toItemId = toId,
+            toAnchor = toAnchor,
+            x0 = connectorStartX, y0 = connectorStartY,
+            x1 = endX, y1 = endY,
+            arrowAtEnd = true,
+            arrowAtStart = false,
+            strokeStyle = ShapeCodec.STROKE_STYLE_SOLID,
+        )
+        val item = NoteItem(
+            noteId = "",
+            zIndex = 0,
+            kind = ConnectorCodec.KIND,
+            tool = Tool.CONNECTOR.id,
+            colorArgb = inkColor,
+            baseWidthPx = baseWidthPx,
+            payload = ConnectorCodec.encode(payload),
+        )
+        committedItems = committedItems + item
+        sceneDirty = true
+        strokeListener?.invoke(item)
+    }
+
+    /**
+     * Topmost bindable item whose bounds (expanded by a scale-aware grab
+     * radius) contain the world point. Strokes and connectors are not
+     * bindable; locked / hidden layers are inert, mirroring the lasso.
+     */
+    private fun findBindableItemAt(wx: Float, wy: Float): Pair<NoteItem, FloatArray>? {
+        val radius = CONNECTOR_BIND_RADIUS_PX / viewport.scale.coerceAtLeast(MIN_DIV_SCALE)
+        var best: Pair<NoteItem, FloatArray>? = null
+        var bestZ = Int.MIN_VALUE
+        for (item in committedItems) {
+            if (!isBindableKind(item.kind)) continue
+            if (layerLookup.isLocked(item)) continue
+            if (!layerLookup.isVisible(item)) continue
+            val b = bindableBounds(item) ?: continue
+            if (wx < b[0] - radius || wx > b[2] + radius) continue
+            if (wy < b[1] - radius || wy > b[3] + radius) continue
+            if (item.zIndex >= bestZ) {
+                best = item to b
+                bestZ = item.zIndex
+            }
+        }
+        return best
+    }
+
+    private fun isBindableKind(kind: String): Boolean =
+        kind == Shape.KIND || kind == StickyCodec.KIND ||
+            kind == TextItemCodec.KIND || kind == NoteItem.KIND_IMAGE
+
+    private fun bindableBounds(item: NoteItem): FloatArray? = try {
+        when (item.kind) {
+            Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
+            StickyCodec.KIND -> StickyCodec.boundsOf(StickyCodec.decode(item.payload))
+            TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
+            NoteItem.KIND_IMAGE -> ImageItemCodec.boundsOf(ImageItemCodec.decode(item.payload))
+            else -> null
+        }
+    } catch (_: IllegalArgumentException) {
+        null
+    }
+
+    /** Resolve a committed connector's endpoints against the local item mirror. */
+    private fun resolveConnector(payload: ConnectorCodec.ConnectorPayload): FloatArray =
+        ConnectorResolver.resolve(payload) { id ->
+            committedItems.firstOrNull { it.id == id }?.let { bindableBounds(it) }
+        }
+
+    private fun drawConnectorPreview(canvas: Canvas) {
+        canvas.save()
+        canvas.translate(viewport.offsetX, viewport.offsetY)
+        canvas.scale(viewport.scale, viewport.scale)
+        ShapeRenderer.configurePaint(shapePaint, inkColor, baseWidthPx)
+        canvas.drawLine(connectorStartX, connectorStartY, connectorEndX, connectorEndY, shapePaint)
+        // Anchor dots: the hover candidate's four edge anchors, plus the
+        // bound start anchor so the user sees what they latched onto.
+        shapePaint.style = Paint.Style.FILL
+        shapePaint.color = ANCHOR_DOT_COLOR
+        val r = ANCHOR_DOT_RADIUS_PX / viewport.scale.coerceAtLeast(MIN_DIV_SCALE)
+        connectorHoverBounds?.let { b ->
+            for (p in ConnectorResolver.edgeAnchorPoints(b)) {
+                canvas.drawCircle(p[0], p[1], r, shapePaint)
+            }
+        }
+        if (connectorFromId != null) {
+            canvas.drawCircle(connectorStartX, connectorStartY, r, shapePaint)
+        }
+        canvas.restore()
     }
 
     // ── Shape tool routing (Phase 6.2) ───────────────────────────────────
@@ -1602,6 +2014,22 @@ class DrawingSurface(context: Context) : View(context) {
         private const val SNAP_FADE_MS: Long = 280L
         private const val SNAP_MARKER_RADIUS_PX: Float = 5f
 
+        // ── Presentation laser (sub-phase 11.5) ───────────────────────
+        private const val LASER_FADE_MS: Long = 900L
+        private const val LASER_CORE_COLOR: Int = 0xFFFF1744.toInt()
+        private const val LASER_GLOW_COLOR: Int = 0xFFFF5252.toInt()
+        private const val LASER_GLOW_ALPHA: Int = 90
+        private const val LASER_CORE_WIDTH_PX: Float = 4f
+        private const val LASER_GLOW_WIDTH_PX: Float = 14f
+
+        // ── Connector tool (sub-phase 11.2) ───────────────────────────
+        /** Screen-space grab radius for binding an endpoint to an item. */
+        private const val CONNECTOR_BIND_RADIUS_PX: Float = 16f
+        /** Free-floating connectors below this length are discarded. */
+        private const val MIN_CONNECTOR_LENGTH_WORLD: Float = 8f
+        private const val ANCHOR_DOT_RADIUS_PX: Float = 5f
+        private const val ANCHOR_DOT_COLOR: Int = 0xCC1E88E5.toInt()
+
         // ── Frame tool (sub-phase 8.1) ────────────────────────────────
         /** Minimum world-space extent for a created frame (both axes). */
         private const val FRAME_MIN_SIZE_WORLD: Float = 4f
@@ -1625,6 +2053,15 @@ fun DrawingSurfaceView(
     onSelectionShouldClear: () -> Unit,
     onTextTap: (worldX: Float, worldY: Float) -> Unit,
     modifier: Modifier = Modifier,
+    // Sub-phase 11.1 — sticky notes: tap dispatch + in-edit body suppression.
+    editingStickyId: String? = null,
+    onStickyTap: (worldX: Float, worldY: Float) -> Unit = { _, _ -> },
+    // Sub-phase 11.3 — hold-to-snap shape recognition.
+    onStrokeHoldRecognized: (NoteItem) -> Unit = { },
+    // Sub-phase 11.5 — presentation mode: stylus draws transient laser ink,
+    // barrel button advances the frame stepper.
+    presentationMode: Boolean = false,
+    onPresentationAdvance: () -> Unit = { },
     sketchMode: Boolean = false,
     // "Draw with finger" user setting — single finger inks, two fingers
     // pan/zoom. Ignored while a stylus pointer is active.
@@ -1648,6 +2085,9 @@ fun DrawingSurfaceView(
     val currentOnLasso by rememberUpdatedState(onLassoCompleted)
     val currentOnSelectionClear by rememberUpdatedState(onSelectionShouldClear)
     val currentOnTextTap by rememberUpdatedState(onTextTap)
+    val currentOnStickyTap by rememberUpdatedState(onStickyTap)
+    val currentOnHoldRecognized by rememberUpdatedState(onStrokeHoldRecognized)
+    val currentOnPresentationAdvance by rememberUpdatedState(onPresentationAdvance)
     val currentOnFrameDrawn by rememberUpdatedState(onFrameDrawn)
     val currentOnFrameTap by rememberUpdatedState(onFrameTap)
     val currentOnViewportReady by rememberUpdatedState(onViewportReady)
@@ -1666,6 +2106,9 @@ fun DrawingSurfaceView(
                 lassoListener = { polygon -> currentOnLasso(polygon) }
                 selectionShouldClearListener = { currentOnSelectionClear() }
                 textTapListener = { wx, wy -> currentOnTextTap(wx, wy) }
+                stickyTapListener = { wx, wy -> currentOnStickyTap(wx, wy) }
+                strokeHoldRecognizeListener = { item -> currentOnHoldRecognized(item) }
+                presentationAdvanceListener = { currentOnPresentationAdvance() }
                 frameDragListener = { bounds -> currentOnFrameDrawn(bounds) }
                 frameTapListener = { wx, wy -> currentOnFrameTap(wx, wy) }
                 setFilesDir(ctx.filesDir)
@@ -1681,6 +2124,10 @@ fun DrawingSurfaceView(
             view.lassoListener = { polygon -> currentOnLasso(polygon) }
             view.selectionShouldClearListener = { currentOnSelectionClear() }
             view.textTapListener = { wx, wy -> currentOnTextTap(wx, wy) }
+            view.stickyTapListener = { wx, wy -> currentOnStickyTap(wx, wy) }
+            view.strokeHoldRecognizeListener = { item -> currentOnHoldRecognized(item) }
+            view.presentationAdvanceListener = { currentOnPresentationAdvance() }
+            view.presentationMode = presentationMode
             view.frameDragListener = { bounds -> currentOnFrameDrawn(bounds) }
             view.frameTapListener = { wx, wy -> currentOnFrameTap(wx, wy) }
             view.backgroundStyle = backgroundStyle
@@ -1696,6 +2143,7 @@ fun DrawingSurfaceView(
             )
             view.setSelection(selectedIds, selectionMatrix)
             view.setEditingTextId(editingTextId)
+            view.setEditingStickyId(editingStickyId)
             view.setLayers(layers)
             view.snapMask = snapMask
             // Re-rasterize whenever the authoritative item list changes

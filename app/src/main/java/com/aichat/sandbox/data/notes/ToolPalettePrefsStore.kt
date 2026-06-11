@@ -29,6 +29,8 @@ data class PalettePrefs(
     val shapeFillEnabled: Boolean? = null,
     val shapeFillColor: Int? = null,
     val shapeStrokeStyle: Int? = null,
+    // Sub-phase 11.1 — sticky fill. Null = never saved.
+    val stickyFillColor: Int? = null,
 )
 
 /**
@@ -62,6 +64,7 @@ class ToolPalettePrefsStore @Inject constructor(
             shapeFillEnabled = p[KEY_SHAPE_FILL_ENABLED],
             shapeFillColor = p[KEY_SHAPE_FILL_COLOR],
             shapeStrokeStyle = p[KEY_SHAPE_STROKE_STYLE],
+            stickyFillColor = p[KEY_STICKY_FILL_COLOR],
         )
     }
 
@@ -74,6 +77,7 @@ class ToolPalettePrefsStore @Inject constructor(
         shapeFillEnabled: Boolean,
         shapeFillColor: Int,
         shapeStrokeStyle: Int,
+        stickyFillColor: Int,
     ) {
         dataStore.edit { p ->
             p[KEY_SELECTED_TOOL] = selectedToolId
@@ -87,6 +91,7 @@ class ToolPalettePrefsStore @Inject constructor(
             p[KEY_SHAPE_FILL_ENABLED] = shapeFillEnabled
             p[KEY_SHAPE_FILL_COLOR] = shapeFillColor
             p[KEY_SHAPE_STROKE_STYLE] = shapeStrokeStyle
+            p[KEY_STICKY_FILL_COLOR] = stickyFillColor
         }
     }
 
@@ -104,6 +109,7 @@ class ToolPalettePrefsStore @Inject constructor(
         private val KEY_SHAPE_FILL_ENABLED = booleanPreferencesKey("shape_fill_enabled")
         private val KEY_SHAPE_FILL_COLOR = intPreferencesKey("shape_fill_color")
         private val KEY_SHAPE_STROKE_STYLE = intPreferencesKey("shape_stroke_style")
+        private val KEY_STICKY_FILL_COLOR = intPreferencesKey("sticky_fill_color")
 
         private fun colorKey(toolId: String) = intPreferencesKey("ink_color_$toolId")
         private fun widthKey(toolId: String) = floatPreferencesKey("ink_width_$toolId")

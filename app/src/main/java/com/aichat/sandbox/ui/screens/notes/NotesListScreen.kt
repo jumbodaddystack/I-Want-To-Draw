@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -62,6 +63,7 @@ import java.util.Locale
 fun NotesListScreen(
     onNoteClick: (String) -> Unit,
     onNewNote: () -> Unit,
+    onNewNoteFromTemplate: (templateId: String) -> Unit = {},
     onOpenNotebook: (noteId: String) -> Unit = {},
     onOpenSearch: () -> Unit = {},
     viewModel: NotesListViewModel = hiltViewModel(),
@@ -119,6 +121,27 @@ fun NotesListScreen(
                             newNotebookOpen = true
                         },
                     )
+                    // Sub-phase 11.4 — starter templates. Each opens a fresh
+                    // note pre-seeded with the template's frames + content.
+                    HorizontalDivider()
+                    Text(
+                        text = "From template",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    )
+                    com.aichat.sandbox.data.notes.NoteTemplate.entries.forEach { template ->
+                        DropdownMenuItem(
+                            text = { Text(template.displayName) },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Dashboard, contentDescription = null)
+                            },
+                            onClick = {
+                                createMenuOpen = false
+                                onNewNoteFromTemplate(template.id)
+                            },
+                        )
+                    }
                 }
             }
         },

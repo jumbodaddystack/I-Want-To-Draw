@@ -6,16 +6,16 @@
 
 ## Status
 
-- **Current phase:** Phase 10 — sub-phases 10.1–10.6 code-complete. `ItemTransformer` extracted from `EditorAction.TransformItems`; `AlignmentMath` / `ZOrderMath` pure objects landed with full JVM coverage. Shape fill surfaced end-to-end (palette "Fill" chip + fill swatch → picker target → `DrawingSurface` commit + rubber-band preview); `ShapeCodec` gained the optional trailing `strokeStyle:u8` (solid/dashed/dotted, legacy payloads decode solid, no DB migration); `ShapeRenderer` renders dash via width-scaled `DashPathEffect` (lines route through `Path` for pipeline reliability, fills never inherit the dash) and `NoteSvgExporter` mirrors the pattern as `stroke-dasharray`. Grouping: `note_items.groupId` (MIGRATION_18_19, DB v19), lasso-commit expansion via `expandSelectionToGroups` (locked-layer members stay inert), duplicate/paste re-key via `remapGroupIds`, Group/Ungroup on the selection menu, `groupId` riding the persisted undo log as optional JSON. Align/distribute (6 edges + 2 axes) and band-respecting z-order ops surfaced in an "Arrange" submenu; restyle (fill / line style) in a "Style" popover — every mutation is a single `EditorAction.CompositeEdit`.
-- **Next sub-phase:** 10.7 on-device verification matrix, then Phase 11 (whiteboard primitives) starting at 11.1 sticky notes.
-- **Last verified device pass:** n/a (10.7 pending).
+- **Current phase:** Phase 11 — sub-phases 11.1–11.5 code-complete (build green, JVM suites green). Stickies: `"sticky"` kind + `StickyCodec` (rect, 8 preset fills, auto-shrink body via `StickyRenderer`), `Tool.STICKY` tap-drops a 160×160 sticky and opens the inline editor (reused `TextItemEditor`); fill persists in the palette prefs. Connectors: `"connector"` kind + `ConnectorCodec` (from/to id+anchor bindings, fallback endpoints, arrow flags, strokeStyle) with **render-time** endpoint resolution via the pure `ConnectorResolver` — drags never touch the undo log, a deleted target falls back to stored geometry (undo re-binds); `Tool.CONNECTOR` binds via nearest edge anchor with hover anchor dots. Both kinds ride `ItemTransformer`, lasso/eraser hit-tests, duplicate/paste/stamp re-keying, `NoteRasterizer`, SVG export and `VectorCanvasJson` (`n_`/`c_` short ids). Hold-to-snap: pure `ShapeRecognizer` (line / ellipse / rect / closed polygon, conservative null on scribbles), ≥600 ms stillness before lift on PEN/PENCIL triggers a `CompositeEdit("Recognized …")` replacement — one undo restores the raw ink. Templates: `NoteTemplates` builders (Brainstorm / Kanban / Mind map / Cornell) seeded via `note/new?template=` from the notes list's New menu, fresh-ID'd, no DB change. Presentation: `presentationIndex` stepper over ordinal-ordered frames with `flyTo`, hidden chrome, prev/counter/next/exit strip, stylus barrel-button advance, and fading laser ink on the front buffer (never committed).
+- **Next sub-phase:** device verification — 10.7 plus a Phase 11 pass on hardware (stickies/connectors/recognition/templates/present) — then Phase 12 (vector pen & node editing) starting at 12.1 `"path"` item kind.
+- **Last verified device pass:** n/a (10.7 pending; Phase 11 device pass pending).
 
 ## Phase index
 
 | Phase | Focus | Breakdown doc | Sub-phases |
 | --- | --- | --- | --- |
 | 10 | Shared vector foundations (fill, stroke style, grouping, align, z-order) | [`VECTOR_WHITEBOARD_PHASE_10.md`](./VECTOR_WHITEBOARD_PHASE_10.md) | 7 |
-| 11 | Whiteboard primitives (stickies, connectors, recognition, templates, presenting) | `VECTOR_WHITEBOARD_PHASE_11.md` (write at phase start) | 5 |
+| 11 | Whiteboard primitives (stickies, connectors, recognition, templates, presenting) | [`VECTOR_WHITEBOARD_PHASE_11.md`](./VECTOR_WHITEBOARD_PHASE_11.md) | 5 |
 | 12 | Vector pen & node editing (path item kind) | `VECTOR_WHITEBOARD_PHASE_12.md` (write at phase start) | 5 |
 | 13 | Boolean ops & gradients | `VECTOR_WHITEBOARD_PHASE_13.md` (write at phase start) | 3 |
 | 14 | Polish & differentiators | `VECTOR_WHITEBOARD_PHASE_14.md` (write at phase start) | 4 |
@@ -38,13 +38,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 - [x] **10.6** JVM tests (`ShapeCodecStrokeStyleTest`, `AlignmentMathTest`, `ZOrderMathTest`, `ItemTransformerTest`, `GroupOpsTest`, `EditorActionCodecGroupTest`) + docs
 - [ ] **10.7** Phase 10 device verification matrix
 
-### Phase 11 — Whiteboard primitives
+### Phase 11 — Whiteboard primitives · [`details`](./VECTOR_WHITEBOARD_PHASE_11.md)
 
-- [ ] **11.1** Sticky notes — new item kind `"sticky"` + `StickyCodec` (rect, 8-colour preset fill, UTF-8 body, auto-shrinking font), `Tool.STICKY` drops a 160×160-world-unit sticky and opens the inline text editor; `StickyRenderer` (rounded rect + soft shadow + laid-out text); fifth branch in `ItemTransformer`, hit-test, exporters, `VectorCanvasJson`
-- [ ] **11.2** Bound connectors — new item kind `"connector"` + `ConnectorCodec` `{fromItemId?, fromAnchor:u8 (N/E/S/W/centre), toItemId?, toAnchor, fallback x0 y0 x1 y1, style (arrowheads, dash)}`; free endpoints allowed; `ConnectorResolver` recomputes endpoints from bound items' current bounds **at render time** (drag never spams the undo log); deleting a bound item unbinds (fallback geometry kept) rather than cascading; `Tool.CONNECTOR` with hover-highlight of bindable anchors
-- [ ] **11.3** Hold-to-snap shape recognition — stylus still ≥ 600 ms before lift runs a pure `ShapeRecognizer` (closed loop → ellipse/rect/polygon; straightness → line/arrow); replacement committed as one `CompositeEdit("Recognized rectangle")` so undo restores raw ink; reuse the local Clean-up/Straighten machinery from Phase 7.5
-- [ ] **11.4** Starter templates — code-defined `NoteTemplate` builders (brainstorm grid, kanban, mind map, Cornell notes) stamped into a fresh note (frames + shapes + stickies + text, re-ID'd à la `StampPayloadCodec`); surfaced on the new-note flow; no DB change
-- [ ] **11.5** Presentation mode — full-screen stepper over `NoteFrame`s in ordinal order via `ViewportController.flyTo`; stylus button advances; transient "laser" ink drawn on the front buffer, never committed
+- [x] **11.1** Sticky notes — new item kind `"sticky"` + `StickyCodec` (rect, 8-colour preset fill, UTF-8 body, auto-shrinking font), `Tool.STICKY` drops a 160×160-world-unit sticky and opens the inline text editor; `StickyRenderer` (rounded rect + soft shadow + laid-out text); fifth branch in `ItemTransformer`, hit-test, exporters, `VectorCanvasJson`
+- [x] **11.2** Bound connectors — new item kind `"connector"` + `ConnectorCodec` `{fromItemId?, fromAnchor:u8 (N/E/S/W/centre), toItemId?, toAnchor, fallback x0 y0 x1 y1, style (arrowheads, dash)}`; free endpoints allowed; `ConnectorResolver` recomputes endpoints from bound items' current bounds **at render time** (drag never spams the undo log); deleting a bound item unbinds (fallback geometry kept) rather than cascading; `Tool.CONNECTOR` with hover-highlight of bindable anchors
+- [x] **11.3** Hold-to-snap shape recognition — stylus still ≥ 600 ms before lift runs a pure `ShapeRecognizer` (closed loop → ellipse/rect/polygon; straightness → line/arrow); replacement committed as one `CompositeEdit("Recognized rectangle")` so undo restores raw ink; reuse the local Clean-up/Straighten machinery from Phase 7.5
+- [x] **11.4** Starter templates — code-defined `NoteTemplate` builders (brainstorm grid, kanban, mind map, Cornell notes) stamped into a fresh note (frames + shapes + stickies + text, re-ID'd à la `StampPayloadCodec`); surfaced on the new-note flow; no DB change
+- [x] **11.5** Presentation mode — full-screen stepper over `NoteFrame`s in ordinal order via `ViewportController.flyTo`; stylus button advances; transient "laser" ink drawn on the front buffer, never committed
 
 ### Phase 12 — Vector pen & node editing
 

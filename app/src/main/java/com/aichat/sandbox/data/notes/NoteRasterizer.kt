@@ -9,10 +9,15 @@ import android.graphics.Path
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
+import com.aichat.sandbox.ui.components.notes.ConnectorCodec
+import com.aichat.sandbox.ui.components.notes.ConnectorRenderer
+import com.aichat.sandbox.ui.components.notes.ConnectorResolver
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.ImageRenderer
 import com.aichat.sandbox.ui.components.notes.Shape
+import com.aichat.sandbox.ui.components.notes.StickyCodec
+import com.aichat.sandbox.ui.components.notes.StickyRenderer
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.ShapeRenderer
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
@@ -293,6 +298,17 @@ object NoteRasterizer {
         TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
         Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
         NoteItem.KIND_IMAGE -> ImageItemCodec.boundsOf(ImageItemCodec.decode(item.payload))
+        StickyCodec.KIND -> StickyCodec.boundsOf(StickyCodec.decode(item.payload))
+        // Connector bounds use the *fallback* endpoints only — resolving the
+        // bound items here would need the whole item list, and the fallback
+        // envelope is a fine approximation for bounds-union purposes.
+        ConnectorCodec.KIND -> {
+            val p = ConnectorCodec.decode(item.payload)
+            floatArrayOf(
+                kotlin.math.min(p.x0, p.x1), kotlin.math.min(p.y0, p.y1),
+                kotlin.math.max(p.x0, p.x1), kotlin.math.max(p.y0, p.y1),
+            )
+        }
         else -> null
     }
 
@@ -309,6 +325,12 @@ object NoteRasterizer {
         val paint = Paint()
         val path = Path()
         val matrix = Matrix()
+        // 11.2 — connectors re-resolve bound endpoints against this render's
+        // item set so exports show them attached, exactly like the canvas.
+        val byId = items.associateBy { it.id }
+        val connectorLookup: (String) -> FloatArray? = { id ->
+            byId[id]?.takeIf { it.kind != ConnectorCodec.KIND }?.let { boundsOf(it) }
+        }
         for (item in sorted) {
             when (item.kind) {
                 STROKE_KIND -> {
@@ -328,6 +350,12 @@ object NoteRasterizer {
                 TextItemCodec.KIND -> TextItemRenderer.draw(canvas, item, matrix)
                 Shape.KIND -> ShapeRenderer.draw(canvas, item, paint)
                 NoteItem.KIND_IMAGE -> filesDir?.let { ImageRenderer.draw(canvas, item, it) }
+                StickyCodec.KIND -> StickyRenderer.draw(canvas, item)
+                ConnectorCodec.KIND -> {
+                    val payload = ConnectorCodec.decode(item.payload)
+                    val endpoints = ConnectorResolver.resolve(payload, connectorLookup)
+                    ConnectorRenderer.draw(canvas, item, payload, endpoints, paint, path)
+                }
             }
         }
     }

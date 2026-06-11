@@ -6,8 +6,11 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.ui.components.notes.ConnectorCodec
+import com.aichat.sandbox.ui.components.notes.ConnectorResolver
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.Shape
+import com.aichat.sandbox.ui.components.notes.StickyCodec
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.ShapeRenderer
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
@@ -118,12 +121,22 @@ class NoteSvgExporter @Inject constructor(
                 .append("\" width=\"").append(fmt(width)).append("\" height=\"")
                 .append(fmt(height)).append("\" fill=\"#FFFFFF\"/>\n")
             sb.append("  <g id=\"items\">\n")
+            // 11.2 — connectors resolve bound endpoints against the *full*
+            // item set (not just the frame-visible subset) so a connector
+            // whose target sits outside the frame still points at it.
+            val byId = items.associateBy { it.id }
+            val connectorLookup: (String) -> FloatArray? = { id ->
+                byId[id]?.takeIf { it.kind != ConnectorCodec.KIND }
+                    ?.let { NoteRasterizer.computeBounds(listOf(it)) }
+            }
             for (item in visibleItems.sortedBy { it.zIndex }) {
                 when (item.kind) {
                     "stroke" -> appendStroke(sb, item)
                     Shape.KIND -> appendShape(sb, item)
                     TextItemCodec.KIND -> appendText(sb, item)
                     NoteItem.KIND_IMAGE -> appendImage(sb, item, filesDir)
+                    StickyCodec.KIND -> appendSticky(sb, item)
+                    ConnectorCodec.KIND -> appendConnector(sb, item, connectorLookup)
                 }
             }
             sb.append("  </g>\n</svg>\n")
@@ -345,6 +358,88 @@ class NoteSvgExporter @Inject constructor(
                 sb.append("</tspan>\n")
             }
             sb.append("    </text>\n")
+        }
+
+        /**
+         * 11.1 — sticky as `<rect>` + `<text>` lines. The auto-shrink fit is
+         * a renderer concern; the export uses the payload's base font size
+         * (documented approximation, same spirit as the stroke mean-width).
+         */
+        private fun appendSticky(sb: StringBuilder, item: NoteItem) {
+            val p = StickyCodec.decode(item.payload)
+            sb.append("    <rect x=\"").append(fmt(p.minX))
+                .append("\" y=\"").append(fmt(p.minY))
+                .append("\" width=\"").append(fmt(p.width))
+                .append("\" height=\"").append(fmt(p.height))
+                .append("\" rx=\"").append(fmt(StickyCodec.CORNER_RADIUS_WORLD))
+                .append("\" fill=\"").append(colorToHex(p.fillArgb))
+                .append("\"/>\n")
+            if (p.body.isEmpty()) return
+            val inset = StickyCodec.TEXT_INSET_WORLD
+            val lineHeight = p.fontSize * 1.2f
+            sb.append("    <text x=\"").append(fmt(p.minX + inset))
+                .append("\" y=\"").append(fmt(p.minY + inset + p.fontSize))
+                .append("\" fill=\"#000000\"")
+                .append(" font-family=\"sans-serif\"")
+                .append(" font-size=\"").append(fmt(p.fontSize)).append("\">\n")
+            for ((i, line) in p.body.split('\n').withIndex()) {
+                sb.append("      <tspan x=\"").append(fmt(p.minX + inset))
+                    .append("\" dy=\"").append(fmt(if (i == 0) 0f else lineHeight)).append("\">")
+                sb.append(escapeXml(line))
+                sb.append("</tspan>\n")
+            }
+            sb.append("    </text>\n")
+        }
+
+        /** 11.2 — connector as `<line>` (+ head polygons), resolved endpoints. */
+        private fun appendConnector(
+            sb: StringBuilder,
+            item: NoteItem,
+            boundsLookup: (String) -> FloatArray?,
+        ) {
+            val payload = ConnectorCodec.decode(item.payload)
+            val ep = ConnectorResolver.resolve(payload, boundsLookup)
+            val color = colorToHex(item.colorArgb)
+            val width = item.baseWidthPx
+            val dash = dashArrayFor(payload.strokeStyle, width)
+            sb.append("    <line x1=\"").append(fmt(ep[0]))
+                .append("\" y1=\"").append(fmt(ep[1]))
+                .append("\" x2=\"").append(fmt(ep[2]))
+                .append("\" y2=\"").append(fmt(ep[3]))
+                .append("\" stroke=\"").append(color)
+                .append("\" stroke-width=\"").append(fmt(width)).append('"')
+            if (dash != null) sb.append(" stroke-dasharray=\"").append(dash).append('"')
+            sb.append(" stroke-linecap=\"round\"/>\n")
+            val headSize = (width * 6f).coerceAtLeast(8f)
+            if (payload.arrowAtEnd) {
+                appendArrowHead(sb, ep[0], ep[1], ep[2], ep[3], headSize, color)
+            }
+            if (payload.arrowAtStart) {
+                appendArrowHead(sb, ep[2], ep[3], ep[0], ep[1], headSize, color)
+            }
+        }
+
+        private fun appendArrowHead(
+            sb: StringBuilder,
+            fromX: Float, fromY: Float,
+            tipX: Float, tipY: Float,
+            headSize: Float,
+            color: String,
+        ) {
+            val dx = tipX - fromX
+            val dy = tipY - fromY
+            if (kotlin.math.hypot(dx, dy) < 1e-3f) return
+            val angle = kotlin.math.atan2(dy, dx)
+            val headAngle = Math.PI / 6.0
+            val hx1 = tipX - headSize * kotlin.math.cos(angle - headAngle).toFloat()
+            val hy1 = tipY - headSize * kotlin.math.sin(angle - headAngle).toFloat()
+            val hx2 = tipX - headSize * kotlin.math.cos(angle + headAngle).toFloat()
+            val hy2 = tipY - headSize * kotlin.math.sin(angle + headAngle).toFloat()
+            sb.append("    <polygon points=\"")
+                .append(fmt(tipX)).append(',').append(fmt(tipY)).append(' ')
+                .append(fmt(hx1)).append(',').append(fmt(hy1)).append(' ')
+                .append(fmt(hx2)).append(',').append(fmt(hy2))
+                .append("\" fill=\"").append(color).append("\"/>\n")
         }
 
         private fun strokeMeanWidth(item: NoteItem): Float {
