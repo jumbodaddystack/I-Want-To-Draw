@@ -22,6 +22,7 @@ import com.aichat.sandbox.data.local.MIGRATION_14_15
 import com.aichat.sandbox.data.local.MIGRATION_15_16
 import com.aichat.sandbox.data.local.MIGRATION_16_17
 import com.aichat.sandbox.data.local.MIGRATION_17_18
+import com.aichat.sandbox.data.local.MIGRATION_18_19
 import com.aichat.sandbox.data.local.createNotesSearchIndex
 import com.aichat.sandbox.data.local.NoteAudioDao
 import com.aichat.sandbox.data.local.NoteDao
@@ -74,6 +75,7 @@ object AppModule {
             MIGRATION_15_16,
             MIGRATION_16_17,
             MIGRATION_17_18,
+            MIGRATION_18_19,
         ).addCallback(object : androidx.room.RoomDatabase.Callback() {
             // `notes_ocr_fts` is not a Room entity, so fresh installs (which
             // skip migrations) must create it here. Upgrades get the same DDL

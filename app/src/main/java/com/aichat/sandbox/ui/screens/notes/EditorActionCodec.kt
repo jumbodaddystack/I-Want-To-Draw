@@ -297,12 +297,16 @@ object EditorActionCodec {
             Base64.getEncoder().encodeToString(item.payload),
         )
         if (item.layerId != null) obj.addProperty("layerId", item.layerId)
+        // Phase 10.4 — optional field; older builds reading a newer log just
+        // ignore it (and drop the grouping), which is the accepted downgrade.
+        if (item.groupId != null) obj.addProperty("groupId", item.groupId)
         return obj
     }
 
     private fun decodeItem(obj: JsonObject): NoteItem {
         val toolEl = obj.get("tool")
         val layerEl = obj.get("layerId")
+        val groupEl = obj.get("groupId")
         return NoteItem(
             id = obj.get("id").asString,
             noteId = obj.get("noteId").asString,
@@ -313,6 +317,7 @@ object EditorActionCodec {
             baseWidthPx = obj.get("baseWidthPx").asFloat,
             payload = Base64.getDecoder().decode(obj.get("payload").asString),
             layerId = if (layerEl == null || layerEl.isJsonNull) null else layerEl.asString,
+            groupId = if (groupEl == null || groupEl.isJsonNull) null else groupEl.asString,
         )
     }
 

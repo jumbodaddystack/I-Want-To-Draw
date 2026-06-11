@@ -25,6 +25,10 @@ data class PalettePrefs(
     val inkWidths: Map<String, Float> = emptyMap(),
     val areaEraserRadiusPx: Float? = null,
     val fingerDrawing: Boolean = false,
+    // Phase 10.2 — shape fill + stroke style. Null = never saved.
+    val shapeFillEnabled: Boolean? = null,
+    val shapeFillColor: Int? = null,
+    val shapeStrokeStyle: Int? = null,
 )
 
 /**
@@ -55,6 +59,9 @@ class ToolPalettePrefsStore @Inject constructor(
             }.toMap(),
             areaEraserRadiusPx = p[KEY_ERASER_RADIUS],
             fingerDrawing = p[KEY_FINGER_DRAWING] ?: false,
+            shapeFillEnabled = p[KEY_SHAPE_FILL_ENABLED],
+            shapeFillColor = p[KEY_SHAPE_FILL_COLOR],
+            shapeStrokeStyle = p[KEY_SHAPE_STROKE_STYLE],
         )
     }
 
@@ -64,6 +71,9 @@ class ToolPalettePrefsStore @Inject constructor(
         inkColors: Map<String, Int>,
         inkWidths: Map<String, Float>,
         areaEraserRadiusPx: Float,
+        shapeFillEnabled: Boolean,
+        shapeFillColor: Int,
+        shapeStrokeStyle: Int,
     ) {
         dataStore.edit { p ->
             p[KEY_SELECTED_TOOL] = selectedToolId
@@ -74,6 +84,9 @@ class ToolPalettePrefsStore @Inject constructor(
                 if (id in INK_TOOL_IDS) p[widthKey(id)] = width
             }
             p[KEY_ERASER_RADIUS] = areaEraserRadiusPx
+            p[KEY_SHAPE_FILL_ENABLED] = shapeFillEnabled
+            p[KEY_SHAPE_FILL_COLOR] = shapeFillColor
+            p[KEY_SHAPE_STROKE_STYLE] = shapeStrokeStyle
         }
     }
 
@@ -88,6 +101,9 @@ class ToolPalettePrefsStore @Inject constructor(
         private val KEY_SELECTED_TOOL = stringPreferencesKey("selected_tool")
         private val KEY_ERASER_RADIUS = floatPreferencesKey("area_eraser_radius_px")
         private val KEY_FINGER_DRAWING = booleanPreferencesKey("finger_drawing")
+        private val KEY_SHAPE_FILL_ENABLED = booleanPreferencesKey("shape_fill_enabled")
+        private val KEY_SHAPE_FILL_COLOR = intPreferencesKey("shape_fill_color")
+        private val KEY_SHAPE_STROKE_STYLE = intPreferencesKey("shape_stroke_style")
 
         private fun colorKey(toolId: String) = intPreferencesKey("ink_color_$toolId")
         private fun widthKey(toolId: String) = floatPreferencesKey("ink_width_$toolId")

@@ -149,6 +149,12 @@ class DrawingSurface(context: Context) : View(context) {
     private var baseWidthPx: Float = DEFAULT_STROKE_WIDTH_PX
     private var areaEraserRadiusPx: Float = 24f
 
+    // Phase 10.2 — shape fill + stroke style for newly committed shapes.
+    // 0 fill means "no fill". Only consulted while a shape tool is active
+    // (the frame tool reuses the rect rubber-band and must stay unfilled).
+    private var shapeFillArgb: Int = 0
+    private var shapeStrokeStyle: Byte = ShapeCodec.STROKE_STYLE_SOLID
+
     /** Tool actually used for the in-flight stroke (palette tool or side-button override). */
     private var strokeTool: Tool = Tool.PEN
     private var strokeColor: Int = DEFAULT_INK_COLOR
@@ -352,12 +358,16 @@ class DrawingSurface(context: Context) : View(context) {
         widthPx: Float,
         areaEraserRadiusPx: Float,
         textureId: String? = null,
+        shapeFillArgb: Int = 0,
+        shapeStrokeStyle: Byte = ShapeCodec.STROKE_STYLE_SOLID,
     ) {
         paletteTool = tool
         inkColor = colorArgb
         baseWidthPx = widthPx
         strokeTextureId = textureId
         this.areaEraserRadiusPx = areaEraserRadiusPx
+        this.shapeFillArgb = shapeFillArgb
+        this.shapeStrokeStyle = shapeStrokeStyle
         invalidate()
     }
 
@@ -1480,7 +1490,14 @@ class DrawingSurface(context: Context) : View(context) {
             tool = tool.id,
             colorArgb = color,
             baseWidthPx = width,
-            payload = ShapeCodec.encode(shape),
+            // Phase 10.2/10.3 — palette fill + stroke style. Guarded on the
+            // palette tool so the frame tool's rect rubber-band (which also
+            // funnels through the shape state) can never pick up a fill.
+            payload = ShapeCodec.encode(
+                shape,
+                fillArgb = if (paletteTool.isShape) shapeFillArgb else 0,
+                strokeStyle = if (paletteTool.isShape) shapeStrokeStyle else ShapeCodec.STROKE_STYLE_SOLID,
+            ),
         )
         committedItems = committedItems + item
         sceneDirty = true
@@ -1492,7 +1509,13 @@ class DrawingSurface(context: Context) : View(context) {
         canvas.save()
         canvas.translate(viewport.offsetX, viewport.offsetY)
         canvas.scale(viewport.scale, viewport.scale)
-        ShapeRenderer.configurePaint(shapePaint, strokeColor, strokeWidthPx)
+        // Frame previews stay solid + unfilled; shape tools preview with the
+        // palette's live fill and stroke style so commit holds no surprises.
+        val isShapeTool = paletteTool.isShape
+        ShapeRenderer.configurePaint(
+            shapePaint, strokeColor, strokeWidthPx,
+            if (isShapeTool) shapeStrokeStyle else ShapeCodec.STROKE_STYLE_SOLID,
+        )
         val previewShape: Shape? = when (strokeTool) {
             Tool.LINE -> Shape.Line(shapeStartX, shapeStartY, shapeEndX, shapeEndY)
             Tool.ARROW -> Shape.Arrow(shapeStartX, shapeStartY, shapeEndX, shapeEndY, strokeWidthPx * 6f)
@@ -1508,7 +1531,12 @@ class DrawingSurface(context: Context) : View(context) {
             else null
             else -> null
         }
-        if (previewShape != null) ShapeRenderer.drawShape(canvas, previewShape, shapePaint, 0)
+        if (previewShape != null) {
+            ShapeRenderer.drawShape(
+                canvas, previewShape, shapePaint,
+                if (isShapeTool) shapeFillArgb else 0,
+            )
+        }
         canvas.restore()
     }
 
@@ -1663,6 +1691,8 @@ fun DrawingSurfaceView(
                 widthPx = paletteState.activeInkWidth(),
                 areaEraserRadiusPx = paletteState.areaEraserRadiusPx,
                 textureId = activeTextureId,
+                shapeFillArgb = paletteState.activeShapeFillArgb(),
+                shapeStrokeStyle = paletteState.shapeStrokeStyle.toByte(),
             )
             view.setSelection(selectedIds, selectionMatrix)
             view.setEditingTextId(editingTextId)

@@ -98,6 +98,36 @@ class ToolPaletteState {
     var lastShapeTool: Tool by mutableStateOf(Tool.LINE)
         private set
 
+    // ── Phase 10.2 — shape fill + stroke style ───────────────────────────
+
+    /** Whether newly drawn shapes carry a fill. */
+    var shapeFillEnabled: Boolean by mutableStateOf(false)
+        private set
+
+    /** ARGB fill colour applied when [shapeFillEnabled] (alpha included). */
+    var shapeFillColor: Int by mutableStateOf(DEFAULT_SHAPE_FILL_COLOR)
+        private set
+
+    /** Outline style for newly drawn shapes — a [ShapeCodec] STROKE_STYLE_* value. */
+    var shapeStrokeStyle: Int by mutableStateOf(ShapeCodec.STROKE_STYLE_SOLID.toInt())
+        private set
+
+    fun setFillEnabled(enabled: Boolean) {
+        shapeFillEnabled = enabled
+    }
+
+    fun setFillColor(color: Int) {
+        shapeFillColor = color
+    }
+
+    fun setStrokeStyle(style: Int) {
+        if (style !in VALID_STROKE_STYLES) return
+        shapeStrokeStyle = style
+    }
+
+    /** Fill ARGB the surface should encode on the next shape — 0 when disabled. */
+    fun activeShapeFillArgb(): Int = if (shapeFillEnabled) shapeFillColor else 0
+
     fun select(tool: Tool) {
         if (!tool.enabledInPalette) return
         if (selected == tool) return
@@ -138,6 +168,9 @@ class ToolPaletteState {
         inkColors: Map<String, Int>,
         inkWidths: Map<String, Float>,
         areaEraserRadiusPx: Float?,
+        shapeFillEnabled: Boolean? = null,
+        shapeFillColor: Int? = null,
+        shapeStrokeStyle: Int? = null,
     ) {
         for ((id, color) in inkColors) {
             Tool.fromId(id)?.let { setColor(it, color) }
@@ -146,6 +179,9 @@ class ToolPaletteState {
             Tool.fromId(id)?.let { setWidth(it, width) }
         }
         areaEraserRadiusPx?.let { setAreaEraserRadius(it) }
+        shapeFillEnabled?.let { setFillEnabled(it) }
+        shapeFillColor?.let { setFillColor(it) }
+        shapeStrokeStyle?.let { setStrokeStyle(it) }
         Tool.fromId(selectedToolId)?.let { select(it) }
     }
 
@@ -160,6 +196,12 @@ class ToolPaletteState {
 
         /** ~30% alpha base highlighter yellow, mirroring the highlighter paint alpha. */
         private val DEFAULT_HIGHLIGHTER_COLOR = Color.rgb(255, 222, 0)
+
+        /** Default shape fill — translucent swatch blue so the outline stays legible. */
+        val DEFAULT_SHAPE_FILL_COLOR: Int = Color.argb(64, 36, 99, 235)
+
+        private val VALID_STROKE_STYLES: IntRange =
+            ShapeCodec.STROKE_STYLE_SOLID.toInt()..ShapeCodec.STROKE_STYLE_DOTTED.toInt()
 
         val DEFAULT_COLOR_SWATCHES: List<Int> = listOf(
             Color.BLACK,

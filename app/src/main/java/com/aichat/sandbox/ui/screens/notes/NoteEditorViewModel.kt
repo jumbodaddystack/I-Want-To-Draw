@@ -38,8 +38,10 @@ import com.aichat.sandbox.data.repository.BrushPresetRepository
 import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.data.repository.StampRepository
+import com.aichat.sandbox.ui.components.notes.AlignmentMath
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
+import com.aichat.sandbox.ui.components.notes.ItemTransformer
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.Snap
@@ -50,6 +52,7 @@ import com.aichat.sandbox.ui.components.notes.TextItemCodec
 import com.aichat.sandbox.ui.components.notes.TextItemRenderer
 import com.aichat.sandbox.ui.components.notes.Tool
 import com.aichat.sandbox.ui.components.notes.ToolPaletteState
+import com.aichat.sandbox.ui.components.notes.ZOrderMath
 import androidx.compose.runtime.snapshotFlow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -328,6 +331,13 @@ class NoteEditorViewModel @Inject constructor(
      */
     private val _colorPickerOpen = MutableStateFlow(false)
     val colorPickerOpen: StateFlow<Boolean> = _colorPickerOpen.asStateFlow()
+
+    /**
+     * Phase 10.2 — when true, the next [confirmColorPick] writes the shape
+     * fill slot instead of the active ink tool. Set by
+     * [openShapeFillColorPicker], cleared on confirm or dismiss.
+     */
+    private var colorPickerTargetsShapeFill = false
 
     /**
      * When the colour picker was opened by the AI side sheet's "Recolor"
@@ -865,7 +875,7 @@ class NoteEditorViewModel @Inject constructor(
             Shape.KIND -> {
                 val decoded = ShapeCodec.decode(item.payload)
                 val transformed = ShapeCodec.transform(decoded.shape, shift)
-                ShapeCodec.encode(transformed, decoded.fillArgb)
+                ShapeCodec.encode(transformed, decoded.fillArgb, decoded.strokeStyle)
             }
             NoteItem.KIND_IMAGE -> {
                 val payload = ImageItemCodec.decode(item.payload)
@@ -1170,6 +1180,9 @@ class NoteEditorViewModel @Inject constructor(
                 inkColors = saved.inkColors,
                 inkWidths = saved.inkWidths,
                 areaEraserRadiusPx = saved.areaEraserRadiusPx,
+                shapeFillEnabled = saved.shapeFillEnabled,
+                shapeFillColor = saved.shapeFillColor,
+                shapeStrokeStyle = saved.shapeStrokeStyle,
             )
             val inkTools = listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.PENCIL)
             snapshotFlow {
@@ -1178,6 +1191,9 @@ class NoteEditorViewModel @Inject constructor(
                     inkColors = inkTools.associate { it.id to palette.colorFor(it) },
                     inkWidths = inkTools.associate { it.id to palette.widthFor(it) },
                     areaEraserRadiusPx = palette.areaEraserRadiusPx,
+                    shapeFillEnabled = palette.shapeFillEnabled,
+                    shapeFillColor = palette.shapeFillColor,
+                    shapeStrokeStyle = palette.shapeStrokeStyle,
                 )
             }
                 // The first emission is the state we just restored.
@@ -1189,6 +1205,9 @@ class NoteEditorViewModel @Inject constructor(
                         inkColors = snap.inkColors,
                         inkWidths = snap.inkWidths,
                         areaEraserRadiusPx = snap.areaEraserRadiusPx,
+                        shapeFillEnabled = snap.shapeFillEnabled,
+                        shapeFillColor = snap.shapeFillColor,
+                        shapeStrokeStyle = snap.shapeStrokeStyle,
                     )
                 }
         }
@@ -1199,6 +1218,9 @@ class NoteEditorViewModel @Inject constructor(
         val inkColors: Map<String, Int>,
         val inkWidths: Map<String, Float>,
         val areaEraserRadiusPx: Float,
+        val shapeFillEnabled: Boolean,
+        val shapeFillColor: Int,
+        val shapeStrokeStyle: Int,
     )
 
     // ── "Draw with finger" (user setting) ────────────────────────────────
@@ -1232,12 +1254,24 @@ class NoteEditorViewModel @Inject constructor(
             // lands somewhere visible.
             palette.select(Tool.PEN)
         }
+        colorPickerTargetsShapeFill = false
+        _colorPickerOpen.value = true
+    }
+
+    /**
+     * Phase 10.2 — open the picker with the shape-fill slot as the target.
+     * No PEN fallback: a shape tool stays selected so the picked colour is
+     * immediately visible on the next rubber-band preview.
+     */
+    fun openShapeFillColorPicker() {
+        colorPickerTargetsShapeFill = true
         _colorPickerOpen.value = true
     }
 
     fun dismissColorPicker() {
         _colorPickerOpen.value = false
         _pendingAiRecolorScope.value = null
+        colorPickerTargetsShapeFill = false
     }
 
     /**
@@ -1258,7 +1292,15 @@ class NoteEditorViewModel @Inject constructor(
             applyAiRecolor(colorArgb, recolorScope)
             return
         }
-        palette.setColor(palette.lastInkTool, colorArgb)
+        if (colorPickerTargetsShapeFill) {
+            // Phase 10.2 — route to the shape-fill slot; picking a colour
+            // implies the user wants the fill on.
+            palette.setFillColor(colorArgb)
+            palette.setFillEnabled(true)
+            colorPickerTargetsShapeFill = false
+        } else {
+            palette.setColor(palette.lastInkTool, colorArgb)
+        }
         _colorPickerOpen.value = false
         viewModelScope.launch {
             recentColorsStore.record(colorArgb)
@@ -1419,9 +1461,19 @@ class NoteEditorViewModel @Inject constructor(
             clearSelection()
             return
         }
-        _selection.value = matched.toHashSet()
-        _selectionWorldBounds.value =
+        // Phase 10.4 — lassoing any member of a group selects the whole
+        // group. Members on a locked layer stay inert, mirroring the lasso's
+        // own locked-layer rule above.
+        val expanded = expandSelectionToGroups(matched.toHashSet(), items) { item ->
+            val layer = _layers.value.firstOrNull { it.id == item.layerId }
+            layer == null || !layer.locked
+        }
+        _selection.value = expanded
+        _selectionWorldBounds.value = if (expanded.size == matched.size) {
             LassoController.unionBounds(bounds)
+        } else {
+            recomputeSelectionBounds()
+        }
         _selectionMatrix.value = StrokeTransform.IDENTITY
         // Drop back to the last ink tool so consecutive strokes don't reopen
         // a lasso on top of the existing selection.
@@ -1465,7 +1517,9 @@ class NoteEditorViewModel @Inject constructor(
         if (ids.isEmpty()) return
         val originals = items.filter { it.id in ids }
         if (originals.isEmpty()) return
-        val copies = originals.map { duplicate(it, paste = false) }
+        // Phase 10.4 — copies of grouped items stay grouped with each other,
+        // under fresh ids so they're independent of the source group.
+        val copies = remapGroupIds(originals.map { duplicate(it, paste = false) })
         apply(EditorAction.AddItems(copies))
         // Replace the selection with the duplicates so the user can move them
         // independently of the originals on the next gesture.
@@ -1503,7 +1557,7 @@ class NoteEditorViewModel @Inject constructor(
      */
     fun pasteFromClipboard() {
         if (NoteClipboard.isEmpty()) return
-        val pasted = NoteClipboard.peek().map { duplicate(it, paste = true) }
+        val pasted = remapGroupIds(NoteClipboard.peek().map { duplicate(it, paste = true) })
         if (pasted.isEmpty()) return
         apply(EditorAction.AddItems(pasted))
         _selection.value = pasted.mapTo(HashSet(pasted.size)) { it.id }
@@ -1512,6 +1566,148 @@ class NoteEditorViewModel @Inject constructor(
     }
 
     fun hasClipboardContent(): Boolean = !NoteClipboard.isEmpty()
+
+    // ── Phase 10 — group / restyle / arrange ─────────────────────────────
+
+    /** True when the active selection contains at least one shape item. */
+    fun selectionHasShapes(): Boolean {
+        val ids = _selection.value
+        return items.any { it.id in ids && it.kind == Shape.KIND }
+    }
+
+    /** True when the active selection contains at least one grouped item. */
+    fun selectionHasGroup(): Boolean {
+        val ids = _selection.value
+        return items.any { it.id in ids && it.groupId != null }
+    }
+
+    /** Tag every selected item with a fresh shared groupId (10.4). */
+    fun groupSelection() {
+        val ids = _selection.value
+        if (ids.size < 2) return
+        val members = items.filter { it.id in ids }
+        if (members.size < 2) return
+        val groupId = UUID.randomUUID().toString()
+        apply(EditorAction.CompositeEdit(
+            description = "Group",
+            added = emptyList(),
+            removed = emptyList(),
+            modified = members.map { it to it.copy(groupId = groupId) },
+        ))
+    }
+
+    /** Strip the groupId from every selected member (10.4). */
+    fun ungroupSelection() {
+        val ids = _selection.value
+        val members = items.filter { it.id in ids && it.groupId != null }
+        if (members.isEmpty()) return
+        apply(EditorAction.CompositeEdit(
+            description = "Ungroup",
+            added = emptyList(),
+            removed = emptyList(),
+            modified = members.map { it to it.copy(groupId = null) },
+        ))
+    }
+
+    /**
+     * Re-fill every selected shape (10.2). `null` removes the fill. One
+     * CompositeEdit so the restyle is a single undo entry; non-shape items
+     * in the selection are untouched.
+     */
+    fun setSelectionFill(fillArgb: Int?) {
+        restyleSelectedShapes(if (fillArgb == null) "Remove fill" else "Set fill") { decoded ->
+            ShapeCodec.encode(decoded.shape, fillArgb ?: 0, decoded.strokeStyle)
+        }
+    }
+
+    /** Re-style every selected shape's outline (10.3) — a [ShapeCodec] STROKE_STYLE_* value. */
+    fun setSelectionStrokeStyle(style: Int) {
+        restyleSelectedShapes("Line style") { decoded ->
+            ShapeCodec.encode(decoded.shape, decoded.fillArgb, style.toByte())
+        }
+    }
+
+    private fun restyleSelectedShapes(
+        description: String,
+        reencode: (ShapeCodec.DecodedShape) -> ByteArray,
+    ) {
+        val ids = _selection.value
+        if (ids.isEmpty()) return
+        val pairs = ArrayList<Pair<NoteItem, NoteItem>>()
+        for (item in items) {
+            if (item.id !in ids || item.kind != Shape.KIND) continue
+            val decoded = ShapeCodec.decode(item.payload)
+            val payload = reencode(decoded)
+            if (payload.contentEquals(item.payload)) continue
+            pairs += item to item.copy(payload = payload)
+        }
+        if (pairs.isEmpty()) return
+        apply(EditorAction.CompositeEdit(description, emptyList(), emptyList(), pairs))
+    }
+
+    /** Align the selected items to [edge] of their union bounds (10.5). */
+    fun alignSelection(edge: AlignmentMath.AlignEdge) {
+        val entries = selectionBoundsEntries() ?: return
+        applyPerItemTranslations(AlignmentMath.align(entries, edge), "Align")
+    }
+
+    /** Equalize gaps between the selected items along [axis] (10.5). */
+    fun distributeSelection(axis: AlignmentMath.Axis) {
+        val entries = selectionBoundsEntries() ?: return
+        applyPerItemTranslations(AlignmentMath.distribute(entries, axis), "Distribute")
+    }
+
+    private fun selectionBoundsEntries(): List<Pair<String, FloatArray>>? {
+        val ids = _selection.value
+        if (ids.size < 2) return null
+        val entries = items.filter { it.id in ids }
+            .mapNotNull { item -> itemBounds(item)?.let { item.id to it } }
+        return entries.takeIf { it.size >= 2 }
+    }
+
+    private fun applyPerItemTranslations(
+        matrices: Map<String, FloatArray>,
+        description: String,
+    ) {
+        if (matrices.isEmpty()) return
+        val pairs = items.filter { it.id in matrices.keys }
+            .map { it to ItemTransformer.transform(it, matrices.getValue(it.id)) }
+        if (pairs.isEmpty()) return
+        apply(EditorAction.CompositeEdit(description, emptyList(), emptyList(), pairs))
+        _selectionWorldBounds.value = recomputeSelectionBounds()
+    }
+
+    /**
+     * Re-stack the selection (10.5). Reordering stays within each z band —
+     * [ZOrderMath] reuses the band's existing zIndex slots, so highlighters
+     * can never climb above the ink tier and the z counters stay valid.
+     */
+    fun reorderSelection(op: ZOrderMath.Op) {
+        val ids = _selection.value
+        if (ids.isEmpty()) return
+        val entries = items.map {
+            ZOrderMath.Entry(
+                id = it.id,
+                zIndex = it.zIndex,
+                band = if (it.tool == StrokeRenderer.TOOL_HIGHLIGHTER) {
+                    ZOrderMath.BAND_HIGHLIGHTER
+                } else {
+                    ZOrderMath.BAND_INK
+                },
+            )
+        }
+        val newZ = ZOrderMath.reorder(entries, ids, op)
+        if (newZ.isEmpty()) return
+        val pairs = items.filter { it.id in newZ.keys }
+            .map { it to it.copy(zIndex = newZ.getValue(it.id)) }
+        val description = when (op) {
+            ZOrderMath.Op.BRING_TO_FRONT -> "Bring to front"
+            ZOrderMath.Op.BRING_FORWARD -> "Bring forward"
+            ZOrderMath.Op.SEND_BACKWARD -> "Send backward"
+            ZOrderMath.Op.SEND_TO_BACK -> "Send to back"
+        }
+        apply(EditorAction.CompositeEdit(description, emptyList(), emptyList(), pairs))
+    }
 
     // ── Text editor (sub-phase 1.9) ──────────────────────────────────────
 
@@ -2401,7 +2597,7 @@ class NoteEditorViewModel @Inject constructor(
             Shape.KIND -> {
                 val decoded = ShapeCodec.decode(source.payload)
                 val transformed = ShapeCodec.transform(decoded.shape, shifted)
-                ShapeCodec.encode(transformed, decoded.fillArgb)
+                ShapeCodec.encode(transformed, decoded.fillArgb, decoded.strokeStyle)
             }
             NoteItem.KIND_IMAGE -> {
                 val payload = ImageItemCodec.decode(source.payload)
@@ -2423,20 +2619,22 @@ class NoteEditorViewModel @Inject constructor(
         val rects = ArrayList<FloatArray>(ids.size)
         for (item in items) {
             if (item.id !in ids) continue
-            val rect = when (item.kind) {
-                STROKE_KIND -> {
-                    val samples = StrokeCodec.decode(item.payload)
-                    val count = samples.size / StrokeCodec.FLOATS_PER_SAMPLE
-                    HitTest.boundsOf(samples, count)
-                }
-                TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
-                Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
-                NoteItem.KIND_IMAGE -> ImageItemCodec.boundsOf(ImageItemCodec.decode(item.payload))
-                else -> null
-            }
-            rect?.let { rects.add(it) }
+            itemBounds(item)?.let { rects.add(it) }
         }
         return LassoController.unionBounds(rects)
+    }
+
+    /** World-space `[minX, minY, maxX, maxY]` of a single item, kind-aware. */
+    private fun itemBounds(item: NoteItem): FloatArray? = when (item.kind) {
+        STROKE_KIND -> {
+            val samples = StrokeCodec.decode(item.payload)
+            val count = samples.size / StrokeCodec.FLOATS_PER_SAMPLE
+            HitTest.boundsOf(samples, count)
+        }
+        TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
+        Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
+        NoteItem.KIND_IMAGE -> ImageItemCodec.boundsOf(ImageItemCodec.decode(item.payload))
+        else -> null
     }
 
     /**

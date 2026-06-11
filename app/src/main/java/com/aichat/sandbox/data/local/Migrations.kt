@@ -642,3 +642,15 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
         createNotesSearchIndex(db)
     }
 }
+
+/**
+ * Migration from version 18 to 19:
+ * Adds the nullable `note_items.groupId` column (Phase 10.4 — flat item
+ * grouping). Existing rows stay null = ungrouped. No index — group lookups
+ * happen against the in-memory item list of a single open note.
+ */
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `note_items` ADD COLUMN `groupId` TEXT")
+    }
+}

@@ -10,8 +10,14 @@ import java.nio.ByteOrder
  * (0 means "no fill"); the codec is otherwise minimal — colour and stroke
  * width travel on the enclosing [com.aichat.sandbox.data.model.NoteItem].
  *
+ * Phase 10.3 appends an optional trailing `strokeStyle:u8` after `fillArgb`
+ * (0 = solid, 1 = dashed, 2 = dotted). Decode treats a payload that ends at
+ * `fillArgb` as solid, so every pre-Phase-10 payload round-trips unchanged.
+ * Future trailing fields must follow the same convention: append after the
+ * last optional field and decode via `buf.hasRemaining()`.
+ *
  * ```
- * [type:u8] <type-specific fields…> [fillArgb:i32]
+ * [type:u8] <type-specific fields…> [fillArgb:i32] [strokeStyle:u8]?
  *
  * type 0x01 Line:    x0:f y0:f x1:f y1:f
  * type 0x02 Rect:    x0:f y0:f x1:f y1:f cornerRadius:f
@@ -28,8 +34,8 @@ object ShapeCodec {
     private const val BYTES_INT: Int = 4
     private const val BYTES_FLOAT: Int = 4
 
-    fun encode(shape: Shape, fillArgb: Int = 0): ByteArray {
-        val size = sizeOf(shape) + BYTES_INT // trailing fillArgb
+    fun encode(shape: Shape, fillArgb: Int = 0, strokeStyle: Byte = STROKE_STYLE_SOLID): ByteArray {
+        val size = sizeOf(shape) + BYTES_INT + 1 // trailing fillArgb + strokeStyle
         val buf = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
         buf.put(shape.type)
         when (shape) {
@@ -60,6 +66,7 @@ object ShapeCodec {
             }
         }
         buf.putInt(fillArgb)
+        buf.put(strokeStyle)
         return buf.array()
     }
 
@@ -90,7 +97,10 @@ object ShapeCodec {
             else -> throw IllegalArgumentException("unknown shape type=$type")
         }
         val fillArgb = buf.int
-        return DecodedShape(shape, fillArgb)
+        // Phase 10.3 — optional trailing strokeStyle; payloads written before
+        // the byte existed decode as solid.
+        val strokeStyle = if (buf.hasRemaining()) buf.get() else STROKE_STYLE_SOLID
+        return DecodedShape(shape, fillArgb, strokeStyle)
     }
 
     private fun sizeOf(shape: Shape): Int = 1 + when (shape) {
@@ -206,5 +216,13 @@ object ShapeCodec {
         }
     }
 
-    data class DecodedShape(val shape: Shape, val fillArgb: Int)
+    data class DecodedShape(
+        val shape: Shape,
+        val fillArgb: Int,
+        val strokeStyle: Byte = STROKE_STYLE_SOLID,
+    )
+
+    const val STROKE_STYLE_SOLID: Byte = 0
+    const val STROKE_STYLE_DASHED: Byte = 1
+    const val STROKE_STYLE_DOTTED: Byte = 2
 }

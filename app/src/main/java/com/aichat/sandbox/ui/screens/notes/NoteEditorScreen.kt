@@ -635,6 +635,18 @@ fun NoteEditorScreen(
                         viewModel.applyCannedEditAction(action)
                     },
                     onSaveAsStamp = { saveStampDialogVisible = true },
+                    // Phase 10 — restyle / group / arrange.
+                    selectionHasShapes = viewModel.selectionHasShapes(),
+                    canGroup = selection.size >= 2,
+                    canUngroup = viewModel.selectionHasGroup(),
+                    canDistribute = selection.size >= 3,
+                    onSetFill = viewModel::setSelectionFill,
+                    onSetStrokeStyle = viewModel::setSelectionStrokeStyle,
+                    onGroup = viewModel::groupSelection,
+                    onUngroup = viewModel::ungroupSelection,
+                    onAlign = viewModel::alignSelection,
+                    onDistribute = viewModel::distributeSelection,
+                    onReorder = viewModel::reorderSelection,
                 )
                 val target = textEditTarget
                 val vp = viewportController
@@ -715,6 +727,7 @@ fun NoteEditorScreen(
                                 onPickCustomColor = viewModel::openColorPicker,
                                 snapMask = snapMask,
                                 onToggleSnap = viewModel::toggleSnap,
+                                onPickShapeFillColor = viewModel::openShapeFillColorPicker,
                             )
                         }
                     }

@@ -2,6 +2,8 @@ package com.aichat.sandbox.ui.screens.notes
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -22,18 +24,27 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileCopy
+import androidx.compose.material.icons.filled.FormatColorFill
+import androidx.compose.material.icons.filled.GroupWork
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,8 +59,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.aichat.sandbox.ui.components.notes.AlignmentMath
 import com.aichat.sandbox.ui.components.notes.StrokeTransform
 import com.aichat.sandbox.ui.components.notes.ViewportController
+import com.aichat.sandbox.ui.components.notes.ZOrderMath
 import kotlin.math.atan2
 import kotlin.math.max
 
@@ -95,6 +108,18 @@ fun SelectionOverlay(
     canPaste: Boolean,
     onCannedEdit: ((com.aichat.sandbox.data.notes.CannedEditAction) -> Unit)? = null,
     onSaveAsStamp: (() -> Unit)? = null,
+    // Phase 10 — restyle (shapes only), grouping, and arrange actions.
+    selectionHasShapes: Boolean = false,
+    canGroup: Boolean = false,
+    canUngroup: Boolean = false,
+    canDistribute: Boolean = false,
+    onSetFill: ((Int?) -> Unit)? = null,
+    onSetStrokeStyle: ((Int) -> Unit)? = null,
+    onGroup: (() -> Unit)? = null,
+    onUngroup: (() -> Unit)? = null,
+    onAlign: ((AlignmentMath.AlignEdge) -> Unit)? = null,
+    onDistribute: ((AlignmentMath.Axis) -> Unit)? = null,
+    onReorder: ((ZOrderMath.Op) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (selection.isEmpty() || worldBounds == null || viewport == null) return
@@ -308,6 +333,17 @@ fun SelectionOverlay(
             onCut = onCut,
             onCopy = onCopy,
             onPaste = onPaste,
+            selectionHasShapes = selectionHasShapes,
+            canGroup = canGroup,
+            canUngroup = canUngroup,
+            canDistribute = canDistribute,
+            onSetFill = onSetFill,
+            onSetStrokeStyle = onSetStrokeStyle,
+            onGroup = onGroup,
+            onUngroup = onUngroup,
+            onAlign = onAlign,
+            onDistribute = onDistribute,
+            onReorder = onReorder,
             modifier = Modifier.layout { measurable, constraints ->
                 val placeable = measurable.measure(
                     Constraints(
@@ -445,6 +481,17 @@ private fun FloatingSelectionMenu(
     onPaste: () -> Unit,
     onCannedEdit: ((com.aichat.sandbox.data.notes.CannedEditAction) -> Unit)? = null,
     onSaveAsStamp: (() -> Unit)? = null,
+    selectionHasShapes: Boolean = false,
+    canGroup: Boolean = false,
+    canUngroup: Boolean = false,
+    canDistribute: Boolean = false,
+    onSetFill: ((Int?) -> Unit)? = null,
+    onSetStrokeStyle: ((Int) -> Unit)? = null,
+    onGroup: (() -> Unit)? = null,
+    onUngroup: (() -> Unit)? = null,
+    onAlign: ((AlignmentMath.AlignEdge) -> Unit)? = null,
+    onDistribute: ((AlignmentMath.Axis) -> Unit)? = null,
+    onReorder: ((ZOrderMath.Op) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -494,6 +541,26 @@ private fun FloatingSelectionMenu(
                     onClick = onSaveAsStamp,
                 )
             }
+            // Phase 10.2/10.3 — restyle existing shapes (fill + line style).
+            if (selectionHasShapes && onSetFill != null && onSetStrokeStyle != null) {
+                StyleMenuButton(onSetFill = onSetFill, onSetStrokeStyle = onSetStrokeStyle)
+            }
+            // Phase 10.4 — group / ungroup.
+            if (canGroup && onGroup != null) {
+                MenuButton(icon = Icons.Filled.GroupWork, label = "Group", onClick = onGroup)
+            }
+            if (canUngroup && onUngroup != null) {
+                MenuButton(icon = Icons.Filled.LinkOff, label = "Ungroup", onClick = onUngroup)
+            }
+            // Phase 10.5 — align / distribute / z-order.
+            if (onAlign != null && onDistribute != null && onReorder != null) {
+                ArrangeMenuButton(
+                    canDistribute = canDistribute,
+                    onAlign = onAlign,
+                    onDistribute = onDistribute,
+                    onReorder = onReorder,
+                )
+            }
             MenuButton(icon = Icons.Filled.FileCopy, label = "Duplicate", onClick = onDuplicate)
             MenuButton(icon = Icons.Filled.Delete, label = "Delete", onClick = onDelete)
             MenuButton(icon = Icons.Filled.ContentCut, label = "Cut", onClick = onCut)
@@ -541,6 +608,105 @@ private fun MenuButton(
     }
 }
 
+/**
+ * Phase 10.2/10.3 — "Style" button with a popover that restyles the selected
+ * shapes: no-fill / fill swatches, then outline style. Every tap is one
+ * CompositeEdit on the VM side, so each is its own undo entry.
+ */
+@Composable
+private fun StyleMenuButton(
+    onSetFill: (Int?) -> Unit,
+    onSetStrokeStyle: (Int) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        MenuButton(
+            icon = Icons.Filled.FormatColorFill,
+            label = "Style",
+            onClick = { expanded = true },
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("No fill") },
+                onClick = { onSetFill(null); expanded = false },
+            )
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                for (swatch in FILL_SWATCHES) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(Color(swatch))
+                            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                            .clickable { onSetFill(swatch); expanded = false },
+                    )
+                }
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Solid line") },
+                onClick = { onSetStrokeStyle(STROKE_STYLE_SOLID); expanded = false },
+            )
+            DropdownMenuItem(
+                text = { Text("Dashed line") },
+                onClick = { onSetStrokeStyle(STROKE_STYLE_DASHED); expanded = false },
+            )
+            DropdownMenuItem(
+                text = { Text("Dotted line") },
+                onClick = { onSetStrokeStyle(STROKE_STYLE_DOTTED); expanded = false },
+            )
+        }
+    }
+}
+
+/** Phase 10.5 — "Arrange" button: align / distribute / restack submenu. */
+@Composable
+private fun ArrangeMenuButton(
+    canDistribute: Boolean,
+    onAlign: (AlignmentMath.AlignEdge) -> Unit,
+    onDistribute: (AlignmentMath.Axis) -> Unit,
+    onReorder: (ZOrderMath.Op) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    fun align(edge: AlignmentMath.AlignEdge) { onAlign(edge); expanded = false }
+    fun reorder(op: ZOrderMath.Op) { onReorder(op); expanded = false }
+    Box {
+        MenuButton(
+            icon = Icons.Filled.SwapVert,
+            label = "Arrange",
+            onClick = { expanded = true },
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("Align left") }, onClick = { align(AlignmentMath.AlignEdge.LEFT) })
+            DropdownMenuItem(text = { Text("Align centre") }, onClick = { align(AlignmentMath.AlignEdge.CENTER_H) })
+            DropdownMenuItem(text = { Text("Align right") }, onClick = { align(AlignmentMath.AlignEdge.RIGHT) })
+            DropdownMenuItem(text = { Text("Align top") }, onClick = { align(AlignmentMath.AlignEdge.TOP) })
+            DropdownMenuItem(text = { Text("Align middle") }, onClick = { align(AlignmentMath.AlignEdge.CENTER_V) })
+            DropdownMenuItem(text = { Text("Align bottom") }, onClick = { align(AlignmentMath.AlignEdge.BOTTOM) })
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Distribute horizontally") },
+                enabled = canDistribute,
+                onClick = { onDistribute(AlignmentMath.Axis.HORIZONTAL); expanded = false },
+            )
+            DropdownMenuItem(
+                text = { Text("Distribute vertically") },
+                enabled = canDistribute,
+                onClick = { onDistribute(AlignmentMath.Axis.VERTICAL); expanded = false },
+            )
+            HorizontalDivider()
+            DropdownMenuItem(text = { Text("Bring to front") }, onClick = { reorder(ZOrderMath.Op.BRING_TO_FRONT) })
+            DropdownMenuItem(text = { Text("Bring forward") }, onClick = { reorder(ZOrderMath.Op.BRING_FORWARD) })
+            DropdownMenuItem(text = { Text("Send backward") }, onClick = { reorder(ZOrderMath.Op.SEND_BACKWARD) })
+            DropdownMenuItem(text = { Text("Send to back") }, onClick = { reorder(ZOrderMath.Op.SEND_TO_BACK) })
+        }
+    }
+}
+
 private data class ScreenRect(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
 private fun screenBoundsOf(corners: Array<Offset>): ScreenRect {
@@ -582,6 +748,22 @@ private fun cornersOf(worldBounds: FloatArray, matrix: FloatArray): Array<Offset
 
 private data class CornerTuple(val minX: Float, val minY: Float, val maxX: Float, val maxY: Float)
 private fun FloatArray.toCornerTuple() = CornerTuple(this[0], this[1], this[2], this[3])
+
+// Phase 10.3 — mirror ShapeCodec's STROKE_STYLE_* bytes (kept as Ints here
+// so the Compose layer stays free of the codec dependency direction).
+private const val STROKE_STYLE_SOLID = 0
+private const val STROKE_STYLE_DASHED = 1
+private const val STROKE_STYLE_DOTTED = 2
+
+/** Quick-fill palette for the Style popover — translucent so outlines stay legible. */
+private val FILL_SWATCHES: List<Int> = listOf(
+    0x40000000,            // 25% black
+    0x40D62828.toInt(),    // 25% red
+    0x402463EB.toInt(),    // 25% blue
+    0x40109F5C.toInt(),    // 25% green
+    0x40FF9F1C.toInt(),    // 25% orange
+    0xFFFFF59D.toInt(),    // sticky-note yellow (opaque)
+)
 
 private val SELECTION_OUTLINE = Color(0xCC1E88E5)
 private val HANDLE_FILL = Color(0xFF1E88E5)

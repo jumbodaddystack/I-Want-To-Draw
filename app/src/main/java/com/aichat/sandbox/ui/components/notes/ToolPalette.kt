@@ -67,6 +67,8 @@ fun ToolPalette(
     onPickCustomColor: () -> Unit = {},
     snapMask: Int = Snap.MASK_ANGLE or Snap.MASK_ENDPOINT,
     onToggleSnap: (Int) -> Unit = { },
+    // Phase 10.2 — opens the colour picker targeting the shape-fill slot.
+    onPickShapeFillColor: () -> Unit = {},
 ) {
     val selected = state.selected
     Surface(
@@ -95,6 +97,8 @@ fun ToolPalette(
             } else if (selected.isShape) {
                 // Phase 6.2 — shape tools reuse the active ink color + width.
                 InkConfigRow(state = state, onPickCustomColor = onPickCustomColor)
+                // Phase 10.2/10.3 — fill + outline style for new shapes.
+                ShapeStyleRow(state = state, onPickShapeFillColor = onPickShapeFillColor)
                 SnapChipRow(snapMask = snapMask, onToggle = onToggleSnap)
             } else if (selected.isFrame) {
                 FrameHintRow()
@@ -433,6 +437,55 @@ private fun TextHintRow() {
             style = MaterialTheme.typography.labelMedium,
         )
     }
+}
+
+/**
+ * Phase 10.2/10.3 — shape fill + outline style row. The fill chip toggles
+ * the fill on/off; the swatch beside it shows the current fill colour and
+ * opens the picker targeting the fill slot. Solid / dashed / dotted chips
+ * pick the outline style for newly drawn shapes.
+ */
+@Composable
+private fun ShapeStyleRow(
+    state: ToolPaletteState,
+    onPickShapeFillColor: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        FilterChip(
+            selected = state.shapeFillEnabled,
+            onClick = { state.setFillEnabled(!state.shapeFillEnabled) },
+            label = { Text("Fill") },
+        )
+        // Current fill colour; tap opens the picker (and turns the fill on).
+        ColorSwatch(
+            colorArgb = state.shapeFillColor,
+            selected = state.shapeFillEnabled,
+            onSelect = onPickShapeFillColor,
+        )
+        Text(
+            text = "Line",
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(start = 4.dp),
+        )
+        StrokeStyleChip(state, ShapeCodec.STROKE_STYLE_SOLID.toInt(), "Solid")
+        StrokeStyleChip(state, ShapeCodec.STROKE_STYLE_DASHED.toInt(), "Dashed")
+        StrokeStyleChip(state, ShapeCodec.STROKE_STYLE_DOTTED.toInt(), "Dotted")
+    }
+}
+
+@Composable
+private fun StrokeStyleChip(state: ToolPaletteState, style: Int, label: String) {
+    FilterChip(
+        selected = state.shapeStrokeStyle == style,
+        onClick = { state.setStrokeStyle(style) },
+        label = { Text(label) },
+    )
 }
 
 /**

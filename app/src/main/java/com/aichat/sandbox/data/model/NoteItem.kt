@@ -32,6 +32,10 @@ data class NoteItem(
     // Sub-phase 6.4 — parent layer FK. Null = default/legacy layer (renders
     // on top of all named layers; behaves as visible+unlocked+opacity 100).
     val layerId: String? = null,
+    // Phase 10.4 — flat group tag. Items sharing a non-null groupId select
+    // together (expansion happens at lasso-commit time). No nesting; a group
+    // may span layers.
+    val groupId: String? = null,
 ) {
     // Hand-written equals/hashCode because ByteArray uses reference equality by default.
     override fun equals(other: Any?): Boolean {
@@ -46,6 +50,7 @@ data class NoteItem(
         if (baseWidthPx != other.baseWidthPx) return false
         if (!payload.contentEquals(other.payload)) return false
         if (layerId != other.layerId) return false
+        if (groupId != other.groupId) return false
         return true
     }
 
@@ -59,6 +64,7 @@ data class NoteItem(
         result = 31 * result + baseWidthPx.hashCode()
         result = 31 * result + payload.contentHashCode()
         result = 31 * result + (layerId?.hashCode() ?: 0)
+        result = 31 * result + (groupId?.hashCode() ?: 0)
         return result
     }
 

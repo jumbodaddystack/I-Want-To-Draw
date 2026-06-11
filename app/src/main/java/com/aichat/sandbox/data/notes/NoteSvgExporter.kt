@@ -9,6 +9,7 @@ import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
+import com.aichat.sandbox.ui.components.notes.ShapeRenderer
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
 import com.aichat.sandbox.ui.components.notes.StrokeRenderer
 import com.aichat.sandbox.ui.components.notes.TextItemCodec
@@ -175,6 +176,8 @@ class NoteSvgExporter @Inject constructor(
             val color = colorToHex(item.colorArgb)
             val fill = if (decoded.fillArgb == 0) "none" else colorToHex(decoded.fillArgb)
             val width = item.baseWidthPx
+            // Phase 10.3 — mirror the renderer's width-scaled dash pattern.
+            val dash = dashArrayFor(decoded.strokeStyle, width)
             when (val s = decoded.shape) {
                 is Shape.Line -> {
                     sb.append("    <line x1=\"").append(fmt(s.x0))
@@ -183,7 +186,9 @@ class NoteSvgExporter @Inject constructor(
                         .append("\" y2=\"").append(fmt(s.y1))
                         .append("\" stroke=\"").append(color)
                         .append("\" stroke-width=\"").append(fmt(width))
-                        .append("\" stroke-linecap=\"round\"/>\n")
+                        .append('"')
+                    if (dash != null) sb.append(" stroke-dasharray=\"").append(dash).append('"')
+                    sb.append(" stroke-linecap=\"round\"/>\n")
                 }
                 is Shape.Rect -> {
                     sb.append("    <rect x=\"").append(fmt(s.minX))
@@ -196,7 +201,9 @@ class NoteSvgExporter @Inject constructor(
                     }
                     sb.append(" fill=\"").append(fill).append('"')
                         .append(" stroke=\"").append(color).append('"')
-                        .append(" stroke-width=\"").append(fmt(width)).append("\"/>\n")
+                        .append(" stroke-width=\"").append(fmt(width)).append('"')
+                    if (dash != null) sb.append(" stroke-dasharray=\"").append(dash).append('"')
+                    sb.append("/>\n")
                 }
                 is Shape.Ellipse -> {
                     sb.append("    <ellipse cx=\"").append(fmt(s.cx))
@@ -213,7 +220,9 @@ class NoteSvgExporter @Inject constructor(
                     }
                     sb.append(" fill=\"").append(fill).append('"')
                         .append(" stroke=\"").append(color).append('"')
-                        .append(" stroke-width=\"").append(fmt(width)).append("\"/>\n")
+                        .append(" stroke-width=\"").append(fmt(width)).append('"')
+                    if (dash != null) sb.append(" stroke-dasharray=\"").append(dash).append('"')
+                    sb.append("/>\n")
                 }
                 is Shape.Arrow -> {
                     // Line + filled triangle head.
@@ -222,7 +231,9 @@ class NoteSvgExporter @Inject constructor(
                         .append("\" x2=\"").append(fmt(s.x1))
                         .append("\" y2=\"").append(fmt(s.y1))
                         .append("\" stroke=\"").append(color)
-                        .append("\" stroke-width=\"").append(fmt(width)).append("\"/>\n")
+                        .append("\" stroke-width=\"").append(fmt(width)).append('"')
+                    if (dash != null) sb.append(" stroke-dasharray=\"").append(dash).append('"')
+                    sb.append("/>\n")
                     val dx = s.x1 - s.x0
                     val dy = s.y1 - s.y0
                     val len = kotlin.math.hypot(dx, dy)
@@ -253,9 +264,23 @@ class NoteSvgExporter @Inject constructor(
                     sb.append('"').append(" fill=\"")
                         .append(if (s.closed) fill else "none").append('"')
                         .append(" stroke=\"").append(color).append('"')
-                        .append(" stroke-width=\"").append(fmt(width)).append("\"/>\n")
+                        .append(" stroke-width=\"").append(fmt(width)).append('"')
+                    if (dash != null) sb.append(" stroke-dasharray=\"").append(dash).append('"')
+                    sb.append("/>\n")
                 }
             }
+        }
+
+        /**
+         * SVG `stroke-dasharray` matching [ShapeRenderer]'s width-scaled
+         * [android.graphics.DashPathEffect] patterns; null for solid.
+         */
+        private fun dashArrayFor(strokeStyle: Byte, width: Float): String? = when (strokeStyle) {
+            ShapeCodec.STROKE_STYLE_DASHED ->
+                "${fmt(width * ShapeRenderer.DASH_ON_FACTOR)} ${fmt(width * ShapeRenderer.DASH_OFF_FACTOR)}"
+            ShapeCodec.STROKE_STYLE_DOTTED ->
+                "${fmt(width * ShapeRenderer.DOT_ON_FACTOR)} ${fmt(width * ShapeRenderer.DOT_OFF_FACTOR)}"
+            else -> null
         }
 
         private fun appendImage(sb: StringBuilder, item: NoteItem, filesDir: java.io.File?) {
