@@ -1,5 +1,30 @@
 # Phase 11 — Whiteboard primitives
 
+## Status: 11.1–11.5 code-complete
+
+All five sub-phases implemented and committed on this branch; build green,
+JVM suites green (only the documented `Color`/`Log` "not mocked" classes
+fail, byte-identical to the pre-Phase-11 base). On-device verification is
+pending (runs together with 10.7 on real hardware). Implementation notes /
+deviations from the spec below:
+
+- **Palette layout** — STICKY and CONNECTOR share one grouped "Board"
+  button (mirroring the shapes group, with a `lastBoardTool` slot) so the
+  tool row still fits a 360 dp phone.
+- **Sticky drop is immediate** — unlike the text tool's NewAt draft, the
+  tap commits the sticky first (`AddItems`) and then opens the editor; an
+  emptied body keeps the sticky (it's a valid board artifact).
+- **Connector duplicate/paste drops bindings** — the copy keeps the
+  resolved geometry as plain fallback endpoints; staying glued to the
+  *original* targets would surprise more than it helps.
+- **Recognition is line-only for open strokes** (no arrow inference) and
+  emits axis-aligned rects; a heavily rotated rectangle falls through to a
+  closed polygon, which renders it faithfully anyway. Ellipse thresholds
+  are documented in-code against the rectangle radial profile.
+- **Templates title the note** after the template's display name.
+- **Presentation keeps finger pan/pinch** inside a frame; system Back
+  exits the presentation before it exits the note.
+
 > Single-user whiteboard features on the existing notes canvas: sticky notes,
 > bound connectors, hold-to-snap shape recognition, starter templates, and a
 > presentation mode over frames. Everything follows the Phase 10 cross-cutting
