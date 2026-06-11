@@ -42,9 +42,12 @@ import com.aichat.sandbox.ui.components.notes.AlignmentMath
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.ItemTransformer
+import com.aichat.sandbox.ui.components.notes.ConnectorCodec
+import com.aichat.sandbox.ui.components.notes.ConnectorResolver
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.Snap
+import com.aichat.sandbox.ui.components.notes.StickyCodec
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
 import com.aichat.sandbox.ui.components.notes.StrokeRenderer
 import com.aichat.sandbox.ui.components.notes.StrokeTransform
@@ -243,6 +246,20 @@ class NoteEditorViewModel @Inject constructor(
 
     private val _textEditTarget = MutableStateFlow<TextEditTarget?>(null)
     val textEditTarget: StateFlow<TextEditTarget?> = _textEditTarget.asStateFlow()
+
+    // ── Sticky editor target (sub-phase 11.1) ────────────────────────────
+    //
+    // Unlike the text tool there is no "NewAt" mode: tapping empty canvas
+    // with the STICKY tool *immediately* drops the sticky (an empty sticky
+    // is a valid board artifact, and the user sees the colour land), then
+    // opens the inline editor on it. Commit diffs the body into one
+    // CompositeEdit("Edit sticky").
+
+    private val _stickyEditTarget = MutableStateFlow<StickyEditTarget?>(null)
+    val stickyEditTarget: StateFlow<StickyEditTarget?> = _stickyEditTarget.asStateFlow()
+
+    /** Live sticky draft body — the Compose editor writes this per keystroke. */
+    private var stickyEditDraftBody: String = ""
 
     // ── OCR indicator (sub-phase 2.4) ────────────────────────────────────
     //
@@ -881,6 +898,22 @@ class NoteEditorViewModel @Inject constructor(
                 val payload = ImageItemCodec.decode(item.payload)
                 ImageItemCodec.encode(ImageItemCodec.transform(payload, shift))
             }
+            StickyCodec.KIND -> {
+                val payload = StickyCodec.decode(item.payload)
+                StickyCodec.encode(StickyCodec.transform(payload, shift))
+            }
+            ConnectorCodec.KIND -> {
+                // Stamp items reference ids from the source note — those
+                // can't resolve here, so shift the fallback geometry and
+                // drop the bindings.
+                val payload = ConnectorCodec.decode(item.payload)
+                ConnectorCodec.encode(
+                    ConnectorCodec.transform(
+                        payload.copy(fromItemId = null, toItemId = null),
+                        shift,
+                    )
+                )
+            }
             else -> item.payload.copyOf()
         }
         return item.copy(
@@ -1183,6 +1216,7 @@ class NoteEditorViewModel @Inject constructor(
                 shapeFillEnabled = saved.shapeFillEnabled,
                 shapeFillColor = saved.shapeFillColor,
                 shapeStrokeStyle = saved.shapeStrokeStyle,
+                stickyFillColor = saved.stickyFillColor,
             )
             val inkTools = listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.PENCIL)
             snapshotFlow {
@@ -1194,6 +1228,7 @@ class NoteEditorViewModel @Inject constructor(
                     shapeFillEnabled = palette.shapeFillEnabled,
                     shapeFillColor = palette.shapeFillColor,
                     shapeStrokeStyle = palette.shapeStrokeStyle,
+                    stickyFillColor = palette.stickyFillColor,
                 )
             }
                 // The first emission is the state we just restored.
@@ -1208,6 +1243,7 @@ class NoteEditorViewModel @Inject constructor(
                         shapeFillEnabled = snap.shapeFillEnabled,
                         shapeFillColor = snap.shapeFillColor,
                         shapeStrokeStyle = snap.shapeStrokeStyle,
+                        stickyFillColor = snap.stickyFillColor,
                     )
                 }
         }
@@ -1221,6 +1257,7 @@ class NoteEditorViewModel @Inject constructor(
         val shapeFillEnabled: Boolean,
         val shapeFillColor: Int,
         val shapeStrokeStyle: Int,
+        val stickyFillColor: Int,
     )
 
     // ── "Draw with finger" (user setting) ────────────────────────────────
@@ -1444,6 +1481,26 @@ class NoteEditorViewModel @Inject constructor(
                     // good enough for the v1 UX.
                     hit = b[2] >= polyBounds[0] && b[0] <= polyBounds[2] &&
                         b[3] >= polyBounds[1] && b[1] <= polyBounds[3]
+                }
+                StickyCodec.KIND -> {
+                    // 11.1 — same cheap AABB selector as images.
+                    val b = StickyCodec.boundsOf(StickyCodec.decode(item.payload))
+                    itemBounds = b
+                    hit = b[2] >= polyBounds[0] && b[0] <= polyBounds[2] &&
+                        b[3] >= polyBounds[1] && b[1] <= polyBounds[3]
+                }
+                ConnectorCodec.KIND -> {
+                    // 11.2 — test the resolved segment's ends + midpoint,
+                    // mirroring the Line shape's representative points.
+                    val ep = resolveConnectorEndpoints(item)
+                    itemBounds = floatArrayOf(
+                        minOf(ep[0], ep[2]), minOf(ep[1], ep[3]),
+                        maxOf(ep[0], ep[2]), maxOf(ep[1], ep[3]),
+                    )
+                    hit = HitTest.shapeIntersectsPolygon(
+                        Shape.Line(ep[0], ep[1], ep[2], ep[3]),
+                        polygon, vertexCount, polyBounds,
+                    )
                 }
                 else -> continue
             }
@@ -1817,6 +1874,109 @@ class NoteEditorViewModel @Inject constructor(
         if (_textEditTarget.value == null) return
         _textEditTarget.value = null
         textEditDraftBody = ""
+    }
+
+    // ── Sticky notes (sub-phase 11.1) ────────────────────────────────────
+
+    /**
+     * Surface dispatched a tap with the STICKY tool. Tap on an existing
+     * sticky → open its inline editor; tap on empty canvas → drop a fresh
+     * 160×160 sticky (one `AddItems` undo entry) and open the editor on it.
+     */
+    fun onStickyToolTap(worldX: Float, worldY: Float) {
+        commitStickyEdit()
+        commitTextEdit()
+        val hit = findTopmostStickyAt(worldX, worldY)
+        val target = if (hit != null) {
+            hit
+        } else {
+            val payload = StickyCodec.newAt(
+                centerX = worldX,
+                centerY = worldY,
+                fillArgb = palette.stickyFillColor,
+            )
+            val item = NoteItem(
+                noteId = resolvedNoteId,
+                zIndex = nextInkZIndex++,
+                kind = StickyCodec.KIND,
+                tool = null,
+                colorArgb = 0,
+                baseWidthPx = 0f,
+                payload = StickyCodec.encode(payload),
+                layerId = layerIdForNewItem(),
+            )
+            apply(EditorAction.AddItems(listOf(item)))
+            item
+        }
+        val decoded = StickyCodec.decode(target.payload)
+        stickyEditDraftBody = decoded.body
+        _stickyEditTarget.value = StickyEditTarget(
+            itemId = target.id,
+            initialBody = decoded.body,
+            worldX = decoded.minX + StickyCodec.TEXT_INSET_WORLD,
+            worldY = decoded.minY + StickyCodec.TEXT_INSET_WORLD,
+            fontSize = decoded.fontSize,
+            maxWidthWorld = (decoded.width - 2 * StickyCodec.TEXT_INSET_WORLD)
+                .coerceAtLeast(StickyCodec.TEXT_INSET_WORLD),
+        )
+        clearSelection()
+    }
+
+    /** Live body update from the Compose editor. */
+    fun onStickyEditBodyChanged(body: String) {
+        stickyEditDraftBody = body
+    }
+
+    /**
+     * Commit the active sticky edit, if any. Idempotent. A changed body
+     * lands as one `CompositeEdit("Edit sticky")` so undo restores the old
+     * payload byte-identical; an unchanged body just closes the editor. An
+     * emptied body keeps the sticky — an empty sticky is a valid artifact;
+     * deletion goes through the selection menu / eraser like other items.
+     */
+    fun commitStickyEdit() {
+        val target = _stickyEditTarget.value ?: return
+        val body = stickyEditDraftBody
+        _stickyEditTarget.value = null
+        stickyEditDraftBody = ""
+        if (body == target.initialBody) return
+        val item = items.firstOrNull { it.id == target.itemId } ?: return
+        if (item.kind != StickyCodec.KIND) return
+        val decoded = StickyCodec.decode(item.payload)
+        val updated = item.copy(payload = StickyCodec.encode(StickyCodec.withBody(decoded, body)))
+        apply(EditorAction.CompositeEdit(
+            description = "Edit sticky",
+            added = emptyList(),
+            removed = emptyList(),
+            modified = listOf(item to updated),
+        ))
+    }
+
+    /** Drop the active sticky edit without persisting the draft. */
+    fun cancelStickyEdit() {
+        if (_stickyEditTarget.value == null) return
+        _stickyEditTarget.value = null
+        stickyEditDraftBody = ""
+    }
+
+    private fun findTopmostStickyAt(worldX: Float, worldY: Float): NoteItem? {
+        var best: NoteItem? = null
+        var bestZ = Int.MIN_VALUE
+        for (item in items) {
+            if (item.kind != StickyCodec.KIND) continue
+            val decoded = try {
+                StickyCodec.decode(item.payload)
+            } catch (_: IllegalArgumentException) {
+                continue
+            }
+            if (worldX < decoded.minX || worldX > decoded.maxX) continue
+            if (worldY < decoded.minY || worldY > decoded.maxY) continue
+            if (item.zIndex >= bestZ) {
+                best = item
+                bestZ = item.zIndex
+            }
+        }
+        return best
     }
 
     // ── AI side sheet (sub-phase 2.6) ────────────────────────────────────
@@ -2603,6 +2763,26 @@ class NoteEditorViewModel @Inject constructor(
                 val payload = ImageItemCodec.decode(source.payload)
                 ImageItemCodec.encode(ImageItemCodec.transform(payload, shifted))
             }
+            StickyCodec.KIND -> {
+                val payload = StickyCodec.decode(source.payload)
+                StickyCodec.encode(StickyCodec.transform(payload, shifted))
+            }
+            ConnectorCodec.KIND -> {
+                // A duplicated connector drops its bindings — the copy
+                // shouldn't stay glued to the *original* endpoints' items —
+                // and keeps the resolved geometry as plain fallback ends.
+                val payload = ConnectorCodec.decode(source.payload)
+                val ep = resolveConnectorEndpoints(source)
+                ConnectorCodec.encode(
+                    ConnectorCodec.transform(
+                        payload.copy(
+                            fromItemId = null, toItemId = null,
+                            x0 = ep[0], y0 = ep[1], x1 = ep[2], y1 = ep[3],
+                        ),
+                        shifted,
+                    )
+                )
+            }
             else -> source.payload.copyOf()
         }
         return source.copy(
@@ -2634,7 +2814,27 @@ class NoteEditorViewModel @Inject constructor(
         TextItemCodec.KIND -> TextItemRenderer.boundsOf(item)
         Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
         NoteItem.KIND_IMAGE -> ImageItemCodec.boundsOf(ImageItemCodec.decode(item.payload))
+        StickyCodec.KIND -> StickyCodec.boundsOf(StickyCodec.decode(item.payload))
+        ConnectorCodec.KIND -> {
+            val ep = resolveConnectorEndpoints(item)
+            floatArrayOf(
+                minOf(ep[0], ep[2]), minOf(ep[1], ep[3]),
+                maxOf(ep[0], ep[2]), maxOf(ep[1], ep[3]),
+            )
+        }
         else -> null
+    }
+
+    /**
+     * Sub-phase 11.2 — resolve a connector's endpoints against the live item
+     * list (bound ends follow their items; missing targets fall back).
+     */
+    private fun resolveConnectorEndpoints(item: NoteItem): FloatArray {
+        val payload = ConnectorCodec.decode(item.payload)
+        return ConnectorResolver.resolve(payload) { id ->
+            items.firstOrNull { it.id == id && it.kind != ConnectorCodec.KIND }
+                ?.let { itemBounds(it) }
+        }
     }
 
     /**
@@ -3099,3 +3299,17 @@ sealed interface TextEditTarget {
         override val alignment: Byte,
     ) : TextEditTarget
 }
+
+/**
+ * Sub-phase 11.1 — open sticky-edit target. The world origin is the text
+ * inset corner (rect min + [com.aichat.sandbox.ui.components.notes.StickyCodec.TEXT_INSET_WORLD])
+ * so the Compose editor overlays exactly where the renderer lays the body out.
+ */
+data class StickyEditTarget(
+    val itemId: String,
+    val initialBody: String,
+    val worldX: Float,
+    val worldY: Float,
+    val fontSize: Float,
+    val maxWidthWorld: Float,
+)

@@ -95,6 +95,7 @@ fun NoteEditorScreen(
     val selectionWorldBounds by viewModel.selectionWorldBounds.collectAsState()
     val selectionMatrix by viewModel.selectionMatrix.collectAsState()
     val textEditTarget by viewModel.textEditTarget.collectAsState()
+    val stickyEditTarget by viewModel.stickyEditTarget.collectAsState()
     val aiSheetState by viewModel.aiSheetState.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
     val chats by viewModel.chats.collectAsState()
@@ -215,6 +216,7 @@ fun NoteEditorScreen(
     LaunchedEffect(viewModel) {
         snapshotFlow { viewModel.palette.selected }.collectLatest { tool ->
             if (tool != Tool.TEXT) viewModel.commitTextEdit()
+            if (tool != Tool.STICKY) viewModel.commitStickyEdit()
         }
     }
 
@@ -570,11 +572,13 @@ fun NoteEditorScreen(
                     selectedIds = selection,
                     selectionMatrix = selectionMatrix,
                     editingTextId = (textEditTarget as? TextEditTarget.Existing)?.itemId,
+                    editingStickyId = stickyEditTarget?.itemId,
                     onStrokeCommitted = viewModel::addItem,
                     onItemsErased = viewModel::removeItems,
                     onLassoCompleted = viewModel::onLassoCompleted,
                     onSelectionShouldClear = viewModel::clearSelection,
                     onTextTap = viewModel::onTextToolTap,
+                    onStickyTap = viewModel::onStickyToolTap,
                     modifier = Modifier.fillMaxSize(),
                     snapMask = snapMask,
                     layers = layers,
@@ -664,6 +668,23 @@ fun NoteEditorScreen(
                             .DEFAULT_MAX_WIDTH_WORLD * vp.scale,
                         onBodyChanged = viewModel::onTextEditBodyChanged,
                         onCommit = viewModel::commitTextEdit,
+                    )
+                }
+                // Sub-phase 11.1 — inline sticky body editor. Reuses the
+                // text-item editor overlay anchored at the sticky's text
+                // inset; the surface keeps drawing the rect underneath and
+                // suppresses the rasterized body while this is open.
+                val stickyTarget = stickyEditTarget
+                if (stickyTarget != null && vp != null) {
+                    TextItemEditor(
+                        initialBody = stickyTarget.initialBody,
+                        screenOriginX = vp.worldToScreenX(stickyTarget.worldX),
+                        screenOriginY = vp.worldToScreenY(stickyTarget.worldY),
+                        fontSizePx = stickyTarget.fontSize * vp.scale,
+                        alignment = com.aichat.sandbox.ui.components.notes.TextItemCodec.ALIGN_LEFT,
+                        maxWidthPx = stickyTarget.maxWidthWorld * vp.scale,
+                        onBodyChanged = viewModel::onStickyEditBodyChanged,
+                        onCommit = viewModel::commitStickyEdit,
                     )
                 }
             }

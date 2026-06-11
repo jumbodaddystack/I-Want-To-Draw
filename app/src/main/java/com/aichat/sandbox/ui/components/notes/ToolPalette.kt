@@ -28,6 +28,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.HorizontalRule
 import androidx.compose.material.icons.filled.Pentagon
+import androidx.compose.material.icons.filled.Polyline
+import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.outlined.Backspace
 import androidx.compose.material.icons.outlined.Circle
@@ -102,6 +104,12 @@ fun ToolPalette(
                 SnapChipRow(snapMask = snapMask, onToggle = onToggleSnap)
             } else if (selected.isFrame) {
                 FrameHintRow()
+            } else if (selected.isSticky) {
+                StickyConfigRow(state = state)
+            } else if (selected.isConnector) {
+                // Sub-phase 11.2 — connectors reuse the active ink colour + width.
+                InkConfigRow(state = state, onPickCustomColor = onPickCustomColor)
+                ConnectorHintRow()
             }
         }
     }
@@ -144,6 +152,15 @@ private fun ToolRow(state: ToolPaletteState) {
             // tap's outcome is visible before tapping.
             groupIcon = { state.lastShapeTool.icon() },
             groupDescription = "Shapes",
+            modifier = Modifier.weight(1f),
+        )
+        // Sub-phase 11.1/11.2 — whiteboard group: sticky notes + connectors.
+        GroupedToolButton(
+            state = state,
+            groupTools = listOf(Tool.STICKY, Tool.CONNECTOR),
+            lastUsed = state.lastBoardTool,
+            groupIcon = { state.lastBoardTool.icon() },
+            groupDescription = "Board",
             modifier = Modifier.weight(1f),
         )
         ToolIconButton(state, Tool.FRAME, Modifier.weight(1f))
@@ -280,6 +297,8 @@ private fun Tool.icon(): ImageVector = when (this) {
     Tool.ARROW -> Icons.AutoMirrored.Filled.TrendingFlat
     Tool.POLYGON -> Icons.Filled.Pentagon
     Tool.FRAME -> Icons.Filled.CropFree
+    Tool.STICKY -> Icons.Filled.StickyNote2
+    Tool.CONNECTOR -> Icons.Filled.Polyline
 }
 
 @Composable
@@ -421,6 +440,47 @@ private fun FrameHintRow() {
     ) {
         Text(
             text = "Frame — drag a rectangle to define an exportable region.",
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
+}
+
+/**
+ * Sub-phase 11.1 — sticky colour row: the 8 preset fills. Tapping a swatch
+ * sets the fill for the *next* dropped sticky; restyling an existing one
+ * happens through its inline editor flow (out of scope for v1).
+ */
+@Composable
+private fun StickyConfigRow(state: ToolPaletteState) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = "Sticky",
+            style = MaterialTheme.typography.labelMedium,
+        )
+        StickyCodec.PRESET_FILLS.forEach { fill ->
+            ColorSwatch(
+                colorArgb = fill,
+                selected = fill == state.stickyFillColor,
+                onSelect = { state.setStickyFill(fill) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConnectorHintRow() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Connector — drag between items to link them; ends stay attached.",
             style = MaterialTheme.typography.labelMedium,
         )
     }

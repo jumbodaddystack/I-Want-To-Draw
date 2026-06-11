@@ -2,9 +2,11 @@ package com.aichat.sandbox.data.notes
 
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.model.NoteLayer
+import com.aichat.sandbox.ui.components.notes.ConnectorCodec
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
+import com.aichat.sandbox.ui.components.notes.StickyCodec
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
 import com.aichat.sandbox.ui.components.notes.TextItemCodec
 import com.google.gson.JsonArray
@@ -91,12 +93,16 @@ object VectorCanvasJson {
         var shapeSeq = 0
         var textSeq = 0
         var imageSeq = 0
+        var stickySeq = 0
+        var connectorSeq = 0
         visibleItems.forEach { item ->
             val short = when (item.kind) {
                 NoteItem.KIND_STROKE -> "s_${(++strokeSeq).pad()}"
                 Shape.KIND -> "h_${(++shapeSeq).pad()}"
                 TextItemCodec.KIND -> "t_${(++textSeq).pad()}"
                 NoteItem.KIND_IMAGE -> "i_${(++imageSeq).pad()}"
+                StickyCodec.KIND -> "n_${(++stickySeq).pad()}"
+                ConnectorCodec.KIND -> "c_${(++connectorSeq).pad()}"
                 else -> "x_${(item.id.hashCode() and 0xFFFF).toString(16)}"
             }
             idMap[short] = item.id
@@ -254,6 +260,39 @@ object VectorCanvasJson {
                 if (payload.rotationRad != 0f) {
                     obj.addProperty("rotation", round2(payload.rotationRad))
                 }
+            }
+            StickyCodec.KIND -> {
+                val payload = try {
+                    StickyCodec.decode(item.payload)
+                } catch (_: Throwable) {
+                    return null
+                }
+                obj.addProperty("fill", colorToHex(payload.fillArgb))
+                obj.addProperty("body", payload.body)
+                obj.add("bbox", JsonObject().apply {
+                    addProperty("x", round1(payload.minX))
+                    addProperty("y", round1(payload.minY))
+                    addProperty("w", round1(payload.width))
+                    addProperty("h", round1(payload.height))
+                })
+            }
+            ConnectorCodec.KIND -> {
+                val payload = try {
+                    ConnectorCodec.decode(item.payload)
+                } catch (_: Throwable) {
+                    return null
+                }
+                // Fallback geometry only — the model gets an addressable
+                // handle (recolor / delete / restyle); endpoint re-binding
+                // is not an AI-editable surface in v1.
+                obj.add("geometry", JsonObject().apply {
+                    addProperty("x0", round1(payload.x0))
+                    addProperty("y0", round1(payload.y0))
+                    addProperty("x1", round1(payload.x1))
+                    addProperty("y1", round1(payload.y1))
+                })
+                obj.addProperty("boundStart", payload.fromItemId != null)
+                obj.addProperty("boundEnd", payload.toItemId != null)
             }
             else -> return null
         }

@@ -39,6 +39,15 @@ enum class Tool(
     // sub-rects of the infinite canvas (also: the substrate Phase 9 uses
     // for notebook pages).
     FRAME("frame", "Frame"),
+
+    // Sub-phase 11.1 — sticky notes. Tap-only (same interaction model as
+    // TEXT): tap empty canvas drops a sticky and opens the inline editor;
+    // tap an existing sticky edits it.
+    STICKY("sticky", "Sticky note"),
+
+    // Sub-phase 11.2 — bound connectors. Drag from one item to another;
+    // endpoints bind to the nearest anchor and re-resolve at render time.
+    CONNECTOR("connector", "Connector"),
     ;
 
     val isInk: Boolean get() = this == PEN || this == HIGHLIGHTER || this == PENCIL
@@ -49,6 +58,8 @@ enum class Tool(
         get() = this == LINE || this == RECT || this == ELLIPSE ||
             this == ARROW || this == POLYGON
     val isFrame: Boolean get() = this == FRAME
+    val isSticky: Boolean get() = this == STICKY
+    val isConnector: Boolean get() = this == CONNECTOR
 
     companion object {
         /** Resolve a persisted [id] back to its enum, or null for unknown ids. */
@@ -98,6 +109,10 @@ class ToolPaletteState {
     var lastShapeTool: Tool by mutableStateOf(Tool.LINE)
         private set
 
+    /** Most-recent board tool (sticky / connector) — grouped button re-selects it. */
+    var lastBoardTool: Tool by mutableStateOf(Tool.STICKY)
+        private set
+
     // ── Phase 10.2 — shape fill + stroke style ───────────────────────────
 
     /** Whether newly drawn shapes carry a fill. */
@@ -128,6 +143,16 @@ class ToolPaletteState {
     /** Fill ARGB the surface should encode on the next shape — 0 when disabled. */
     fun activeShapeFillArgb(): Int = if (shapeFillEnabled) shapeFillColor else 0
 
+    // ── Sub-phase 11.1 — sticky fill ─────────────────────────────────────
+
+    /** Fill applied to newly dropped stickies — one of [StickyCodec.PRESET_FILLS]. */
+    var stickyFillColor: Int by mutableStateOf(StickyCodec.PRESET_FILLS.first())
+        private set
+
+    fun setStickyFill(color: Int) {
+        stickyFillColor = color
+    }
+
     fun select(tool: Tool) {
         if (!tool.enabledInPalette) return
         if (selected == tool) return
@@ -135,6 +160,7 @@ class ToolPaletteState {
         if (tool.isInk) lastInkTool = tool
         if (tool.isEraser) lastEraserTool = tool
         if (tool.isShape) lastShapeTool = tool
+        if (tool.isSticky || tool.isConnector) lastBoardTool = tool
     }
 
     fun colorFor(tool: Tool): Int = colors[tool] ?: Color.BLACK
@@ -171,6 +197,7 @@ class ToolPaletteState {
         shapeFillEnabled: Boolean? = null,
         shapeFillColor: Int? = null,
         shapeStrokeStyle: Int? = null,
+        stickyFillColor: Int? = null,
     ) {
         for ((id, color) in inkColors) {
             Tool.fromId(id)?.let { setColor(it, color) }
@@ -182,6 +209,7 @@ class ToolPaletteState {
         shapeFillEnabled?.let { setFillEnabled(it) }
         shapeFillColor?.let { setFillColor(it) }
         shapeStrokeStyle?.let { setStrokeStyle(it) }
+        stickyFillColor?.let { setStickyFill(it) }
         Tool.fromId(selectedToolId)?.let { select(it) }
     }
 
