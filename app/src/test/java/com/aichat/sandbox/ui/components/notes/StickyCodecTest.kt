@@ -117,4 +117,32 @@ class StickyCodecTest {
             assertTrue("fill should be opaque", (fill ushr 24) == 0xFF)
         }
     }
+
+    // ── 13.2 — gradient block after the body ─────────────────────────────
+
+    @Test
+    fun gradientRoundTripsAfterBody() {
+        val gradient = FillStyle.linear(0xFF2463EB.toInt(), 0xFF9333EA.toInt())
+        val payload = sample().copy(gradient = gradient)
+        assertEquals(payload, StickyCodec.decode(StickyCodec.encode(payload)))
+    }
+
+    @Test
+    fun legacyPayloadEndingAtBodyDecodesNullGradient() {
+        val payload = sample()
+        val full = StickyCodec.encode(payload)
+        // Pre-13.2 payloads end at the body — drop the trailing fillType byte.
+        val legacy = full.copyOf(full.size - 1)
+        val decoded = StickyCodec.decode(legacy)
+        assertEquals(null, decoded.gradient)
+        assertEquals(payload, decoded)
+    }
+
+    @Test
+    fun transformPreservesGradient() {
+        val gradient = FillStyle.radial(0xFFFDE047.toInt(), 0xFFF472B6.toInt())
+        val payload = sample().copy(gradient = gradient)
+        val moved = StickyCodec.transform(payload, StrokeTransform.translation(12f, -3f))
+        assertEquals(gradient, moved.gradient)
+    }
 }

@@ -234,7 +234,7 @@ object EditPreviewController {
         Shape.KIND -> {
             val decoded = ShapeCodec.decode(item.payload)
             val transformed = ShapeCodec.transform(decoded.shape, matrix)
-            item.copy(payload = ShapeCodec.encode(transformed, decoded.fillArgb, decoded.strokeStyle))
+            item.copy(payload = ShapeCodec.encode(transformed, decoded.fillArgb, decoded.strokeStyle, decoded.gradient))
         }
         TextItemCodec.KIND -> {
             val decoded = TextItemCodec.decode(item.payload)

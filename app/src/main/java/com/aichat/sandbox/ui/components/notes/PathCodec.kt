@@ -28,6 +28,7 @@ import java.nio.ByteOrder
  * [strokeStyle:u8]?          ShapeCodec STROKE_STYLE_* value
  * [capJoin:u8]?              low nibble cap (0 butt / 1 round / 2 square),
  *                            high nibble join (0 miter / 1 round / 2 bevel)
+ * [gradient]?                13.2: optional [FillStyle] gradient block
  * ```
  *
  * Trailing fields follow the ShapeCodec strokeStyle convention: append
@@ -82,6 +83,7 @@ object PathCodec {
         val fillArgb: Int = 0,
         val strokeStyle: Byte = ShapeCodec.STROKE_STYLE_SOLID,
         val capJoin: Int = DEFAULT_CAP_JOIN,
+        val gradient: FillStyle.Gradient? = null,
     ) {
         /** Cubic-segment count, including the wrap-around segment when closed. */
         val segmentCount: Int
@@ -94,7 +96,10 @@ object PathCodec {
 
     fun encode(payload: PathPayload): ByteArray {
         val buf = ByteBuffer
-            .allocate(1 + 1 + 2 + payload.anchors.size * BYTES_PER_ANCHOR + 4 + 1 + 1)
+            .allocate(
+                1 + 1 + 2 + payload.anchors.size * BYTES_PER_ANCHOR + 4 + 1 + 1 +
+                    FillStyle.byteSize(payload.gradient),
+            )
             .order(ByteOrder.LITTLE_ENDIAN)
         buf.put(VERSION)
         buf.put((if (payload.closed) FLAG_CLOSED else 0).toByte())
@@ -108,6 +113,7 @@ object PathCodec {
         buf.putInt(payload.fillArgb)
         buf.put(payload.strokeStyle)
         buf.put(payload.capJoin.toByte())
+        FillStyle.encode(buf, payload.gradient)
         return buf.array()
     }
 
@@ -132,12 +138,15 @@ object PathCodec {
         val fillArgb = if (buf.remaining() >= 4) buf.int else 0
         val strokeStyle = if (buf.hasRemaining()) buf.get() else ShapeCodec.STROKE_STYLE_SOLID
         val capJoin = if (buf.hasRemaining()) buf.get().toInt() and 0xFF else DEFAULT_CAP_JOIN
+        // 13.2 — optional trailing gradient block.
+        val gradient = FillStyle.decode(buf)
         return PathPayload(
             anchors = anchors,
             closed = (flags and FLAG_CLOSED) != 0,
             fillArgb = fillArgb,
             strokeStyle = strokeStyle,
             capJoin = capJoin,
+            gradient = gradient,
         )
     }
 

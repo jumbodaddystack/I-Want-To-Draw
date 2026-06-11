@@ -19,14 +19,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.FormatColorFill
+import androidx.compose.material.icons.filled.FormatPaint
 import androidx.compose.material.icons.filled.GroupWork
 import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.MergeType
 import androidx.compose.material.icons.filled.Polyline
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.RotateRight
@@ -61,7 +65,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Brush as ComposeBrush
+import com.aichat.sandbox.data.vector.edit.boolean.PathBoolean
 import com.aichat.sandbox.ui.components.notes.AlignmentMath
+import com.aichat.sandbox.ui.components.notes.FillStyle
 import com.aichat.sandbox.ui.components.notes.StrokeTransform
 import com.aichat.sandbox.ui.components.notes.ViewportController
 import com.aichat.sandbox.ui.components.notes.ZOrderMath
@@ -127,6 +134,16 @@ fun SelectionOverlay(
     onEditNodes: (() -> Unit)? = null,
     canConvertToPath: Boolean = false,
     onConvertToPath: (() -> Unit)? = null,
+    // Phase 13.1 — boolean ops; 13.2 — gradient fills; 13.3 — style tools.
+    canCombine: Boolean = false,
+    onCombine: ((PathBoolean.Op) -> Unit)? = null,
+    onSetGradient: ((FillStyle.Gradient) -> Unit)? = null,
+    canCopyStyle: Boolean = false,
+    onCopyStyle: (() -> Unit)? = null,
+    canPasteStyle: Boolean = false,
+    onPasteStyle: (() -> Unit)? = null,
+    canPickColor: Boolean = false,
+    onPickColor: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (selection.isEmpty() || worldBounds == null || viewport == null) return
@@ -355,6 +372,15 @@ fun SelectionOverlay(
             onEditNodes = onEditNodes,
             canConvertToPath = canConvertToPath,
             onConvertToPath = onConvertToPath,
+            canCombine = canCombine,
+            onCombine = onCombine,
+            onSetGradient = onSetGradient,
+            canCopyStyle = canCopyStyle,
+            onCopyStyle = onCopyStyle,
+            canPasteStyle = canPasteStyle,
+            onPasteStyle = onPasteStyle,
+            canPickColor = canPickColor,
+            onPickColor = onPickColor,
             modifier = Modifier.layout { measurable, constraints ->
                 val placeable = measurable.measure(
                     Constraints(
@@ -507,6 +533,15 @@ private fun FloatingSelectionMenu(
     onEditNodes: (() -> Unit)? = null,
     canConvertToPath: Boolean = false,
     onConvertToPath: (() -> Unit)? = null,
+    canCombine: Boolean = false,
+    onCombine: ((PathBoolean.Op) -> Unit)? = null,
+    onSetGradient: ((FillStyle.Gradient) -> Unit)? = null,
+    canCopyStyle: Boolean = false,
+    onCopyStyle: (() -> Unit)? = null,
+    canPasteStyle: Boolean = false,
+    onPasteStyle: (() -> Unit)? = null,
+    canPickColor: Boolean = false,
+    onPickColor: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -572,9 +607,41 @@ private fun FloatingSelectionMenu(
                     onClick = onConvertToPath,
                 )
             }
-            // Phase 10.2/10.3 — restyle existing shapes (fill + line style).
+            // Phase 13.1 — boolean ops on ≥ 2 selected shapes / paths.
+            if (canCombine && onCombine != null) {
+                CombineMenuButton(onCombine = onCombine)
+            }
+            // Phase 10.2/10.3 — restyle existing shapes (fill + line style);
+            // 13.2 adds gradient presets.
             if (selectionHasShapes && onSetFill != null && onSetStrokeStyle != null) {
-                StyleMenuButton(onSetFill = onSetFill, onSetStrokeStyle = onSetStrokeStyle)
+                StyleMenuButton(
+                    onSetFill = onSetFill,
+                    onSetStrokeStyle = onSetStrokeStyle,
+                    onSetGradient = onSetGradient,
+                )
+            }
+            // Phase 13.3 — eyedropper + style copy/paste.
+            if (canPickColor && onPickColor != null) {
+                MenuButton(
+                    icon = Icons.Filled.Colorize,
+                    label = "Pick colour",
+                    onClick = onPickColor,
+                )
+            }
+            if (canCopyStyle && onCopyStyle != null) {
+                MenuButton(
+                    icon = Icons.Filled.Brush,
+                    label = "Copy style",
+                    onClick = onCopyStyle,
+                )
+            }
+            if (onPasteStyle != null) {
+                MenuButton(
+                    icon = Icons.Filled.FormatPaint,
+                    label = "Paste style",
+                    enabled = canPasteStyle,
+                    onClick = onPasteStyle,
+                )
             }
             // Phase 10.4 — group / ungroup.
             if (canGroup && onGroup != null) {
@@ -648,6 +715,7 @@ private fun MenuButton(
 private fun StyleMenuButton(
     onSetFill: (Int?) -> Unit,
     onSetStrokeStyle: (Int) -> Unit,
+    onSetGradient: ((FillStyle.Gradient) -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -677,6 +745,47 @@ private fun StyleMenuButton(
                     )
                 }
             }
+            // Phase 13.2 — gradient preset rows (diagonal linear + centred
+            // radial); each tap is one CompositeEdit on the VM side.
+            if (onSetGradient != null) {
+                HorizontalDivider()
+                for (radial in listOf(false, true)) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (radial) "Radial" else "Linear",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        for ((start, end) in GRADIENT_PRESETS) {
+                            val brush = if (radial) {
+                                ComposeBrush.radialGradient(listOf(Color(start), Color(end)))
+                            } else {
+                                ComposeBrush.linearGradient(listOf(Color(start), Color(end)))
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(brush)
+                                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                    .clickable {
+                                        onSetGradient(
+                                            if (radial) {
+                                                FillStyle.radial(start, end)
+                                            } else {
+                                                FillStyle.linear(start, end)
+                                            },
+                                        )
+                                        expanded = false
+                                    },
+                            )
+                        }
+                    }
+                }
+            }
             HorizontalDivider()
             DropdownMenuItem(
                 text = { Text("Solid line") },
@@ -690,6 +799,26 @@ private fun StyleMenuButton(
                 text = { Text("Dotted line") },
                 onClick = { onSetStrokeStyle(STROKE_STYLE_DOTTED); expanded = false },
             )
+        }
+    }
+}
+
+/** Phase 13.1 — "Combine" button: union / subtract / intersect / exclude. */
+@Composable
+private fun CombineMenuButton(onCombine: (PathBoolean.Op) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    fun combine(op: PathBoolean.Op) { onCombine(op); expanded = false }
+    Box {
+        MenuButton(
+            icon = Icons.Filled.MergeType,
+            label = "Combine",
+            onClick = { expanded = true },
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("Union") }, onClick = { combine(PathBoolean.Op.UNION) })
+            DropdownMenuItem(text = { Text("Subtract") }, onClick = { combine(PathBoolean.Op.SUBTRACT) })
+            DropdownMenuItem(text = { Text("Intersect") }, onClick = { combine(PathBoolean.Op.INTERSECT) })
+            DropdownMenuItem(text = { Text("Exclude") }, onClick = { combine(PathBoolean.Op.EXCLUDE) })
         }
     }
 }
@@ -794,6 +923,14 @@ private val FILL_SWATCHES: List<Int> = listOf(
     0x40109F5C.toInt(),    // 25% green
     0x40FF9F1C.toInt(),    // 25% orange
     0xFFFFF59D.toInt(),    // sticky-note yellow (opaque)
+)
+
+/** Phase 13.2 — gradient preset endpoints (opaque so stickies stay solid). */
+private val GRADIENT_PRESETS: List<Pair<Int, Int>> = listOf(
+    0xFF2463EB.toInt() to 0xFF9333EA.toInt(), // blue → purple
+    0xFFD62828.toInt() to 0xFFFF9F1C.toInt(), // red → orange
+    0xFF109F5C.toInt() to 0xFF06B6D4.toInt(), // green → teal
+    0xFFFDE047.toInt() to 0xFFF472B6.toInt(), // yellow → pink
 )
 
 private val SELECTION_OUTLINE = Color(0xCC1E88E5)

@@ -46,8 +46,18 @@ object StickyRenderer {
         canvas.drawRoundRect(rect, r, r, shadowPaint)
         rect.offset(-SHADOW_OFFSET_WORLD, -SHADOW_OFFSET_WORLD)
 
-        fillPaint.color = payload.fillArgb
+        // 13.2 — gradient fill over the sticky rect; solid colour otherwise.
+        val shader = payload.gradient?.let {
+            GradientShaderFactory.shaderFor(it, StickyCodec.boundsOf(payload))
+        }
+        if (shader != null) {
+            fillPaint.shader = shader
+            fillPaint.color = Color.WHITE
+        } else {
+            fillPaint.color = payload.fillArgb
+        }
         canvas.drawRoundRect(rect, r, r, fillPaint)
+        fillPaint.shader = null
 
         if (!drawBody || payload.body.isEmpty()) return
         val inset = StickyCodec.TEXT_INSET_WORLD

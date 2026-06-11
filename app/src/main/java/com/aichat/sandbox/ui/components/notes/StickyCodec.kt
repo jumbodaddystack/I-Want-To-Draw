@@ -19,9 +19,10 @@ import java.nio.ByteOrder
  * [fillArgb:i32]
  * [fontSize:f]
  * [bodyLen:i32] [body:utf8]
+ * [gradient]?                13.2: optional [FillStyle] gradient block
  * ```
  *
- * Future trailing fields append after `body` and decode via
+ * Future trailing fields append after the gradient block and decode via
  * `buf.hasRemaining()` — the ShapeCodec strokeStyle convention.
  */
 object StickyCodec {
@@ -66,6 +67,7 @@ object StickyCodec {
         val fillArgb: Int,
         val fontSize: Float,
         val body: String,
+        val gradient: FillStyle.Gradient? = null,
     ) {
         val width: Float get() = maxX - minX
         val height: Float get() = maxY - minY
@@ -91,7 +93,7 @@ object StickyCodec {
     fun encode(payload: StickyPayload): ByteArray {
         val bodyBytes = payload.body.toByteArray(Charsets.UTF_8)
         val buf = ByteBuffer
-            .allocate(1 + 4 * 4 + 4 + 4 + 4 + bodyBytes.size)
+            .allocate(1 + 4 * 4 + 4 + 4 + 4 + bodyBytes.size + FillStyle.byteSize(payload.gradient))
             .order(ByteOrder.LITTLE_ENDIAN)
         buf.put(VERSION)
         buf.putFloat(payload.minX)
@@ -102,6 +104,7 @@ object StickyCodec {
         buf.putFloat(payload.fontSize)
         buf.putInt(bodyBytes.size)
         buf.put(bodyBytes)
+        FillStyle.encode(buf, payload.gradient)
         return buf.array()
     }
 
@@ -121,14 +124,17 @@ object StickyCodec {
         }
         val bodyBytes = ByteArray(bodyLen)
         buf.get(bodyBytes)
-        // Bytes past the body are future trailing fields — ignored on read,
-        // dropped on the next re-encode (acceptable: this build can't have
-        // produced them, so it can't be asked to preserve them faithfully).
+        // 13.2 — optional trailing gradient block. Bytes past it are future
+        // trailing fields — ignored on read, dropped on the next re-encode
+        // (acceptable: this build can't have produced them, so it can't be
+        // asked to preserve them faithfully).
+        val gradient = FillStyle.decode(buf)
         return StickyPayload(
             minX = minX, minY = minY, maxX = maxX, maxY = maxY,
             fillArgb = fillArgb,
             fontSize = fontSize,
             body = String(bodyBytes, Charsets.UTF_8),
+            gradient = gradient,
         )
     }
 

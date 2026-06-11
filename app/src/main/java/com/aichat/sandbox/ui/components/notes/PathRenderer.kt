@@ -57,15 +57,27 @@ object PathRenderer {
             else -> Paint.Join.ROUND
         }
         buildPath(payload, scratchPath)
-        if (payload.closed && payload.fillArgb != 0) {
+        if (payload.closed && (payload.fillArgb != 0 || payload.gradient != null)) {
             val strokeColor = paint.color
             val strokeAlpha = paint.alpha
             val strokeEffect = paint.pathEffect
             paint.style = Paint.Style.FILL
-            paint.color = payload.fillArgb
-            paint.alpha = Color.alpha(payload.fillArgb)
             paint.pathEffect = null
+            // 13.2 — gradient fill maps the normalized geometry onto the
+            // path's exact cubic-extrema bounds.
+            val shader = payload.gradient?.let { g ->
+                PathCodec.boundsOf(payload)?.let { GradientShaderFactory.shaderFor(g, it) }
+            }
+            if (shader != null) {
+                paint.shader = shader
+                paint.color = -0x1
+                paint.alpha = 255
+            } else {
+                paint.color = payload.fillArgb
+                paint.alpha = Color.alpha(payload.fillArgb)
+            }
             canvas.drawPath(scratchPath, paint)
+            paint.shader = null
             paint.style = Paint.Style.STROKE
             paint.color = strokeColor
             paint.alpha = strokeAlpha

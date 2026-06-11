@@ -59,10 +59,16 @@ object ShapeRenderer {
     fun draw(canvas: Canvas, item: NoteItem, paint: Paint = Paint()) {
         val decoded = ShapeCodec.decode(item.payload)
         configurePaint(paint, item.colorArgb, item.baseWidthPx, decoded.strokeStyle)
-        drawShape(canvas, decoded.shape, paint, decoded.fillArgb)
+        drawShape(canvas, decoded.shape, paint, decoded.fillArgb, decoded.gradient)
     }
 
-    fun drawShape(canvas: Canvas, shape: Shape, paint: Paint, fillArgb: Int) {
+    fun drawShape(
+        canvas: Canvas,
+        shape: Shape,
+        paint: Paint,
+        fillArgb: Int,
+        gradient: FillStyle.Gradient? = null,
+    ) {
         val strokeColor = paint.color
         val strokeAlpha = paint.alpha
         val strokeStyle = paint.style
@@ -71,13 +77,26 @@ object ShapeRenderer {
         // would slice the fill geometry into dash fragments), so fills run
         // with pathEffect nulled and the outline pass restores it.
         val strokeEffect = paint.pathEffect
+        val hasFill = fillArgb != 0 || gradient != null
 
-        fun fillPass(draw: () -> Unit) {
+        // 13.2 — [gradientBounds] is the rect the normalized gradient maps
+        // onto (the shape's own frame, so rotated ellipses pass their
+        // unrotated oval rect and the shader rotates with the canvas).
+        fun fillPass(gradientBounds: FloatArray, draw: () -> Unit) {
             paint.style = Paint.Style.FILL
-            paint.color = fillArgb
-            paint.alpha = Color.alpha(fillArgb)
             paint.pathEffect = null
+            val shader = gradient?.let { GradientShaderFactory.shaderFor(it, gradientBounds) }
+            if (shader != null) {
+                paint.shader = shader
+                // Opaque white so the shader's own colours aren't modulated.
+                paint.color = -0x1
+                paint.alpha = 255
+            } else {
+                paint.color = fillArgb
+                paint.alpha = Color.alpha(fillArgb)
+            }
             draw()
+            paint.shader = null
             paint.style = strokeStyle
             paint.color = strokeColor
             paint.alpha = strokeAlpha
@@ -93,8 +112,8 @@ object ShapeRenderer {
             }
             is Shape.Rect -> {
                 rect.set(shape.minX, shape.minY, shape.maxX, shape.maxY)
-                if (fillArgb != 0) {
-                    fillPass {
+                if (hasFill) {
+                    fillPass(floatArrayOf(rect.left, rect.top, rect.right, rect.bottom)) {
                         if (shape.cornerRadius > 0f) {
                             canvas.drawRoundRect(rect, shape.cornerRadius, shape.cornerRadius, paint)
                         } else {
@@ -118,8 +137,10 @@ object ShapeRenderer {
                     canvas.save()
                     canvas.rotate(Math.toDegrees(shape.rotationRad.toDouble()).toFloat(), shape.cx, shape.cy)
                 }
-                if (fillArgb != 0) {
-                    fillPass { canvas.drawOval(rect, paint) }
+                if (hasFill) {
+                    fillPass(floatArrayOf(rect.left, rect.top, rect.right, rect.bottom)) {
+                        canvas.drawOval(rect, paint)
+                    }
                 }
                 canvas.drawOval(rect, paint)
                 if (rotated) canvas.restore()
@@ -137,13 +158,17 @@ object ShapeRenderer {
                     i += 2
                 }
                 if (shape.closed) path.close()
-                if (shape.closed && fillArgb != 0) {
-                    fillPass { canvas.drawPath(path, paint) }
+                if (shape.closed && hasFill) {
+                    val b = ShapeCodec.boundsOf(shape)
+                    if (b != null) {
+                        fillPass(b) { canvas.drawPath(path, paint) }
+                    }
                 }
                 canvas.drawPath(path, paint)
             }
         }
         // Restore in case fill pass mutated paint state.
+        paint.shader = null
         paint.style = strokeStyle
         paint.color = strokeColor
         paint.alpha = strokeAlpha
