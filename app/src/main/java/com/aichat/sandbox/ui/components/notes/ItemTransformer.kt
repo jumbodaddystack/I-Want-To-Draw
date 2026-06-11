@@ -53,7 +53,9 @@ object ItemTransformer {
         val decoded = ShapeCodec.decode(item.payload)
         val transformed = ShapeCodec.transform(decoded.shape, m)
         return item.copy(
-            payload = ShapeCodec.encode(transformed, decoded.fillArgb, decoded.strokeStyle),
+            payload = ShapeCodec.encode(
+                transformed, decoded.fillArgb, decoded.strokeStyle, decoded.gradient,
+            ),
         )
     }
 

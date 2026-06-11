@@ -8,6 +8,7 @@ import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.ui.components.notes.ConnectorCodec
 import com.aichat.sandbox.ui.components.notes.ConnectorResolver
+import com.aichat.sandbox.ui.components.notes.FillStyle
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.PathCodec
 import com.aichat.sandbox.ui.components.notes.Shape
@@ -121,6 +122,17 @@ class NoteSvgExporter @Inject constructor(
             sb.append("  <rect x=\"").append(fmt(minX)).append("\" y=\"").append(fmt(minY))
                 .append("\" width=\"").append(fmt(width)).append("\" height=\"")
                 .append(fmt(height)).append("\" fill=\"#FFFFFF\"/>\n")
+            // 13.2 — one <defs> gradient per gradient-filled item. The
+            // normalized geometry maps straight onto the default
+            // objectBoundingBox gradient units, so the wire format is exact.
+            val gradients = collectGradients(visibleItems)
+            if (gradients.isNotEmpty()) {
+                sb.append("  <defs>\n")
+                for ((gradId, gradient) in gradients.values) {
+                    appendGradientDef(sb, gradId, gradient)
+                }
+                sb.append("  </defs>\n")
+            }
             sb.append("  <g id=\"items\">\n")
             // 11.2 — connectors resolve bound endpoints against the *full*
             // item set (not just the frame-visible subset) so a connector
@@ -131,14 +143,15 @@ class NoteSvgExporter @Inject constructor(
                     ?.let { NoteRasterizer.computeBounds(listOf(it)) }
             }
             for (item in visibleItems.sortedBy { it.zIndex }) {
+                val gradId = gradients[item.id]?.first
                 when (item.kind) {
                     "stroke" -> appendStroke(sb, item)
-                    Shape.KIND -> appendShape(sb, item)
+                    Shape.KIND -> appendShape(sb, item, gradId)
                     TextItemCodec.KIND -> appendText(sb, item)
                     NoteItem.KIND_IMAGE -> appendImage(sb, item, filesDir)
-                    StickyCodec.KIND -> appendSticky(sb, item)
+                    StickyCodec.KIND -> appendSticky(sb, item, gradId)
                     ConnectorCodec.KIND -> appendConnector(sb, item, connectorLookup)
-                    PathCodec.KIND -> appendPathItem(sb, item)
+                    PathCodec.KIND -> appendPathItem(sb, item, gradId)
                 }
             }
             sb.append("  </g>\n</svg>\n")
@@ -186,10 +199,67 @@ class NoteSvgExporter @Inject constructor(
             sb.append("/>\n")
         }
 
-        private fun appendShape(sb: StringBuilder, item: NoteItem) {
+        /**
+         * 13.2 — scan [items] for gradient fills: item id → (`gradN` def id,
+         * gradient). LinkedHashMap so the `<defs>` order is deterministic.
+         */
+        private fun collectGradients(
+            items: List<NoteItem>,
+        ): Map<String, Pair<String, FillStyle.Gradient>> {
+            val out = LinkedHashMap<String, Pair<String, FillStyle.Gradient>>()
+            for (item in items.sortedBy { it.zIndex }) {
+                val gradient = try {
+                    when (item.kind) {
+                        Shape.KIND -> ShapeCodec.decode(item.payload).gradient
+                        PathCodec.KIND -> PathCodec.decode(item.payload)
+                            .takeIf { it.closed }?.gradient
+                        StickyCodec.KIND -> StickyCodec.decode(item.payload).gradient
+                        else -> null
+                    }
+                } catch (_: IllegalArgumentException) {
+                    null
+                } ?: continue
+                if (gradient.stops.size < 2) continue
+                out[item.id] = "grad${out.size}" to gradient
+            }
+            return out
+        }
+
+        private fun appendGradientDef(sb: StringBuilder, id: String, g: FillStyle.Gradient) {
+            if (g.type == FillStyle.TYPE_RADIAL) {
+                sb.append("    <radialGradient id=\"").append(id)
+                    .append("\" cx=\"").append(fmt(g.x0))
+                    .append("\" cy=\"").append(fmt(g.y0))
+                    .append("\" r=\"").append(fmt(g.x1))
+                    .append("\">\n")
+            } else {
+                sb.append("    <linearGradient id=\"").append(id)
+                    .append("\" x1=\"").append(fmt(g.x0))
+                    .append("\" y1=\"").append(fmt(g.y0))
+                    .append("\" x2=\"").append(fmt(g.x1))
+                    .append("\" y2=\"").append(fmt(g.y1))
+                    .append("\">\n")
+            }
+            for (stop in g.stops) {
+                sb.append("      <stop offset=\"").append(fmt(stop.offset))
+                    .append("\" stop-color=\"").append(colorToHex(stop.argb)).append('"')
+                val alpha = (stop.argb ushr 24) and 0xFF
+                if (alpha < 255) {
+                    sb.append(" stop-opacity=\"").append(fmt(alpha / 255f)).append('"')
+                }
+                sb.append("/>\n")
+            }
+            sb.append(if (g.type == FillStyle.TYPE_RADIAL) "    </radialGradient>\n" else "    </linearGradient>\n")
+        }
+
+        private fun appendShape(sb: StringBuilder, item: NoteItem, gradId: String? = null) {
             val decoded = ShapeCodec.decode(item.payload)
             val color = colorToHex(item.colorArgb)
-            val fill = if (decoded.fillArgb == 0) "none" else colorToHex(decoded.fillArgb)
+            val fill = when {
+                gradId != null -> "url(#$gradId)"
+                decoded.fillArgb == 0 -> "none"
+                else -> colorToHex(decoded.fillArgb)
+            }
             val width = item.baseWidthPx
             // Phase 10.3 — mirror the renderer's width-scaled dash pattern.
             val dash = dashArrayFor(decoded.strokeStyle, width)
@@ -367,14 +437,15 @@ class NoteSvgExporter @Inject constructor(
          * a renderer concern; the export uses the payload's base font size
          * (documented approximation, same spirit as the stroke mean-width).
          */
-        private fun appendSticky(sb: StringBuilder, item: NoteItem) {
+        private fun appendSticky(sb: StringBuilder, item: NoteItem, gradId: String? = null) {
             val p = StickyCodec.decode(item.payload)
             sb.append("    <rect x=\"").append(fmt(p.minX))
                 .append("\" y=\"").append(fmt(p.minY))
                 .append("\" width=\"").append(fmt(p.width))
                 .append("\" height=\"").append(fmt(p.height))
                 .append("\" rx=\"").append(fmt(StickyCodec.CORNER_RADIUS_WORLD))
-                .append("\" fill=\"").append(colorToHex(p.fillArgb))
+                .append("\" fill=\"")
+                .append(if (gradId != null) "url(#$gradId)" else colorToHex(p.fillArgb))
                 .append("\"/>\n")
             if (p.body.isEmpty()) return
             val inset = StickyCodec.TEXT_INSET_WORLD
@@ -449,14 +520,14 @@ class NoteSvgExporter @Inject constructor(
          * dash, cap and join. Pure int math (no `android.graphics.Color`) so
          * the wire format stays pinnable in plain JVM tests.
          */
-        private fun appendPathItem(sb: StringBuilder, item: NoteItem) {
+        private fun appendPathItem(sb: StringBuilder, item: NoteItem, gradId: String? = null) {
             val payload = PathCodec.decode(item.payload)
             if (payload.anchors.size < 2) return
             val color = colorToHex(item.colorArgb)
-            val fill = if (payload.closed && payload.fillArgb != 0) {
-                colorToHex(payload.fillArgb)
-            } else {
-                "none"
+            val fill = when {
+                payload.closed && gradId != null -> "url(#$gradId)"
+                payload.closed && payload.fillArgb != 0 -> colorToHex(payload.fillArgb)
+                else -> "none"
             }
             val width = item.baseWidthPx
             val dash = dashArrayFor(payload.strokeStyle, width)

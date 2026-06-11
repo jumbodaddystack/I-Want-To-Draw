@@ -245,4 +245,44 @@ class PathCodecTest {
             assertTrue(abs(a.x - b.x) < 1e-3f && abs(a.y - b.y) < 1e-3f)
         }
     }
+
+    // ── 13.2 — gradient block after capJoin ──────────────────────────────
+
+    @Test
+    fun gradientRoundTripsAfterCapJoin() {
+        val gradient = FillStyle.Gradient(
+            type = FillStyle.TYPE_LINEAR,
+            x0 = 0f, y0 = 0f, x1 = 1f, y1 = 0.5f,
+            stops = listOf(
+                FillStyle.Stop(0f, 0xFF109F5C.toInt()),
+                FillStyle.Stop(1f, 0x8006B6D4.toInt()),
+            ),
+        )
+        val payload = curvedPath(
+            closed = true,
+            fill = gradient.firstStopArgb,
+            style = ShapeCodec.STROKE_STYLE_DASHED,
+            capJoin = PathCodec.capJoinOf(PathCodec.CAP_SQUARE, PathCodec.JOIN_BEVEL),
+        ).copy(gradient = gradient)
+        assertEquals(payload, PathCodec.decode(PathCodec.encode(payload)))
+    }
+
+    @Test
+    fun legacyPayloadEndingAtCapJoinDecodesNullGradient() {
+        val payload = curvedPath(closed = true, fill = 0x40000000)
+        val full = PathCodec.encode(payload)
+        // Pre-13.2 payloads end at capJoin — drop the trailing fillType byte.
+        val legacy = full.copyOf(full.size - 1)
+        val decoded = PathCodec.decode(legacy)
+        assertEquals(null, decoded.gradient)
+        assertEquals(payload, decoded)
+    }
+
+    @Test
+    fun transformPreservesGradient() {
+        val gradient = FillStyle.radial(0xFFD62828.toInt(), 0xFFFF9F1C.toInt())
+        val payload = curvedPath(closed = true).copy(gradient = gradient)
+        val transformed = PathCodec.transform(payload, StrokeTransform.translation(7f, 9f))
+        assertEquals(gradient, transformed.gradient)
+    }
 }

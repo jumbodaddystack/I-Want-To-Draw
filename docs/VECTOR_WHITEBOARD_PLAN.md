@@ -6,9 +6,9 @@
 
 ## Status
 
-- **Current phase:** Phase 12 — sub-phases 12.1–12.5 code-complete (build green, JVM suites green). Paths: `"path"` kind + `PathCodec` (anchors with **relative** handle deltas, corner/smooth/symmetric types, trailing optional `fillArgb` / `strokeStyle` / `capJoin`), exact cubic-extrema bounds, flatten-based eraser/lasso hit-tests, `PathRenderer` (cubicTo + fill pass + dash/cap/join), branches in `ItemTransformer` / `EditPreviewController` / `NoteRasterizer` / duplicate / stamp re-key. Pen: `Tool.PATH_PEN` in the shapes group — tap = corner anchor, press-drag pulls symmetric handles, tap-first-anchor closes, tool-switch commits, two-finger pinch survives between taps. Node editor: "Edit nodes" on a single selected path opens `PathNodeEditor` (drag anchors/handles, double-tap corner⇄smooth, tap-curve insert via de Casteljau split, long-press delete); drags live-mutate the payload and land as **one CompositeEdit per gesture** (`PathNodeMath` is pure + tested). Convert: "To path" replaces selected shapes/strokes in one `CompositeEdit` — exact anchors for line/rect/polygon, kappa cubics for rounded rects + (rotated) ellipses, arrows as shaft + filled head, strokes via shared RDP + Schneider least-squares fit with smooth/corner classification and closed-loop detection. Parity: Style popover restyles paths, SVG `<path d=>` with dash/cap/join, VectorDrawable `pathData` cubics (not skipped), `VectorCanvasJson` `p_` ids with anchors/closed/fill. Side fix: `NoteRasterizer` colour literals made `computeBounds` JVM-pure — 17 of the ~22 documented "not mocked" failures now pass (5 remain, see `VECTOR_WHITEBOARD_PHASE_12.md`).
-- **Next sub-phase:** device verification — 10.7 plus Phase 11 + Phase 12 passes on hardware (stickies/connectors/recognition/templates/present + pen/node-edit/convert/exports) — then Phase 13 (boolean ops & gradients) starting at 13.1, writing `VECTOR_WHITEBOARD_PHASE_13.md` first.
-- **Last verified device pass:** n/a (10.7 pending; Phase 11 + 12 device passes pending).
+- **Current phase:** Phase 13 — sub-phases 13.1–13.3 code-complete (build green, JVM suites green; see [`VECTOR_WHITEBOARD_PHASE_13.md`](./VECTOR_WHITEBOARD_PHASE_13.md)). Booleans: "Combine" (Union/Subtract/Intersect/Exclude) on ≥ 2 selected shapes/paths runs the **in-repo pure clipper** (`PathBoolean`/`PolygonClipper`/`CurveRefit` via the new `PathBooleanBridge`) — a documented deviation from the `Path.op()` bullet (JVM-testable, no new deps); bottom-most item is the subject ("minus front"), one `CompositeEdit("Union 2 paths")`, multi-ring results land grouped (holes render filled — single-subpath codec limitation, documented). Gradients: shared `FillStyle` trailing block (fillType + normalized geometry + stops, `objectBoundingBox` semantics) appended to `ShapeCodec`/`PathCodec`/`StickyCodec`; `GradientShaderFactory` drives Linear/RadialGradient fill passes in all three renderers; Style popover gained linear+radial preset rows (`setSelectionGradient`, stickies included); `fillArgb` is pinned to the first stop so old builds / VectorDrawable export fall back to a sensible solid; SVG emits `<defs>` gradients with `url(#gradN)` fills. Style tools: `StyleTransfer` (pure per-kind lift/apply) + `StyleClipboard` power "Copy style"/"Paste style" (one `CompositeEdit`), and "Pick colour" eyedrops the selected item's stroke colour into the active ink tool + recents.
+- **Next sub-phase:** device verification — 10.7 plus Phase 11 + 12 + 13 passes on hardware (stickies/connectors/recognition/templates/present + pen/node-edit/convert/exports + combine/gradients/style tools) — then Phase 14 (polish & differentiators) starting at 14.1, writing `VECTOR_WHITEBOARD_PHASE_14.md` first.
+- **Last verified device pass:** n/a (10.7 pending; Phase 11 + 12 + 13 device passes pending).
 
 ## Phase index
 
@@ -17,7 +17,7 @@
 | 10 | Shared vector foundations (fill, stroke style, grouping, align, z-order) | [`VECTOR_WHITEBOARD_PHASE_10.md`](./VECTOR_WHITEBOARD_PHASE_10.md) | 7 |
 | 11 | Whiteboard primitives (stickies, connectors, recognition, templates, presenting) | [`VECTOR_WHITEBOARD_PHASE_11.md`](./VECTOR_WHITEBOARD_PHASE_11.md) | 5 |
 | 12 | Vector pen & node editing (path item kind) | [`VECTOR_WHITEBOARD_PHASE_12.md`](./VECTOR_WHITEBOARD_PHASE_12.md) | 5 |
-| 13 | Boolean ops & gradients | `VECTOR_WHITEBOARD_PHASE_13.md` (write at phase start) | 3 |
+| 13 | Boolean ops & gradients | [`VECTOR_WHITEBOARD_PHASE_13.md`](./VECTOR_WHITEBOARD_PHASE_13.md) | 3 |
 | 14 | Polish & differentiators | `VECTOR_WHITEBOARD_PHASE_14.md` (write at phase start) | 4 |
 
 ---
@@ -54,11 +54,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 - [x] **12.4** Convert — shape→path (exact anchors for rect/ellipse/polygon/line/arrow) and stroke→path (RDP simplification + least-squares cubic fit, pure JVM, heavily unit tested); both on the selection menu ("To path")
 - [x] **12.5** Stroke styling completeness — cap/join on paths, dash on paths, export parity (`NoteSvgExporter` `d=` output, VectorDrawable `pathData`); `VectorCanvasJson` gains the path kind (`p_` ids) so AI edits keep working (`EditOpsParser` is id-agnostic; the preview controller routes paths through `ItemTransformer`)
 
-### Phase 13 — Boolean ops & gradients
+### Phase 13 — Boolean ops & gradients · [`details`](./VECTOR_WHITEBOARD_PHASE_13.md)
 
-- [ ] **13.1** Boolean ops — union/subtract/intersect/exclude on path/shape selections via `android.graphics.Path.op()`, re-extract anchors, one `CompositeEdit("Union 2 paths")`
-- [ ] **13.2** Gradient fills — fill payload grows `fillType:u8` (solid/linear/radial) + stops; `LinearGradient`/`RadialGradient` shaders; SVG `<defs>` gradients; applies to shapes, paths, stickies
-- [ ] **13.3** Eyedropper + style copy/paste (copy style from selection, apply to selection)
+- [x] **13.1** Boolean ops — union/subtract/intersect/exclude on path/shape selections, one `CompositeEdit("Union 2 paths")`; implemented on the in-repo pure clipper (`PathBooleanBridge` → `PathBoolean`/`PolygonClipper`/`CurveRefit`) instead of `android.graphics.Path.op()` — JVM-testable, no new deps, anchors come back refit as smooth/corner cubics (documented deviation; holes = one filled item per ring, grouped)
+- [x] **13.2** Gradient fills — shared `FillStyle` trailing block `fillType:u8` (solid/linear/radial) + normalized geometry + stops on shapes, paths **and** stickies; `GradientShaderFactory` → `LinearGradient`/`RadialGradient` fill passes; Style popover preset rows; SVG `<defs>` gradients (`objectBoundingBox` = the stored geometry); VectorDrawable falls back to the first stop via the pinned `fillArgb`
+- [x] **13.3** Eyedropper + style copy/paste — `StyleTransfer` (pure) + `StyleClipboard`; "Pick colour" (selection → active ink tool + recents), "Copy style" (single item), "Paste style" (one `CompositeEdit` across the selection, per-kind subsets)
 
 ### Phase 14 — Polish & differentiators
 
@@ -83,6 +83,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 | Grouping | Flat, single-level, may span layers; expansion at selection time | Keeps every downstream action (transform/delete/duplicate/copy) group-agnostic; nesting deferred until something needs it |
 | Old-build downgrade | An old build reading a new undo log silently drops `groupId` on those items | Gson ignores unknown fields; acceptable for a single-user app |
 | VectorDrawable dash | Not supported by the format — export renders solid | SVG is the faithful vector export |
+| Boolean engine (13.1) | The in-repo pure clipper (flatten → clip → refit), not `Path.op()` | JVM-testable, zero new deps; reading geometry back out of a framework `Path` needs API-34 `PathIterator`; refit emits node-editable cubic anchors directly |
+| Gradient geometry (13.2) | Normalized to item bounds (`objectBoundingBox`), `fillArgb` pinned to the first stop | Transforms never re-encode the gradient; old builds + VectorDrawable export get a sensible solid fallback for free |
 
 ## Out of scope (entire plan)
 

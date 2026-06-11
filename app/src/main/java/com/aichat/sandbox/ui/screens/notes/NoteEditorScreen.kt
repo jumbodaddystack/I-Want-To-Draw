@@ -699,6 +699,16 @@ fun NoteEditorScreen(
                     onEditNodes = viewModel::enterNodeEdit,
                     canConvertToPath = viewModel.selectionHasConvertibles(),
                     onConvertToPath = viewModel::convertSelectionToPaths,
+                    // Phase 13 — booleans, gradients, style tools.
+                    canCombine = viewModel.selectionCanCombine(),
+                    onCombine = viewModel::combineSelection,
+                    onSetGradient = viewModel::setSelectionGradient,
+                    canCopyStyle = viewModel.selectionIsSingleStyleSource(),
+                    onCopyStyle = viewModel::copySelectionStyle,
+                    canPasteStyle = viewModel.hasStyleClipboard(),
+                    onPasteStyle = viewModel::pasteStyleToSelection,
+                    canPickColor = selection.size == 1,
+                    onPickColor = viewModel::pickColorFromSelection,
                 )
                 // Sub-phase 12.3 — node-edit overlay replaces the selection
                 // overlay (the selection cleared when node editing began).

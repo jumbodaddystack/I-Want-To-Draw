@@ -38,12 +38,15 @@ import com.aichat.sandbox.data.repository.BrushPresetRepository
 import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.data.repository.StampRepository
+import com.aichat.sandbox.data.vector.edit.boolean.PathBoolean
 import com.aichat.sandbox.ui.components.notes.AlignmentMath
+import com.aichat.sandbox.ui.components.notes.FillStyle
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.ItemTransformer
 import com.aichat.sandbox.ui.components.notes.ConnectorCodec
 import com.aichat.sandbox.ui.components.notes.ConnectorResolver
+import com.aichat.sandbox.ui.components.notes.PathBooleanBridge
 import com.aichat.sandbox.ui.components.notes.PathCodec
 import com.aichat.sandbox.ui.components.notes.PathConversions
 import com.aichat.sandbox.ui.components.notes.Shape
@@ -957,7 +960,7 @@ class NoteEditorViewModel @Inject constructor(
             Shape.KIND -> {
                 val decoded = ShapeCodec.decode(item.payload)
                 val transformed = ShapeCodec.transform(decoded.shape, shift)
-                ShapeCodec.encode(transformed, decoded.fillArgb, decoded.strokeStyle)
+                ShapeCodec.encode(transformed, decoded.fillArgb, decoded.strokeStyle, decoded.gradient)
             }
             NoteItem.KIND_IMAGE -> {
                 val payload = ImageItemCodec.decode(item.payload)
@@ -1885,11 +1888,15 @@ class NoteEditorViewModel @Inject constructor(
 
     // ── Phase 10 — group / restyle / arrange ─────────────────────────────
 
-    /** True when the selection has restyleable vector items (shapes / paths). */
+    /**
+     * True when the selection has restyleable vector items (shapes / paths;
+     * stickies since 13.2 — they take fills and gradients).
+     */
     fun selectionHasShapes(): Boolean {
         val ids = _selection.value
         return items.any {
-            it.id in ids && (it.kind == Shape.KIND || it.kind == PathCodec.KIND)
+            it.id in ids &&
+                (it.kind == Shape.KIND || it.kind == PathCodec.KIND || it.kind == StickyCodec.KIND)
         }
     }
 
@@ -1929,8 +1936,10 @@ class NoteEditorViewModel @Inject constructor(
 
     /**
      * Re-fill every selected shape / path (10.2, paths since 12.5). `null`
-     * removes the fill. One CompositeEdit so the restyle is a single undo
-     * entry; other kinds in the selection are untouched.
+     * removes the fill. Picking a solid fill clears any gradient (13.2);
+     * stickies switch to the solid colour too but ignore "No fill" — a
+     * sticky is always opaque. One CompositeEdit so the restyle is a single
+     * undo entry; other kinds in the selection are untouched.
      */
     fun setSelectionFill(fillArgb: Int?) {
         restyleSelectedShapes(
@@ -1939,7 +1948,31 @@ class NoteEditorViewModel @Inject constructor(
                 ShapeCodec.encode(decoded.shape, fillArgb ?: 0, decoded.strokeStyle)
             },
             reencodePath = { payload ->
-                PathCodec.encode(payload.copy(fillArgb = fillArgb ?: 0))
+                PathCodec.encode(payload.copy(fillArgb = fillArgb ?: 0, gradient = null))
+            },
+            reencodeSticky = fillArgb?.let { solid ->
+                { payload -> StickyCodec.encode(payload.copy(fillArgb = solid, gradient = null)) }
+            },
+        )
+    }
+
+    /**
+     * 13.2 — gradient-fill every selected shape / path / sticky. The legacy
+     * `fillArgb` becomes the first stop's colour so old builds and the
+     * VectorDrawable export show a sensible solid fallback.
+     */
+    fun setSelectionGradient(gradient: FillStyle.Gradient) {
+        val fallback = gradient.firstStopArgb
+        restyleSelectedShapes(
+            description = "Gradient fill",
+            reencode = { decoded ->
+                ShapeCodec.encode(decoded.shape, fallback, decoded.strokeStyle, gradient)
+            },
+            reencodePath = { payload ->
+                PathCodec.encode(payload.copy(fillArgb = fallback, gradient = gradient))
+            },
+            reencodeSticky = { payload ->
+                StickyCodec.encode(payload.copy(fillArgb = fallback, gradient = gradient))
             },
         )
     }
@@ -1949,7 +1982,7 @@ class NoteEditorViewModel @Inject constructor(
         restyleSelectedShapes(
             description = "Line style",
             reencode = { decoded ->
-                ShapeCodec.encode(decoded.shape, decoded.fillArgb, style.toByte())
+                ShapeCodec.encode(decoded.shape, decoded.fillArgb, style.toByte(), decoded.gradient)
             },
             reencodePath = { payload ->
                 PathCodec.encode(payload.copy(strokeStyle = style.toByte()))
@@ -1961,6 +1994,7 @@ class NoteEditorViewModel @Inject constructor(
         description: String,
         reencode: (ShapeCodec.DecodedShape) -> ByteArray,
         reencodePath: (PathCodec.PathPayload) -> ByteArray,
+        reencodeSticky: ((StickyCodec.StickyPayload) -> ByteArray)? = null,
     ) {
         val ids = _selection.value
         if (ids.isEmpty()) return
@@ -1970,6 +2004,8 @@ class NoteEditorViewModel @Inject constructor(
             val payload = when (item.kind) {
                 Shape.KIND -> reencode(ShapeCodec.decode(item.payload))
                 PathCodec.KIND -> reencodePath(PathCodec.decode(item.payload))
+                StickyCodec.KIND -> reencodeSticky?.invoke(StickyCodec.decode(item.payload))
+                    ?: continue
                 else -> continue
             }
             if (payload.contentEquals(item.payload)) continue
@@ -1977,6 +2013,143 @@ class NoteEditorViewModel @Inject constructor(
         }
         if (pairs.isEmpty()) return
         apply(EditorAction.CompositeEdit(description, emptyList(), emptyList(), pairs))
+    }
+
+    // ── Phase 13.1 — boolean ops ─────────────────────────────────────────
+
+    /** True when ≥ 2 selected items are shapes / paths (gates "Combine"). */
+    fun selectionCanCombine(): Boolean {
+        val ids = _selection.value
+        if (ids.size < 2) return false
+        return items.count {
+            it.id in ids && (it.kind == Shape.KIND || it.kind == PathCodec.KIND)
+        } >= 2
+    }
+
+    /**
+     * Combine the selected shapes / paths under [op] via the pure
+     * flatten → clip → refit pipeline ([PathBooleanBridge]). Inputs are
+     * ordered by zIndex ascending; the bottom-most item is the subject, so
+     * Subtract removes everything stacked above it ("minus front"). One
+     * `CompositeEdit("Union 2 paths")` removes the inputs and adds the
+     * result ring(s) — multi-ring results land grouped so they keep moving
+     * as one. Empty results (disjoint intersect) are a silent no-op.
+     */
+    fun combineSelection(op: PathBoolean.Op) {
+        val ids = _selection.value
+        val eligible = items
+            .filter { it.id in ids && (it.kind == Shape.KIND || it.kind == PathCodec.KIND) }
+            .sortedBy { it.zIndex }
+        if (eligible.size < 2) return
+        val geometries = eligible.map { item ->
+            when (item.kind) {
+                Shape.KIND -> PathConversions.fromShape(ShapeCodec.decode(item.payload), item.colorArgb)
+                else -> listOf(PathCodec.decode(item.payload))
+            }
+        }
+        val results = PathBooleanBridge.combine(geometries, op)
+        if (results.isEmpty()) return
+        // An area op should produce a visible area: the subject's fill when
+        // it had one, else its stroke colour. Stroke styling rides along.
+        val subject = eligible.first()
+        val subjectFill: Int
+        val subjectGradient: FillStyle.Gradient?
+        val subjectStrokeStyle: Byte
+        val subjectCapJoin: Int
+        if (subject.kind == PathCodec.KIND) {
+            val p = PathCodec.decode(subject.payload)
+            subjectFill = if (p.fillArgb != 0) p.fillArgb else subject.colorArgb
+            subjectGradient = p.gradient
+            subjectStrokeStyle = p.strokeStyle
+            subjectCapJoin = p.capJoin
+        } else {
+            val d = ShapeCodec.decode(subject.payload)
+            subjectFill = if (d.fillArgb != 0) d.fillArgb else subject.colorArgb
+            subjectGradient = d.gradient
+            subjectStrokeStyle = d.strokeStyle
+            subjectCapJoin = PathCodec.DEFAULT_CAP_JOIN
+        }
+        val groupId = if (results.size > 1) UUID.randomUUID().toString() else null
+        val added = results.map { payload ->
+            NoteItem(
+                noteId = resolvedNoteId,
+                zIndex = subject.zIndex,
+                kind = PathCodec.KIND,
+                tool = null,
+                colorArgb = subject.colorArgb,
+                baseWidthPx = subject.baseWidthPx,
+                payload = PathCodec.encode(payload.copy(
+                    fillArgb = subjectFill,
+                    strokeStyle = subjectStrokeStyle,
+                    capJoin = subjectCapJoin,
+                    gradient = subjectGradient,
+                )),
+                layerId = subject.layerId,
+                groupId = groupId,
+            )
+        }
+        val opName = when (op) {
+            PathBoolean.Op.UNION -> "Union"
+            PathBoolean.Op.SUBTRACT -> "Subtract"
+            PathBoolean.Op.INTERSECT -> "Intersect"
+            PathBoolean.Op.EXCLUDE -> "Exclude"
+        }
+        apply(EditorAction.CompositeEdit(
+            description = "$opName ${eligible.size} paths",
+            added = added,
+            removed = eligible,
+            modified = emptyList(),
+        ))
+        _selection.value = added.mapTo(HashSet(added.size)) { it.id }
+        _selectionWorldBounds.value = recomputeSelectionBounds()
+        _selectionMatrix.value = StrokeTransform.IDENTITY
+    }
+
+    // ── Phase 13.3 — eyedropper + style copy/paste ───────────────────────
+
+    /** True when exactly one styleable item is selected (gates "Copy style"). */
+    fun selectionIsSingleStyleSource(): Boolean {
+        val ids = _selection.value
+        if (ids.size != 1) return false
+        val item = items.firstOrNull { it.id == ids.first() } ?: return false
+        return StyleTransfer.styleOf(item) != null
+    }
+
+    /** Lift the single selected item's style into the [StyleClipboard]. */
+    fun copySelectionStyle() {
+        val ids = _selection.value
+        if (ids.size != 1) return
+        val item = items.firstOrNull { it.id == ids.first() } ?: return
+        StyleTransfer.styleOf(item)?.let { StyleClipboard.put(it) }
+    }
+
+    fun hasStyleClipboard(): Boolean = !StyleClipboard.isEmpty()
+
+    /** Apply the copied style to every styleable selected item — one undo entry. */
+    fun pasteStyleToSelection() {
+        val style = StyleClipboard.peek() ?: return
+        val ids = _selection.value
+        if (ids.isEmpty()) return
+        val pairs = items
+            .filter { it.id in ids }
+            .mapNotNull { item -> StyleTransfer.applyTo(item, style)?.let { item to it } }
+        if (pairs.isEmpty()) return
+        apply(EditorAction.CompositeEdit("Paste style", emptyList(), emptyList(), pairs))
+    }
+
+    /**
+     * The eyedropper: copy the single selected item's stroke colour into
+     * the active ink tool and the recents list — same landing spot as a
+     * colour-picker confirm.
+     */
+    fun pickColorFromSelection() {
+        val ids = _selection.value
+        if (ids.size != 1) return
+        val item = items.firstOrNull { it.id == ids.first() } ?: return
+        palette.setColor(palette.lastInkTool, item.colorArgb)
+        viewModelScope.launch {
+            recentColorsStore.record(item.colorArgb)
+        }
     }
 
     /** Align the selected items to [edge] of their union bounds (10.5). */
@@ -3035,7 +3208,7 @@ class NoteEditorViewModel @Inject constructor(
             Shape.KIND -> {
                 val decoded = ShapeCodec.decode(source.payload)
                 val transformed = ShapeCodec.transform(decoded.shape, shifted)
-                ShapeCodec.encode(transformed, decoded.fillArgb, decoded.strokeStyle)
+                ShapeCodec.encode(transformed, decoded.fillArgb, decoded.strokeStyle, decoded.gradient)
             }
             NoteItem.KIND_IMAGE -> {
                 val payload = ImageItemCodec.decode(source.payload)

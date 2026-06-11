@@ -16,8 +16,11 @@ import java.nio.ByteOrder
  * Future trailing fields must follow the same convention: append after the
  * last optional field and decode via `buf.hasRemaining()`.
  *
+ * Phase 13.2 appends the optional [FillStyle] gradient block after
+ * `strokeStyle` (absent or fillType 0 = solid fill only).
+ *
  * ```
- * [type:u8] <type-specific fields…> [fillArgb:i32] [strokeStyle:u8]?
+ * [type:u8] <type-specific fields…> [fillArgb:i32] [strokeStyle:u8]? [gradient]?
  *
  * type 0x01 Line:    x0:f y0:f x1:f y1:f
  * type 0x02 Rect:    x0:f y0:f x1:f y1:f cornerRadius:f
@@ -34,8 +37,14 @@ object ShapeCodec {
     private const val BYTES_INT: Int = 4
     private const val BYTES_FLOAT: Int = 4
 
-    fun encode(shape: Shape, fillArgb: Int = 0, strokeStyle: Byte = STROKE_STYLE_SOLID): ByteArray {
-        val size = sizeOf(shape) + BYTES_INT + 1 // trailing fillArgb + strokeStyle
+    fun encode(
+        shape: Shape,
+        fillArgb: Int = 0,
+        strokeStyle: Byte = STROKE_STYLE_SOLID,
+        gradient: FillStyle.Gradient? = null,
+    ): ByteArray {
+        // trailing fillArgb + strokeStyle + gradient block
+        val size = sizeOf(shape) + BYTES_INT + 1 + FillStyle.byteSize(gradient)
         val buf = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
         buf.put(shape.type)
         when (shape) {
@@ -67,6 +76,7 @@ object ShapeCodec {
         }
         buf.putInt(fillArgb)
         buf.put(strokeStyle)
+        FillStyle.encode(buf, gradient)
         return buf.array()
     }
 
@@ -100,7 +110,9 @@ object ShapeCodec {
         // Phase 10.3 — optional trailing strokeStyle; payloads written before
         // the byte existed decode as solid.
         val strokeStyle = if (buf.hasRemaining()) buf.get() else STROKE_STYLE_SOLID
-        return DecodedShape(shape, fillArgb, strokeStyle)
+        // Phase 13.2 — optional trailing gradient block.
+        val gradient = FillStyle.decode(buf)
+        return DecodedShape(shape, fillArgb, strokeStyle, gradient)
     }
 
     private fun sizeOf(shape: Shape): Int = 1 + when (shape) {
@@ -220,6 +232,7 @@ object ShapeCodec {
         val shape: Shape,
         val fillArgb: Int,
         val strokeStyle: Byte = STROKE_STYLE_SOLID,
+        val gradient: FillStyle.Gradient? = null,
     )
 
     const val STROKE_STYLE_SOLID: Byte = 0
