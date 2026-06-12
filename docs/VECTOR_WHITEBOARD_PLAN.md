@@ -6,9 +6,9 @@
 
 ## Status
 
-- **Current phase:** Phase 13 — sub-phases 13.1–13.3 code-complete (build green, JVM suites green; see [`VECTOR_WHITEBOARD_PHASE_13.md`](./VECTOR_WHITEBOARD_PHASE_13.md)). Booleans: "Combine" (Union/Subtract/Intersect/Exclude) on ≥ 2 selected shapes/paths runs the **in-repo pure clipper** (`PathBoolean`/`PolygonClipper`/`CurveRefit` via the new `PathBooleanBridge`) — a documented deviation from the `Path.op()` bullet (JVM-testable, no new deps); bottom-most item is the subject ("minus front"), one `CompositeEdit("Union 2 paths")`, multi-ring results land grouped (holes render filled — single-subpath codec limitation, documented). Gradients: shared `FillStyle` trailing block (fillType + normalized geometry + stops, `objectBoundingBox` semantics) appended to `ShapeCodec`/`PathCodec`/`StickyCodec`; `GradientShaderFactory` drives Linear/RadialGradient fill passes in all three renderers; Style popover gained linear+radial preset rows (`setSelectionGradient`, stickies included); `fillArgb` is pinned to the first stop so old builds / VectorDrawable export fall back to a sensible solid; SVG emits `<defs>` gradients with `url(#gradN)` fills. Style tools: `StyleTransfer` (pure per-kind lift/apply) + `StyleClipboard` power "Copy style"/"Paste style" (one `CompositeEdit`), and "Pick colour" eyedrops the selected item's stroke colour into the active ink tool + recents.
-- **Next sub-phase:** device verification — 10.7 plus Phase 11 + 12 + 13 passes on hardware (stickies/connectors/recognition/templates/present + pen/node-edit/convert/exports + combine/gradients/style tools) — then Phase 14 (polish & differentiators) starting at 14.1, writing `VECTOR_WHITEBOARD_PHASE_14.md` first.
-- **Last verified device pass:** n/a (10.7 pending; Phase 11 + 12 + 13 device passes pending).
+- **Current phase:** Phase 14 — sub-phases 14.1–14.3 code-complete (build green, JVM suites green; see [`VECTOR_WHITEBOARD_PHASE_14.md`](./VECTOR_WHITEBOARD_PHASE_14.md)). Beautify: opt-in `InkBeautifier` pass (RDP de-noise scaled to the stroke's bbox + the same two Chaikin passes as Clean up, stride-agnostic so v2 timestamped strokes work) runs at commit time in `DrawingSurface` behind a persisted "Beautify" palette chip — the beautified stroke *is* the item, so one undo removes it. Connectors: `ConnectorCodec` gained a trailing `routeStyle:u8` (absent = straight); pure `ConnectorRouter` produces elbow (orthogonal, anchor-normal stubs, candidate routes scored by crossings of the two bound items' inflated bounds → bends → length) and curved (single cubic, anchor-normal control points) routes consumed by the renderer, rasterizer, eraser hit-test, drag preview and SVG export (`<polyline>` / `C` path, tangent-aligned heads); Straight/Elbow/Curved chips on the connector row, persisted. Templates: four new built-ins (Weekly planner / Retrospective / SWOT / Storyboard); "Save as template" snapshots items+frames through the new pure `TemplatePayloadCodec` into a `user_templates` table (DB v19→20), and the new-note menu's "Your templates" section seeds them re-keyed (fresh UUIDs, connector bindings + groupIds remapped, dangling refs dropped) via `note/new?template=user:<id>`.
+- **Next sub-phase:** 14.4 — whole-plan device verification on hardware (the 10.7 matrix plus Phase 11 + 12 + 13 + 14 passes: stickies/connectors/recognition/templates/present + pen/node-edit/convert/exports + combine/gradients/style tools + beautify/elbow-curved routing/user templates).
+- **Last verified device pass:** n/a (10.7 pending; Phase 11 + 12 + 13 + 14 device passes pending — all gated on 14.4).
 
 ## Phase index
 
@@ -18,7 +18,7 @@
 | 11 | Whiteboard primitives (stickies, connectors, recognition, templates, presenting) | [`VECTOR_WHITEBOARD_PHASE_11.md`](./VECTOR_WHITEBOARD_PHASE_11.md) | 5 |
 | 12 | Vector pen & node editing (path item kind) | [`VECTOR_WHITEBOARD_PHASE_12.md`](./VECTOR_WHITEBOARD_PHASE_12.md) | 5 |
 | 13 | Boolean ops & gradients | [`VECTOR_WHITEBOARD_PHASE_13.md`](./VECTOR_WHITEBOARD_PHASE_13.md) | 3 |
-| 14 | Polish & differentiators | `VECTOR_WHITEBOARD_PHASE_14.md` (write at phase start) | 4 |
+| 14 | Polish & differentiators | [`VECTOR_WHITEBOARD_PHASE_14.md`](./VECTOR_WHITEBOARD_PHASE_14.md) | 4 |
 
 ---
 
@@ -60,11 +60,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 - [x] **13.2** Gradient fills — shared `FillStyle` trailing block `fillType:u8` (solid/linear/radial) + normalized geometry + stops on shapes, paths **and** stickies; `GradientShaderFactory` → `LinearGradient`/`RadialGradient` fill passes; Style popover preset rows; SVG `<defs>` gradients (`objectBoundingBox` = the stored geometry); VectorDrawable falls back to the first stop via the pinned `fillArgb`
 - [x] **13.3** Eyedropper + style copy/paste — `StyleTransfer` (pure) + `StyleClipboard`; "Pick colour" (selection → active ink tool + recents), "Copy style" (single item), "Paste style" (one `CompositeEdit` across the selection, per-kind subsets)
 
-### Phase 14 — Polish & differentiators
+### Phase 14 — Polish & differentiators · [`details`](./VECTOR_WHITEBOARD_PHASE_14.md)
 
-- [ ] **14.1** Ink beautification pass (optional per-stroke smoothing toggle building on Clean up)
-- [ ] **14.2** Connector routing polish (elbow/curved connectors, light obstacle-avoid heuristic)
-- [ ] **14.3** Template gallery growth + "save this note as a template"
+- [x] **14.1** Ink beautification pass — `InkBeautifier` (pure: RDP de-noise + Clean-up's Chaikin ×2, all lanes incl. v2 timestamps) at stroke-commit time behind a persisted "Beautify" palette toggle; `InkBeautifierTest`
+- [x] **14.2** Connector routing polish — trailing `routeStyle:u8` on `ConnectorCodec` (absent = straight), pure `ConnectorRouter` (elbow: anchor-normal stubs + Manhattan candidates scored by bound-item crossings/bends/length; curved: single cubic), route-aware renderer/eraser/preview/SVG, Straight/Elbow/Curved palette chips; `ConnectorRouterTest` + codec tests
+- [x] **14.3** Template gallery growth (Weekly / Retro / SWOT / Storyboard) + "save this note as a template" — `TemplatePayloadCodec` (re-keys ids, remaps connector bindings + groupIds), `user_templates` table (DB v20), editor overflow save + "Your templates" pick/delete in the new-note menu; `TemplatePayloadCodecTest`
 - [ ] **14.4** Whole-plan device verification matrix on real hardware
 
 ---
@@ -85,6 +85,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (n
 | VectorDrawable dash | Not supported by the format — export renders solid | SVG is the faithful vector export |
 | Boolean engine (13.1) | The in-repo pure clipper (flatten → clip → refit), not `Path.op()` | JVM-testable, zero new deps; reading geometry back out of a framework `Path` needs API-34 `PathIterator`; refit emits node-editable cubic anchors directly |
 | Gradient geometry (13.2) | Normalized to item bounds (`objectBoundingBox`), `fillArgb` pinned to the first stop | Transforms never re-encode the gradient; old builds + VectorDrawable export get a sensible solid fallback for free |
+| Beautify (14.1) | Commit-time pass on the packed samples, not a post-hoc undo entry | The committed item, the surface's instant-feedback copy and the hold-recognizer's input stay byte-identical; one undo removes the stroke |
+| Connector routing (14.2) | Trailing `routeStyle:u8` + route computed at render time by a pure `ConnectorRouter` | Dragging bound items re-routes for free (same render-time rule as endpoint resolution); old builds draw new connectors straight |
+| User templates (14.3) | `user_templates` table + JSON codec (stamps pattern), no thumbnails | A template is a whole-note layout incl. frames, which stamps can't carry; the text dropdown needs no PNG, keeping the save path JVM-pure |
 
 ## Out of scope (entire plan)
 
