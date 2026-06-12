@@ -58,6 +58,29 @@ class ConnectorCodecTest {
         assertEquals(payload, ConnectorCodec.decode(extended))
     }
 
+    // ── 14.2 — trailing routeStyle ───────────────────────────────────────
+
+    @Test
+    fun routeStyleRoundTrips() {
+        for (style in byteArrayOf(
+            ConnectorCodec.ROUTE_STRAIGHT, ConnectorCodec.ROUTE_ELBOW, ConnectorCodec.ROUTE_CURVED,
+        )) {
+            val payload = sample().copy(routeStyle = style)
+            assertEquals(payload, ConnectorCodec.decode(ConnectorCodec.encode(payload)))
+        }
+    }
+
+    @Test
+    fun legacyPayloadWithoutRouteStyleDecodesStraight() {
+        // Re-encode a sample in the pre-14.2 layout (no trailing routeStyle).
+        val payload = sample()
+        val full = ConnectorCodec.encode(payload)
+        val legacy = full.copyOf(full.size - 1)
+        val decoded = ConnectorCodec.decode(legacy)
+        assertEquals(ConnectorCodec.ROUTE_STRAIGHT, decoded.routeStyle)
+        assertEquals(payload, decoded)
+    }
+
     @Test
     fun transformMovesFallbackOnly() {
         val payload = sample()

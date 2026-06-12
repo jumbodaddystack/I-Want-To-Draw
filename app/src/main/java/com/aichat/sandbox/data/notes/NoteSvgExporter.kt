@@ -7,7 +7,7 @@ import androidx.core.content.FileProvider
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.ui.components.notes.ConnectorCodec
-import com.aichat.sandbox.ui.components.notes.ConnectorResolver
+import com.aichat.sandbox.ui.components.notes.ConnectorRouter
 import com.aichat.sandbox.ui.components.notes.FillStyle
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.PathCodec
@@ -464,31 +464,60 @@ class NoteSvgExporter @Inject constructor(
             sb.append("    </text>\n")
         }
 
-        /** 11.2 — connector as `<line>` (+ head polygons), resolved endpoints. */
+        /**
+         * 11.2 — connector with resolved endpoints (+ head polygons). 14.2 —
+         * straight stays a `<line>` (pre-14.2 wire format), elbows emit a
+         * `<polyline>`, curves a cubic `<path>`; heads orient along the
+         * route's terminal tangents.
+         */
         private fun appendConnector(
             sb: StringBuilder,
             item: NoteItem,
             boundsLookup: (String) -> FloatArray?,
         ) {
             val payload = ConnectorCodec.decode(item.payload)
-            val ep = ConnectorResolver.resolve(payload, boundsLookup)
+            val route = ConnectorRouter.route(payload, boundsLookup)
+            val pts = route.points
             val color = colorToHex(item.colorArgb)
             val width = item.baseWidthPx
             val dash = dashArrayFor(payload.strokeStyle, width)
-            sb.append("    <line x1=\"").append(fmt(ep[0]))
-                .append("\" y1=\"").append(fmt(ep[1]))
-                .append("\" x2=\"").append(fmt(ep[2]))
-                .append("\" y2=\"").append(fmt(ep[3]))
-                .append("\" stroke=\"").append(color)
-                .append("\" stroke-width=\"").append(fmt(width)).append('"')
+            when {
+                route.curved -> {
+                    sb.append("    <path d=\"M ").append(fmt(pts[0])).append(' ').append(fmt(pts[1]))
+                        .append(" C ").append(fmt(pts[2])).append(' ').append(fmt(pts[3]))
+                        .append(' ').append(fmt(pts[4])).append(' ').append(fmt(pts[5]))
+                        .append(' ').append(fmt(pts[6])).append(' ').append(fmt(pts[7]))
+                        .append("\" fill=\"none\" stroke=\"").append(color)
+                        .append("\" stroke-width=\"").append(fmt(width)).append('"')
+                }
+                pts.size > 4 -> {
+                    sb.append("    <polyline points=\"")
+                    for (i in 0 until pts.size / 2) {
+                        if (i > 0) sb.append(' ')
+                        sb.append(fmt(pts[i * 2])).append(',').append(fmt(pts[i * 2 + 1]))
+                    }
+                    sb.append("\" fill=\"none\" stroke=\"").append(color)
+                        .append("\" stroke-width=\"").append(fmt(width)).append('"')
+                }
+                else -> {
+                    sb.append("    <line x1=\"").append(fmt(pts[0]))
+                        .append("\" y1=\"").append(fmt(pts[1]))
+                        .append("\" x2=\"").append(fmt(pts[2]))
+                        .append("\" y2=\"").append(fmt(pts[3]))
+                        .append("\" stroke=\"").append(color)
+                        .append("\" stroke-width=\"").append(fmt(width)).append('"')
+                }
+            }
             if (dash != null) sb.append(" stroke-dasharray=\"").append(dash).append('"')
             sb.append(" stroke-linecap=\"round\"/>\n")
             val headSize = (width * 6f).coerceAtLeast(8f)
             if (payload.arrowAtEnd) {
-                appendArrowHead(sb, ep[0], ep[1], ep[2], ep[3], headSize, color)
+                val t = ConnectorRouter.endTangent(route)
+                appendArrowHead(sb, t[0], t[1], t[2], t[3], headSize, color)
             }
             if (payload.arrowAtStart) {
-                appendArrowHead(sb, ep[2], ep[3], ep[0], ep[1], headSize, color)
+                val t = ConnectorRouter.startTangent(route)
+                appendArrowHead(sb, t[0], t[1], t[2], t[3], headSize, color)
             }
         }
 

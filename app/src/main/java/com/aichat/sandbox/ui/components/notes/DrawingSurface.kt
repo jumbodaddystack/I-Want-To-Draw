@@ -161,6 +161,9 @@ class DrawingSurface(context: Context) : View(context) {
     // 14.1 — run [InkBeautifier] on ink samples at commit time.
     private var beautifyInk: Boolean = false
 
+    // 14.2 — route style encoded on the next connector commit.
+    private var connectorRouteStyle: Byte = ConnectorCodec.ROUTE_STRAIGHT
+
     /** Tool actually used for the in-flight stroke (palette tool or side-button override). */
     private var strokeTool: Tool = Tool.PEN
     private var strokeColor: Int = DEFAULT_INK_COLOR
@@ -392,6 +395,7 @@ class DrawingSurface(context: Context) : View(context) {
         shapeStrokeStyle: Byte = ShapeCodec.STROKE_STYLE_SOLID,
         pathCapJoin: Int = PathCodec.DEFAULT_CAP_JOIN,
         beautifyInk: Boolean = false,
+        connectorRouteStyle: Byte = ConnectorCodec.ROUTE_STRAIGHT,
     ) {
         // 12.2 — leaving the pen tool commits whatever path is in progress;
         // an abandoned two-anchor stub is more useful than silent loss.
@@ -407,6 +411,7 @@ class DrawingSurface(context: Context) : View(context) {
         this.shapeStrokeStyle = shapeStrokeStyle
         this.pathCapJoin = pathCapJoin
         this.beautifyInk = beautifyInk
+        this.connectorRouteStyle = connectorRouteStyle
         invalidate()
     }
 
@@ -1191,10 +1196,27 @@ class DrawingSurface(context: Context) : View(context) {
                         py >= sb[1] - radius && py <= sb[3] + radius
                 }
                 ConnectorCodec.KIND -> {
-                    val ep = resolveConnector(ConnectorCodec.decode(item.payload))
-                    HitTest.shapeContainsPoint(
-                        Shape.Line(ep[0], ep[1], ep[2], ep[3]), px, py, radius,
+                    // 14.2 — erase against the routed polyline (curves
+                    // flatten), so elbow/curved connectors erase where they
+                    // actually draw.
+                    val pts = ConnectorRouter.flatten(
+                        routeConnector(ConnectorCodec.decode(item.payload)),
                     )
+                    var segHit = false
+                    for (s in 0 until pts.size / 2 - 1) {
+                        if (HitTest.shapeContainsPoint(
+                                Shape.Line(
+                                    pts[s * 2], pts[s * 2 + 1],
+                                    pts[s * 2 + 2], pts[s * 2 + 3],
+                                ),
+                                px, py, radius,
+                            )
+                        ) {
+                            segHit = true
+                            break
+                        }
+                    }
+                    segHit
                 }
                 // 12.1 — paths erase via the flattened curve (interior counts
                 // when closed, mirroring closed polygons).
@@ -1286,11 +1308,12 @@ class DrawingSurface(context: Context) : View(context) {
             )
             // 11.2 — bound endpoints re-resolve from the current item set on
             // every rasterize, so dragging a bound item carries the
-            // connector along without ever touching its payload.
+            // connector along (and 14.2 re-routes it) without ever touching
+            // its payload.
             ConnectorCodec.KIND -> {
                 val payload = ConnectorCodec.decode(item.payload)
                 ConnectorRenderer.draw(
-                    canvas, item, payload, resolveConnector(payload), replayPaint, scratchPath,
+                    canvas, item, payload, routeConnector(payload), replayPaint, scratchPath,
                 )
             }
             // 12.1 — bezier paths.
@@ -1564,6 +1587,8 @@ class DrawingSurface(context: Context) : View(context) {
     private var connectorEndY: Float = 0f
     private var connectorFromId: String? = null
     private var connectorFromAnchor: Byte = ConnectorCodec.ANCHOR_CENTER
+    /** Bound start item's bounds — the 14.2 preview routes against them. */
+    private var connectorFromBounds: FloatArray? = null
     /** Hover candidate's bounds — anchor dots render while dragging over it. */
     private var connectorHoverBounds: FloatArray? = null
 
@@ -1578,11 +1603,13 @@ class DrawingSurface(context: Context) : View(context) {
                     val bounds = candidate.second
                     connectorFromId = candidate.first.id
                     connectorFromAnchor = ConnectorResolver.nearestAnchor(bounds, wx, wy)
+                    connectorFromBounds = bounds
                     val p = ConnectorResolver.anchorPoint(bounds, connectorFromAnchor)
                     connectorStartX = p[0]; connectorStartY = p[1]
                 } else {
                     connectorFromId = null
                     connectorFromAnchor = ConnectorCodec.ANCHOR_CENTER
+                    connectorFromBounds = null
                     connectorStartX = wx; connectorStartY = wy
                 }
                 connectorEndX = connectorStartX
@@ -1645,6 +1672,7 @@ class DrawingSurface(context: Context) : View(context) {
             arrowAtEnd = true,
             arrowAtStart = false,
             strokeStyle = ShapeCodec.STROKE_STYLE_SOLID,
+            routeStyle = connectorRouteStyle,
         )
         val item = NoteItem(
             noteId = "",
@@ -1700,9 +1728,9 @@ class DrawingSurface(context: Context) : View(context) {
         null
     }
 
-    /** Resolve a committed connector's endpoints against the local item mirror. */
-    private fun resolveConnector(payload: ConnectorCodec.ConnectorPayload): FloatArray =
-        ConnectorResolver.resolve(payload) { id ->
+    /** Route a committed connector against the local item mirror (14.2). */
+    private fun routeConnector(payload: ConnectorCodec.ConnectorPayload): ConnectorRouter.Route =
+        ConnectorRouter.route(payload) { id ->
             committedItems.firstOrNull { it.id == id }?.let { bindableBounds(it) }
         }
 
@@ -1711,7 +1739,39 @@ class DrawingSurface(context: Context) : View(context) {
         canvas.translate(viewport.offsetX, viewport.offsetY)
         canvas.scale(viewport.scale, viewport.scale)
         ShapeRenderer.configurePaint(shapePaint, inkColor, baseWidthPx)
-        canvas.drawLine(connectorStartX, connectorStartY, connectorEndX, connectorEndY, shapePaint)
+        // 14.2 — preview the actual route so elbows/curves are visible
+        // while dragging, not only after commit.
+        val hover = connectorHoverBounds
+        val route = ConnectorRouter.route(
+            payload = ConnectorCodec.ConnectorPayload(
+                fromItemId = connectorFromId,
+                fromAnchor = connectorFromAnchor,
+                toItemId = null,
+                toAnchor = hover?.let {
+                    ConnectorResolver.nearestAnchor(it, connectorEndX, connectorEndY)
+                } ?: ConnectorCodec.ANCHOR_CENTER,
+                x0 = connectorStartX, y0 = connectorStartY,
+                x1 = connectorEndX, y1 = connectorEndY,
+                routeStyle = connectorRouteStyle,
+            ),
+            endpoints = floatArrayOf(
+                connectorStartX, connectorStartY, connectorEndX, connectorEndY,
+            ),
+            fromBounds = connectorFromBounds,
+            toBounds = hover,
+        )
+        val pts = route.points
+        scratchPath.reset()
+        scratchPath.moveTo(pts[0], pts[1])
+        if (route.curved) {
+            scratchPath.cubicTo(pts[2], pts[3], pts[4], pts[5], pts[6], pts[7])
+        } else {
+            for (i in 1 until pts.size / 2) {
+                scratchPath.lineTo(pts[i * 2], pts[i * 2 + 1])
+            }
+        }
+        canvas.drawPath(scratchPath, shapePaint)
+        scratchPath.reset()
         // Anchor dots: the hover candidate's four edge anchors, plus the
         // bound start anchor so the user sees what they latched onto.
         shapePaint.style = Paint.Style.FILL
@@ -2384,6 +2444,7 @@ fun DrawingSurfaceView(
                 shapeStrokeStyle = paletteState.shapeStrokeStyle.toByte(),
                 pathCapJoin = paletteState.activePathCapJoin(),
                 beautifyInk = paletteState.inkBeautify,
+                connectorRouteStyle = paletteState.connectorRouteStyle.toByte(),
             )
             view.setSelection(selectedIds, selectionMatrix)
             view.setEditingTextId(editingTextId)

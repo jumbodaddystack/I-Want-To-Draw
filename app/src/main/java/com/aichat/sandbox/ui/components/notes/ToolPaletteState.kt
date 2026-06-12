@@ -182,6 +182,17 @@ class ToolPaletteState {
         inkBeautify = enabled
     }
 
+    // ── Sub-phase 14.2 — connector route style ───────────────────────────
+
+    /** Route for newly drawn connectors — a [ConnectorCodec] ROUTE_* value. */
+    var connectorRouteStyle: Int by mutableStateOf(ConnectorCodec.ROUTE_STRAIGHT.toInt())
+        private set
+
+    fun setConnectorRoute(style: Int) {
+        if (style !in VALID_ROUTE_STYLES) return
+        connectorRouteStyle = style
+    }
+
     // ── Sub-phase 11.1 — sticky fill ─────────────────────────────────────
 
     /** Fill applied to newly dropped stickies — one of [StickyCodec.PRESET_FILLS]. */
@@ -239,6 +250,7 @@ class ToolPaletteState {
         shapeStrokeStyle: Int? = null,
         stickyFillColor: Int? = null,
         inkBeautify: Boolean? = null,
+        connectorRouteStyle: Int? = null,
     ) {
         for ((id, color) in inkColors) {
             Tool.fromId(id)?.let { setColor(it, color) }
@@ -252,6 +264,7 @@ class ToolPaletteState {
         shapeStrokeStyle?.let { setStrokeStyle(it) }
         stickyFillColor?.let { setStickyFill(it) }
         inkBeautify?.let { setBeautify(it) }
+        connectorRouteStyle?.let { setConnectorRoute(it) }
         Tool.fromId(selectedToolId)?.let { select(it) }
     }
 
@@ -272,6 +285,9 @@ class ToolPaletteState {
 
         private val VALID_STROKE_STYLES: IntRange =
             ShapeCodec.STROKE_STYLE_SOLID.toInt()..ShapeCodec.STROKE_STYLE_DOTTED.toInt()
+
+        private val VALID_ROUTE_STYLES: IntRange =
+            ConnectorCodec.ROUTE_STRAIGHT.toInt()..ConnectorCodec.ROUTE_CURVED.toInt()
 
         val DEFAULT_COLOR_SWATCHES: List<Int> = listOf(
             Color.BLACK,

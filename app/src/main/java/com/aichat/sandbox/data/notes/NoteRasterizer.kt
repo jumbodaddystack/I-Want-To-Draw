@@ -10,7 +10,7 @@ import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import com.aichat.sandbox.ui.components.notes.ConnectorCodec
 import com.aichat.sandbox.ui.components.notes.ConnectorRenderer
-import com.aichat.sandbox.ui.components.notes.ConnectorResolver
+import com.aichat.sandbox.ui.components.notes.ConnectorRouter
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
 import com.aichat.sandbox.ui.components.notes.ImageRenderer
@@ -306,12 +306,19 @@ object NoteRasterizer {
         StickyCodec.KIND -> StickyCodec.boundsOf(StickyCodec.decode(item.payload))
         // Connector bounds use the *fallback* endpoints only — resolving the
         // bound items here would need the whole item list, and the fallback
-        // envelope is a fine approximation for bounds-union purposes.
+        // envelope is a fine approximation for bounds-union purposes. 14.2 —
+        // routed (elbow) connectors may detour outside that envelope by up
+        // to a stub + clearance, so they inflate by the router's margin.
         ConnectorCodec.KIND -> {
             val p = ConnectorCodec.decode(item.payload)
+            val margin = if (p.routeStyle == ConnectorCodec.ROUTE_STRAIGHT) {
+                0f
+            } else {
+                ConnectorRouter.ROUTE_BOUNDS_MARGIN_WORLD
+            }
             floatArrayOf(
-                kotlin.math.min(p.x0, p.x1), kotlin.math.min(p.y0, p.y1),
-                kotlin.math.max(p.x0, p.x1), kotlin.math.max(p.y0, p.y1),
+                kotlin.math.min(p.x0, p.x1) - margin, kotlin.math.min(p.y0, p.y1) - margin,
+                kotlin.math.max(p.x0, p.x1) + margin, kotlin.math.max(p.y0, p.y1) + margin,
             )
         }
         PathCodec.KIND -> PathCodec.boundsOf(PathCodec.decode(item.payload))
@@ -359,8 +366,8 @@ object NoteRasterizer {
                 StickyCodec.KIND -> StickyRenderer.draw(canvas, item)
                 ConnectorCodec.KIND -> {
                     val payload = ConnectorCodec.decode(item.payload)
-                    val endpoints = ConnectorResolver.resolve(payload, connectorLookup)
-                    ConnectorRenderer.draw(canvas, item, payload, endpoints, paint, path)
+                    val route = ConnectorRouter.route(payload, connectorLookup)
+                    ConnectorRenderer.draw(canvas, item, payload, route, paint, path)
                 }
                 PathCodec.KIND -> PathRenderer.draw(canvas, item, paint, path)
             }

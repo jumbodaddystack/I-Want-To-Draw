@@ -23,9 +23,11 @@ import java.nio.ByteOrder
  * [x0:f] [y0:f] [x1:f] [y1:f]        fallback endpoints, world units
  * [fromIdLen:u16] [fromId:utf8]      length 0 = free (unbound) endpoint
  * [toIdLen:u16]   [toId:utf8]
+ * [routeStyle:u8]                    14.2, optional — ROUTE_* value; absent
+ *                                    decodes as ROUTE_STRAIGHT
  * ```
  *
- * Future trailing fields append after `toId` and decode via
+ * Future trailing fields append after `routeStyle` and decode via
  * `buf.hasRemaining()`.
  */
 object ConnectorCodec {
@@ -44,6 +46,11 @@ object ConnectorCodec {
     const val FLAG_ARROW_END: Int = 0x01
     const val FLAG_ARROW_START: Int = 0x02
 
+    // 14.2 — route styles, drawn by [ConnectorRouter].
+    const val ROUTE_STRAIGHT: Byte = 0
+    const val ROUTE_ELBOW: Byte = 1
+    const val ROUTE_CURVED: Byte = 2
+
     data class ConnectorPayload(
         val fromItemId: String?,
         val fromAnchor: Byte,
@@ -58,6 +65,7 @@ object ConnectorCodec {
         val arrowAtEnd: Boolean = true,
         val arrowAtStart: Boolean = false,
         val strokeStyle: Byte = ShapeCodec.STROKE_STYLE_SOLID,
+        val routeStyle: Byte = ROUTE_STRAIGHT,
     )
 
     fun encode(payload: ConnectorPayload): ByteArray {
@@ -67,7 +75,7 @@ object ConnectorCodec {
             "ConnectorCodec: item id too long"
         }
         val buf = ByteBuffer
-            .allocate(1 + 4 + 4 * 4 + 2 + fromBytes.size + 2 + toBytes.size)
+            .allocate(1 + 4 + 4 * 4 + 2 + fromBytes.size + 2 + toBytes.size + 1)
             .order(ByteOrder.LITTLE_ENDIAN)
         buf.put(VERSION)
         buf.put(payload.fromAnchor)
@@ -85,6 +93,7 @@ object ConnectorCodec {
         buf.put(fromBytes)
         buf.putShort(toBytes.size.toShort())
         buf.put(toBytes)
+        buf.put(payload.routeStyle)
         return buf.array()
     }
 
@@ -106,7 +115,9 @@ object ConnectorCodec {
         val toLen = buf.short.toInt() and 0xFFFF
         val toBytes = ByteArray(toLen)
         buf.get(toBytes)
-        // Bytes past `toId` are future trailing fields — ignored.
+        // 14.2 — optional trailing routeStyle; pre-14.2 payloads end here.
+        val routeStyle = if (buf.hasRemaining()) buf.get() else ROUTE_STRAIGHT
+        // Bytes past `routeStyle` are future trailing fields — ignored.
         return ConnectorPayload(
             fromItemId = String(fromBytes, Charsets.UTF_8).ifEmpty { null },
             fromAnchor = fromAnchor,
@@ -116,6 +127,7 @@ object ConnectorCodec {
             arrowAtEnd = flags and FLAG_ARROW_END != 0,
             arrowAtStart = flags and FLAG_ARROW_START != 0,
             strokeStyle = strokeStyle,
+            routeStyle = routeStyle,
         )
     }
 

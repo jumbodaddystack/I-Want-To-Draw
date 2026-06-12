@@ -10,13 +10,14 @@ import kotlin.math.hypot
 import kotlin.math.sin
 
 /**
- * Sub-phase 11.2 — connector rasterizer.
+ * Sub-phase 11.2 — connector rasterizer (14.2: route-aware).
  *
- * Draws the resolved segment (caller runs [ConnectorResolver] because only
- * it knows where the other items live) with the item's colour / width, the
- * payload's stroke style, and optional arrowheads at either end. Dashed /
- * dotted segments route through a [Path] for the same hardware-pipeline
- * reason as [ShapeRenderer].
+ * Draws the routed geometry (caller runs [ConnectorRouter] because only it
+ * knows where the other items live) with the item's colour / width, the
+ * payload's stroke style, and optional arrowheads at either end. Arrowheads
+ * orient along the route's terminal tangents so elbow heads sit flush with
+ * their final segment. Dashed / dotted segments route through a [Path] for
+ * the same hardware-pipeline reason as [ShapeRenderer].
  */
 object ConnectorRenderer {
 
@@ -24,25 +25,36 @@ object ConnectorRenderer {
         canvas: Canvas,
         item: NoteItem,
         payload: ConnectorCodec.ConnectorPayload,
-        endpoints: FloatArray,
+        route: ConnectorRouter.Route,
         paint: Paint,
         scratchPath: Path = Path(),
     ) {
-        val x0 = endpoints[0]; val y0 = endpoints[1]
-        val x1 = endpoints[2]; val y1 = endpoints[3]
+        val pts = route.points
         ShapeRenderer.configurePaint(paint, item.colorArgb, item.baseWidthPx, payload.strokeStyle)
-        if (paint.pathEffect == null) {
-            canvas.drawLine(x0, y0, x1, y1, paint)
+        if (!route.curved && pts.size == 4 && paint.pathEffect == null) {
+            canvas.drawLine(pts[0], pts[1], pts[2], pts[3], paint)
         } else {
             scratchPath.reset()
-            scratchPath.moveTo(x0, y0)
-            scratchPath.lineTo(x1, y1)
+            scratchPath.moveTo(pts[0], pts[1])
+            if (route.curved) {
+                scratchPath.cubicTo(pts[2], pts[3], pts[4], pts[5], pts[6], pts[7])
+            } else {
+                for (i in 1 until pts.size / 2) {
+                    scratchPath.lineTo(pts[i * 2], pts[i * 2 + 1])
+                }
+            }
             canvas.drawPath(scratchPath, paint)
             scratchPath.reset()
         }
         val headSize = headSizeFor(item.baseWidthPx)
-        if (payload.arrowAtEnd) drawHead(canvas, x0, y0, x1, y1, headSize, paint, scratchPath)
-        if (payload.arrowAtStart) drawHead(canvas, x1, y1, x0, y0, headSize, paint, scratchPath)
+        if (payload.arrowAtEnd) {
+            val t = ConnectorRouter.endTangent(route)
+            drawHead(canvas, t[0], t[1], t[2], t[3], headSize, paint, scratchPath)
+        }
+        if (payload.arrowAtStart) {
+            val t = ConnectorRouter.startTangent(route)
+            drawHead(canvas, t[0], t[1], t[2], t[3], headSize, paint, scratchPath)
+        }
     }
 
     /** Arrowhead size convention — mirrors the SVG exporter. */

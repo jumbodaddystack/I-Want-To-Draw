@@ -110,7 +110,8 @@ fun ToolPalette(
             } else if (selected.isConnector) {
                 // Sub-phase 11.2 — connectors reuse the active ink colour + width.
                 InkConfigRow(state = state, onPickCustomColor = onPickCustomColor)
-                ConnectorHintRow()
+                // 14.2 — straight / elbow / curved routing.
+                ConnectorRouteRow(state = state)
             } else if (selected.isPathPen) {
                 // Sub-phase 12.2 — the pen shares the ink colour/width row and
                 // the shape fill / line-style row (paths encode both).
@@ -495,17 +496,37 @@ private fun StickyConfigRow(state: ToolPaletteState) {
     }
 }
 
+/**
+ * Sub-phase 14.2 — route style for newly drawn connectors. Straight is the
+ * Phase 11.2 segment; Elbow routes orthogonally around the bound items;
+ * Curved draws a single cubic between the anchors.
+ */
 @Composable
-private fun ConnectorHintRow() {
+private fun ConnectorRouteRow(state: ToolPaletteState) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            text = "Connector — drag between items to link them; ends stay attached.",
+            text = "Route",
             style = MaterialTheme.typography.labelMedium,
         )
+        ConnectorRouteChip(state, ConnectorCodec.ROUTE_STRAIGHT.toInt(), "Straight")
+        ConnectorRouteChip(state, ConnectorCodec.ROUTE_ELBOW.toInt(), "Elbow")
+        ConnectorRouteChip(state, ConnectorCodec.ROUTE_CURVED.toInt(), "Curved")
     }
+}
+
+@Composable
+private fun ConnectorRouteChip(state: ToolPaletteState, style: Int, label: String) {
+    FilterChip(
+        selected = state.connectorRouteStyle == style,
+        onClick = { state.setConnectorRoute(style) },
+        label = { Text(label) },
+    )
 }
 
 /**

@@ -33,6 +33,8 @@ data class PalettePrefs(
     val stickyFillColor: Int? = null,
     // Sub-phase 14.1 — ink beautify toggle. Null = never saved.
     val inkBeautify: Boolean? = null,
+    // Sub-phase 14.2 — connector route style. Null = never saved.
+    val connectorRouteStyle: Int? = null,
 )
 
 /**
@@ -68,6 +70,7 @@ class ToolPalettePrefsStore @Inject constructor(
             shapeStrokeStyle = p[KEY_SHAPE_STROKE_STYLE],
             stickyFillColor = p[KEY_STICKY_FILL_COLOR],
             inkBeautify = p[KEY_INK_BEAUTIFY],
+            connectorRouteStyle = p[KEY_CONNECTOR_ROUTE_STYLE],
         )
     }
 
@@ -82,6 +85,7 @@ class ToolPalettePrefsStore @Inject constructor(
         shapeStrokeStyle: Int,
         stickyFillColor: Int,
         inkBeautify: Boolean,
+        connectorRouteStyle: Int,
     ) {
         dataStore.edit { p ->
             p[KEY_SELECTED_TOOL] = selectedToolId
@@ -97,6 +101,7 @@ class ToolPalettePrefsStore @Inject constructor(
             p[KEY_SHAPE_STROKE_STYLE] = shapeStrokeStyle
             p[KEY_STICKY_FILL_COLOR] = stickyFillColor
             p[KEY_INK_BEAUTIFY] = inkBeautify
+            p[KEY_CONNECTOR_ROUTE_STYLE] = connectorRouteStyle
         }
     }
 
@@ -116,6 +121,7 @@ class ToolPalettePrefsStore @Inject constructor(
         private val KEY_SHAPE_STROKE_STYLE = intPreferencesKey("shape_stroke_style")
         private val KEY_STICKY_FILL_COLOR = intPreferencesKey("sticky_fill_color")
         private val KEY_INK_BEAUTIFY = booleanPreferencesKey("ink_beautify")
+        private val KEY_CONNECTOR_ROUTE_STYLE = intPreferencesKey("connector_route_style")
 
         private fun colorKey(toolId: String) = intPreferencesKey("ink_color_$toolId")
         private fun widthKey(toolId: String) = floatPreferencesKey("ink_width_$toolId")
