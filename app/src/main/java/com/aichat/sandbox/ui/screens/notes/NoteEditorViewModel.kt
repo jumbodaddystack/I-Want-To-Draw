@@ -1294,6 +1294,7 @@ class NoteEditorViewModel @Inject constructor(
                 shapeFillColor = saved.shapeFillColor,
                 shapeStrokeStyle = saved.shapeStrokeStyle,
                 stickyFillColor = saved.stickyFillColor,
+                inkBeautify = saved.inkBeautify,
             )
             val inkTools = listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.PENCIL)
             snapshotFlow {
@@ -1306,6 +1307,7 @@ class NoteEditorViewModel @Inject constructor(
                     shapeFillColor = palette.shapeFillColor,
                     shapeStrokeStyle = palette.shapeStrokeStyle,
                     stickyFillColor = palette.stickyFillColor,
+                    inkBeautify = palette.inkBeautify,
                 )
             }
                 // The first emission is the state we just restored.
@@ -1321,6 +1323,7 @@ class NoteEditorViewModel @Inject constructor(
                         shapeFillColor = snap.shapeFillColor,
                         shapeStrokeStyle = snap.shapeStrokeStyle,
                         stickyFillColor = snap.stickyFillColor,
+                        inkBeautify = snap.inkBeautify,
                     )
                 }
         }
@@ -1335,6 +1338,7 @@ class NoteEditorViewModel @Inject constructor(
         val shapeFillColor: Int,
         val shapeStrokeStyle: Int,
         val stickyFillColor: Int,
+        val inkBeautify: Boolean,
     )
 
     // ── "Draw with finger" (user setting) ────────────────────────────────

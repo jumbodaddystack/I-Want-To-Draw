@@ -172,6 +172,16 @@ class ToolPaletteState {
     /** Packed capJoin byte the surface encodes on the next path commit. */
     fun activePathCapJoin(): Int = PathCodec.capJoinOf(pathStrokeCap, pathStrokeJoin)
 
+    // ── Sub-phase 14.1 — ink beautification ──────────────────────────────
+
+    /** Whether ink strokes get the [InkBeautifier] pass on commit. */
+    var inkBeautify: Boolean by mutableStateOf(false)
+        private set
+
+    fun setBeautify(enabled: Boolean) {
+        inkBeautify = enabled
+    }
+
     // ── Sub-phase 11.1 — sticky fill ─────────────────────────────────────
 
     /** Fill applied to newly dropped stickies — one of [StickyCodec.PRESET_FILLS]. */
@@ -228,6 +238,7 @@ class ToolPaletteState {
         shapeFillColor: Int? = null,
         shapeStrokeStyle: Int? = null,
         stickyFillColor: Int? = null,
+        inkBeautify: Boolean? = null,
     ) {
         for ((id, color) in inkColors) {
             Tool.fromId(id)?.let { setColor(it, color) }
@@ -240,6 +251,7 @@ class ToolPaletteState {
         shapeFillColor?.let { setFillColor(it) }
         shapeStrokeStyle?.let { setStrokeStyle(it) }
         stickyFillColor?.let { setStickyFill(it) }
+        inkBeautify?.let { setBeautify(it) }
         Tool.fromId(selectedToolId)?.let { select(it) }
     }
 

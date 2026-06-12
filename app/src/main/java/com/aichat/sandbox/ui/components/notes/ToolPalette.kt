@@ -374,6 +374,16 @@ private fun InkConfigRow(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // 14.1 — opt-in smoothing pass on pen lift. Only meaningful for
+            // ink strokes, so the chip hides when this row serves the shape /
+            // connector / path tools.
+            if (state.selected.isInk) {
+                FilterChip(
+                    selected = state.inkBeautify,
+                    onClick = { state.setBeautify(!state.inkBeautify) },
+                    label = { Text("Beautify") },
+                )
+            }
         }
     }
 }

@@ -158,6 +158,9 @@ class DrawingSurface(context: Context) : View(context) {
     // 12.5 — packed PathCodec cap/join byte for newly committed paths.
     private var pathCapJoin: Int = PathCodec.DEFAULT_CAP_JOIN
 
+    // 14.1 — run [InkBeautifier] on ink samples at commit time.
+    private var beautifyInk: Boolean = false
+
     /** Tool actually used for the in-flight stroke (palette tool or side-button override). */
     private var strokeTool: Tool = Tool.PEN
     private var strokeColor: Int = DEFAULT_INK_COLOR
@@ -388,6 +391,7 @@ class DrawingSurface(context: Context) : View(context) {
         shapeFillArgb: Int = 0,
         shapeStrokeStyle: Byte = ShapeCodec.STROKE_STYLE_SOLID,
         pathCapJoin: Int = PathCodec.DEFAULT_CAP_JOIN,
+        beautifyInk: Boolean = false,
     ) {
         // 12.2 — leaving the pen tool commits whatever path is in progress;
         // an abandoned two-anchor stub is more useful than silent loss.
@@ -402,6 +406,7 @@ class DrawingSurface(context: Context) : View(context) {
         this.shapeFillArgb = shapeFillArgb
         this.shapeStrokeStyle = shapeStrokeStyle
         this.pathCapJoin = pathCapJoin
+        this.beautifyInk = beautifyInk
         invalidate()
     }
 
@@ -1076,9 +1081,11 @@ class DrawingSurface(context: Context) : View(context) {
         }
         // Phase 9.4 — encode in v2 (with `t`) when a recording is active;
         // otherwise stay on the v1 path so non-recording strokes are
-        // binary-identical to pre-9.4 commits.
+        // binary-identical to pre-9.4 commits. 14.1 — the opt-in beautify
+        // pass reshapes the packed samples right before encoding, so the
+        // committed payload and the instant-feedback copy below agree.
         val payload = if (recordingStartedAt != 0L) {
-            val packedV2 = FloatArray(liveSampleCount * StrokeCodec.FLOATS_PER_SAMPLE_V2)
+            var packedV2 = FloatArray(liveSampleCount * StrokeCodec.FLOATS_PER_SAMPLE_V2)
             var src = 0
             var dst = 0
             var i = 0
@@ -1092,10 +1099,16 @@ class DrawingSurface(context: Context) : View(context) {
                 dst += StrokeCodec.FLOATS_PER_SAMPLE_V2
                 i++
             }
+            if (beautifyInk && strokeTool.isInk) {
+                packedV2 = InkBeautifier.beautify(packedV2, StrokeCodec.FLOATS_PER_SAMPLE_V2)
+            }
             StrokeCodec.encodeV2(packedV2)
         } else {
-            val packed = FloatArray(liveSampleCount * StrokeCodec.FLOATS_PER_SAMPLE)
+            var packed = FloatArray(liveSampleCount * StrokeCodec.FLOATS_PER_SAMPLE)
             System.arraycopy(liveSamples, 0, packed, 0, packed.size)
+            if (beautifyInk && strokeTool.isInk) {
+                packed = InkBeautifier.beautify(packed, StrokeCodec.FLOATS_PER_SAMPLE)
+            }
             StrokeCodec.encode(packed)
         }
         val item = NoteItem(
@@ -2370,6 +2383,7 @@ fun DrawingSurfaceView(
                 shapeFillArgb = paletteState.activeShapeFillArgb(),
                 shapeStrokeStyle = paletteState.shapeStrokeStyle.toByte(),
                 pathCapJoin = paletteState.activePathCapJoin(),
+                beautifyInk = paletteState.inkBeautify,
             )
             view.setSelection(selectedIds, selectionMatrix)
             view.setEditingTextId(editingTextId)
