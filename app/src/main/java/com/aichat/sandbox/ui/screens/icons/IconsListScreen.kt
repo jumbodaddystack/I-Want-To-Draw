@@ -27,8 +27,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -123,7 +125,31 @@ fun IconsListScreen(
             Column(modifier = Modifier.fillMaxSize()) {
                 IconsHeader(count = icons.size)
 
-                if (icons.isEmpty()) {
+                // Phase 16.3 — search by title / handwriting OCR text.
+                val query by viewModel.query.collectAsState()
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = viewModel::setQuery,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = spacing.l, vertical = spacing.s),
+                    placeholder = { Text("Search icons") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    singleLine = true,
+                )
+
+                if (icons.isEmpty() && query.isNotBlank()) {
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        StudioText(
+                            text = "No icons match \"$query\"",
+                            style = StudioTheme.type.label,
+                            color = colors.inkFaint,
+                        )
+                    }
+                } else if (icons.isEmpty()) {
                     EmptyState(modifier = Modifier.weight(1f))
                 } else {
                     LazyVerticalGrid(

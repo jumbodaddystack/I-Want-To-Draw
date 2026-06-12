@@ -42,6 +42,24 @@ interface NoteSearchDao {
         """
     )
     suspend fun search(match: String, limit: Int = 100): List<NoteSearchResultRow>
+
+    /**
+     * Phase 16.3 — the Icons gallery's filter: same FTS index, restricted
+     * to icon notes, returning full [com.aichat.sandbox.data.model.Note]
+     * rows so the gallery grid renders them exactly like the unfiltered
+     * list (thumbnail, title, artboard dimensions).
+     */
+    @SkipQueryVerification
+    @Query(
+        """
+        SELECT n.* FROM notes_ocr_fts
+        JOIN notes n ON n.rowid = notes_ocr_fts.docid
+        WHERE notes_ocr_fts MATCH :match AND n.isIcon = 1
+        ORDER BY n.updatedAt DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun searchIcons(match: String, limit: Int = 100): List<com.aichat.sandbox.data.model.Note>
 }
 
 /**

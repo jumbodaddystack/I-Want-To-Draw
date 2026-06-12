@@ -9,6 +9,7 @@ import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteFrame
 import com.aichat.sandbox.data.notes.NoteRasterizer
 import com.aichat.sandbox.data.repository.NoteRepository
+import com.aichat.sandbox.data.repository.NoteSearchRepository
 import com.aichat.sandbox.data.vector.AndroidVectorDrawableParser
 import com.aichat.sandbox.data.vector.VectorImportDetector
 import com.aichat.sandbox.data.vector.VectorImportFormat
@@ -18,11 +19,18 @@ import com.aichat.sandbox.data.vector.notesbridge.DocumentToNoteItems
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -41,11 +49,31 @@ import javax.inject.Inject
 @HiltViewModel
 class IconsListViewModel @Inject constructor(
     private val repository: NoteRepository,
+    private val searchRepository: NoteSearchRepository,
     private val fileReader: VectorTuneupFileReader,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
-    val icons: StateFlow<List<Note>> = repository.observeIcons()
+    // Phase 16.3 — gallery search. Blank query = the live icon flow; a
+    // non-blank query runs the FTS title/OCR search filtered to icons,
+    // debounced so per-keystroke queries don't pile up.
+    private val _query = MutableStateFlow("")
+    val query: StateFlow<String> = _query.asStateFlow()
+
+    fun setQuery(value: String) {
+        _query.value = value
+    }
+
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+    val icons: StateFlow<List<Note>> = _query
+        .debounce { if (it.isBlank()) 0L else QUERY_DEBOUNCE_MS }
+        .flatMapLatest { q ->
+            if (q.isBlank()) {
+                repository.observeIcons()
+            } else {
+                flow { emit(searchRepository.searchIcons(q)) }
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /** Outcome of an [importIcon] call, collected by the screen. */
@@ -129,6 +157,10 @@ class IconsListViewModel @Inject constructor(
                 ),
             )
         }
+    }
+
+    private companion object {
+        const val QUERY_DEBOUNCE_MS = 150L
     }
 
     /** The picked file's display name, without extension — used as the title. */

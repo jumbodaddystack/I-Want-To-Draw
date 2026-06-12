@@ -43,6 +43,17 @@ class NoteSearchRepository @Inject constructor(
             rows.map { row -> toResult(row, notebookCache) }
         }
 
+    /**
+     * Phase 16.3 — same FTS search restricted to icon notes, returning the
+     * full [com.aichat.sandbox.data.model.Note] rows the Icons gallery
+     * grid renders. Empty / whitespace queries return an empty list.
+     */
+    suspend fun searchIcons(query: String, limit: Int = 100) =
+        withContext(Dispatchers.IO) {
+            val match = sanitizeQuery(query) ?: return@withContext emptyList()
+            searchDao.searchIcons(match, limit)
+        }
+
     private suspend fun toResult(
         row: NoteSearchResultRow,
         notebookCache: HashMap<String, Notebook?>,
