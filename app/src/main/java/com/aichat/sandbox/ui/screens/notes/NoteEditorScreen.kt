@@ -726,6 +726,8 @@ fun NoteEditorScreen(
                     canCombine = viewModel.selectionCanCombine(),
                     onCombine = viewModel::combineSelection,
                     canMergePaths = viewModel.selectionCanMergePaths(),
+                    canTidy = viewModel.selectionCanTidy(),
+                    onTidy = { viewModel.tidySelection() },
                     onMergePaths = viewModel::mergeSelectionPaths,
                     onSetGradient = viewModel::setSelectionGradient,
                     canCopyStyle = viewModel.selectionIsSingleStyleSource(),

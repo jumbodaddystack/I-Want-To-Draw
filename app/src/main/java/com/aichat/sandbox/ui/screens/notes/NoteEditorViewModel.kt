@@ -40,6 +40,7 @@ import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.data.repository.StampRepository
 import com.aichat.sandbox.data.vector.edit.boolean.PathBoolean
 import com.aichat.sandbox.ui.components.notes.AlignmentMath
+import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import com.aichat.sandbox.ui.components.notes.FillStyle
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
@@ -2294,6 +2295,17 @@ class NoteEditorViewModel @Inject constructor(
         return false
     }
 
+    /**
+     * Phase 17.5 follow-on — gate for the selection "Tidy" action: there's
+     * something simplify / snap / merge could act on (a path or a stroke).
+     * Tidy itself no-ops gracefully when nothing actually changes.
+     */
+    fun selectionCanTidy(): Boolean {
+        val ids = _selection.value
+        if (ids.isEmpty()) return false
+        return items.any { it.id in ids && (it.kind == PathCodec.KIND || it.kind == STROKE_KIND) }
+    }
+
     private fun pathsMergeable(a: NoteItem, b: NoteItem): Boolean =
         a.colorArgb == b.colorArgb && a.baseWidthPx == b.baseWidthPx &&
             PathMerge.compatible(PathCodec.decode(a.payload), PathCodec.decode(b.payload))
@@ -2352,8 +2364,40 @@ class NoteEditorViewModel @Inject constructor(
         _selectionMatrix.value = StrokeTransform.IDENTITY
     }
 
-    // ── Phase 13.3 — eyedropper + style copy/paste ───────────────────────
+    /**
+     * Phase 17.5 follow-on — one-tap **tidy** over the selection: simplify
+     * strokes, snap path anchors to the icon grid, and fold style-compatible
+     * paths together ([NoteTidy]). Lands as a single `CompositeEdit("Tidy")`.
+     * Grid snapping only applies to icons (the artboard grid); plain notes get
+     * simplify + merge. No-ops when nothing changes.
+     */
+    fun tidySelection(selection: List<NoteItem>? = null) {
+        val target = selection ?: items.filter { it.id in _selection.value }
+        if (target.isEmpty()) return
+        val step = if (_note.value.isIcon) BackgroundLayer.SPACING_WORLD else 0f
+        val result = com.aichat.sandbox.data.notes.NoteTidy.tidy(
+            items = target,
+            gridStep = step,
+            bounds = currentFrameBounds(),
+            newItemNoteId = resolvedNoteId,
+        )
+        if (result.isEmpty) return
+        apply(EditorAction.CompositeEdit(
+            description = "Tidy",
+            added = result.added,
+            removed = result.removed,
+            modified = result.modified,
+        ))
+        val removedIds = result.removed.mapTo(HashSet(result.removed.size)) { it.id }
+        val newSelection = target.mapNotNull { it.id.takeUnless { id -> id in removedIds } }
+            .toMutableSet()
+        newSelection += result.added.map { it.id }
+        _selection.value = newSelection
+        _selectionWorldBounds.value = recomputeSelectionBounds()
+        _selectionMatrix.value = StrokeTransform.IDENTITY
+    }
 
+    // ── Phase 13.3 — eyedropper + style copy/paste ───────────────────────
     /** True when exactly one styleable item is selected (gates "Copy style"). */
     fun selectionIsSingleStyleSource(): Boolean {
         val ids = _selection.value

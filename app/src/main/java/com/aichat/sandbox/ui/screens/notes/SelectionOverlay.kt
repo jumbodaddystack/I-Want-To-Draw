@@ -144,6 +144,9 @@ fun SelectionOverlay(
     // Phase 17.5 — concatenate style-compatible paths into one (holes kept).
     canMergePaths: Boolean = false,
     onMergePaths: (() -> Unit)? = null,
+    // Phase 17.5 follow-on — one-tap tidy (simplify + snap + merge).
+    canTidy: Boolean = false,
+    onTidy: (() -> Unit)? = null,
     onSetGradient: ((FillStyle.Gradient) -> Unit)? = null,
     canCopyStyle: Boolean = false,
     onCopyStyle: (() -> Unit)? = null,
@@ -385,6 +388,8 @@ fun SelectionOverlay(
             onCombine = onCombine,
             canMergePaths = canMergePaths,
             onMergePaths = onMergePaths,
+            canTidy = canTidy,
+            onTidy = onTidy,
             onSetGradient = onSetGradient,
             canCopyStyle = canCopyStyle,
             onCopyStyle = onCopyStyle,
@@ -550,6 +555,8 @@ private fun FloatingSelectionMenu(
     onCombine: ((PathBoolean.Op) -> Unit)? = null,
     canMergePaths: Boolean = false,
     onMergePaths: (() -> Unit)? = null,
+    canTidy: Boolean = false,
+    onTidy: (() -> Unit)? = null,
     onSetGradient: ((FillStyle.Gradient) -> Unit)? = null,
     canCopyStyle: Boolean = false,
     onCopyStyle: (() -> Unit)? = null,
@@ -642,6 +649,15 @@ private fun FloatingSelectionMenu(
                     icon = Icons.Filled.MergeType,
                     label = "Merge",
                     onClick = onMergePaths,
+                )
+            }
+            // Phase 17.5 follow-on — one-tap tidy (simplify + snap-to-grid +
+            // merge), bundled so an icon cleans up in a single undo step.
+            if (canTidy && onTidy != null) {
+                MenuButton(
+                    icon = Icons.Filled.AutoFixHigh,
+                    label = "Tidy",
+                    onClick = onTidy,
                 )
             }
             // Phase 10.2/10.3 — restyle existing shapes (fill + line style);
