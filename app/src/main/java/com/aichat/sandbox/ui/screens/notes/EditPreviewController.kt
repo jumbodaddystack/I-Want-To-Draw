@@ -62,8 +62,21 @@ object EditPreviewController {
          * *authors* (`add_path` / `add_shape`), so a "Make real" refine lands
          * the cleaned vector *next to* the original sketch rather than on top
          * of it. Null leaves authored geometry at the model's coordinates.
+         * Superseded by [authoredFit] when both are supplied.
          */
         authoredOffset: FloatArray? = null,
+        /**
+         * Phase 17.5 #2 (placement fix) — target world rect
+         * `[minX, minY, maxX, maxY]` to *fit* the model's authored geometry
+         * into (uniform scale, aspect-preserved, centred). A refine only ever
+         * shows the model a cropped raster of the sketch, so its raw output
+         * coordinates carry no world position or scale — fitting them to a
+         * sketch-sized box beside the original is what keeps the result on
+         * canvas and at the right size (without it the cleaned vector lands
+         * tiny and off in a corner). Takes precedence over [authoredOffset];
+         * a degenerate source/target falls back to the offset.
+         */
+        authoredFit: FloatArray? = null,
     ): Simulation {
         val byShortId: Map<String, NoteItem> = buildMap {
             for ((short, uuid) in idMap) {
@@ -77,6 +90,11 @@ object EditPreviewController {
         val working = HashMap<String, NoteItem>()
         val toRemove = LinkedHashSet<String>()
         val toAdd = ArrayList<NoteItem>()
+        // Model-authored geometry (add_path / add_shape) is collected
+        // separately so it can be placed as a *group* (fit / offset) after
+        // every op is processed — fitting needs the union of all authored
+        // items so their relative layout is preserved.
+        val authored = ArrayList<NoteItem>()
         val skipped = ArrayList<String>()
 
         // 17.5 #1 — context for items the model authors from scratch.
@@ -245,10 +263,10 @@ object EditPreviewController {
                         continue
                     }
                     nextAuthoredZ++
-                    toAdd += offsetAuthored(item, authoredOffset)
+                    authored += item
                 }
                 is EditOp.AddShape -> {
-                    toAdd += offsetAuthored(buildAddedShape(op, authorNoteId, nextAuthoredZ), authoredOffset)
+                    authored += buildAddedShape(op, authorNoteId, nextAuthoredZ)
                     nextAuthoredZ++
                 }
                 is EditOp.Group -> {
@@ -270,13 +288,85 @@ object EditPreviewController {
             if (before.id in toRemove) continue
             modified += before to after
         }
+        // Place the model-authored geometry as a group: fit it into the
+        // target rect when one is given (a refine), otherwise apply the
+        // translation-only offset. See [authoredFit] for why fitting matters.
+        val placedAuthored = placeAuthored(authored, authoredFit, authoredOffset)
         // toAdd items that share an id with anything being removed at the
         // same time keep the new id - shape replacements use a fresh UUID.
         return Simulation(
-            added = toAdd,
+            added = toAdd + placedAuthored,
             removed = currentItems.filter { it.id in toRemove },
             modified = modified,
             skipped = skipped,
+        )
+    }
+
+    /**
+     * Place model-authored geometry. With a [fit] target rect, the whole
+     * authored group is uniformly scaled (aspect-preserved) and centred into
+     * it; otherwise a translation-only [offset] is applied per item. A
+     * degenerate source/target rect falls back to the offset so authored
+     * geometry is never dropped.
+     */
+    private fun placeAuthored(
+        authored: List<NoteItem>,
+        fit: FloatArray?,
+        offset: FloatArray?,
+    ): List<NoteItem> {
+        if (authored.isEmpty()) return authored
+        if (fit != null) {
+            val m = fitMatrix(authoredUnionBounds(authored), fit)
+            if (m != null) return authored.map { transformItem(it, m) ?: it }
+            // Degenerate fit — fall through to the offset path below.
+        }
+        if (offset != null) return authored.map { offsetAuthored(it, offset) }
+        return authored
+    }
+
+    /** Union world bounds of authored path / shape items, or null when empty. */
+    private fun authoredUnionBounds(items: List<NoteItem>): FloatArray? {
+        var out: FloatArray? = null
+        for (item in items) {
+            val b = when (item.kind) {
+                PathCodec.KIND -> PathCodec.boundsOf(PathCodec.decode(item.payload))
+                Shape.KIND -> ShapeCodec.boundsOf(ShapeCodec.decode(item.payload).shape)
+                else -> null
+            } ?: continue
+            if (out == null) {
+                out = b.copyOf()
+            } else {
+                if (b[0] < out[0]) out[0] = b[0]
+                if (b[1] < out[1]) out[1] = b[1]
+                if (b[2] > out[2]) out[2] = b[2]
+                if (b[3] > out[3]) out[3] = b[3]
+            }
+        }
+        return out
+    }
+
+    /**
+     * Uniform fit of source rect [src] into [target] (both
+     * `[minX, minY, maxX, maxY]`), preserving aspect ratio and centring the
+     * result. Null when either rect is degenerate (non-positive area).
+     */
+    private fun fitMatrix(src: FloatArray?, target: FloatArray): FloatArray? {
+        if (src == null) return null
+        val sw = src[2] - src[0]
+        val sh = src[3] - src[1]
+        val tw = target[2] - target[0]
+        val th = target[3] - target[1]
+        if (sw <= 0f || sh <= 0f || tw <= 0f || th <= 0f) return null
+        val scale = kotlin.math.min(tw / sw, th / sh)
+        val scx = (src[0] + src[2]) * 0.5f
+        val scy = (src[1] + src[3]) * 0.5f
+        val tcx = (target[0] + target[2]) * 0.5f
+        val tcy = (target[1] + target[3]) * 0.5f
+        // Scale about the source centre (keeps it fixed), then translate that
+        // centre onto the target centre.
+        return StrokeTransform.multiply(
+            StrokeTransform.translation(tcx - scx, tcy - scy),
+            StrokeTransform.scaleAround(scale, scale, scx, scy),
         )
     }
 

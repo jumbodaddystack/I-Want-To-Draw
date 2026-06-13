@@ -3481,16 +3481,24 @@ class NoteEditorViewModel @Inject constructor(
     }
 
     /**
-     * Phase 17.5 #2 — placement offset for a refine result: one sketch-width
-     * (plus a small gap) to the right of the original, so the cleaned vector
-     * sits beside the source for side-by-side comparison. Null when the
-     * selection has no measurable bounds (the result then lands in-place).
+     * Phase 17.5 #2 — placement *target* for a refine result: a sketch-sized
+     * box one sketch-width (plus a small gap) to the right of the original.
+     * The cleaned vector is *fit* into this box (uniform scale, aspect
+     * preserved) so it lands at the sketch's size beside the source for
+     * side-by-side comparison — regardless of the coordinate space the model
+     * drew in. A refine only shows the model a cropped raster of the sketch,
+     * so its raw output coordinates carry no world position or scale; fitting
+     * (rather than a raw translation) is what keeps the result on canvas and
+     * correctly sized. Null when the selection has no measurable bounds (the
+     * result then lands at the model's own coordinates).
      */
-    private fun refinePlacementOffset(selection: List<NoteItem>?): FloatArray? {
+    private fun refinePlacementTarget(selection: List<NoteItem>?): FloatArray? {
         val bounds = NoteRasterizer.computeBounds(selection ?: return null) ?: return null
         val width = bounds[2] - bounds[0]
-        if (width <= 0f) return null
-        return floatArrayOf(width + width * REFINE_GAP_FRACTION, 0f)
+        val height = bounds[3] - bounds[1]
+        if (width <= 0f || height <= 0f) return null
+        val dx = width + width * REFINE_GAP_FRACTION
+        return floatArrayOf(bounds[0] + dx, bounds[1], bounds[2] + dx, bounds[3])
     }
 
     private suspend fun runStream(
@@ -3506,10 +3514,10 @@ class NoteEditorViewModel @Inject constructor(
             .ifEmpty { preferencesManager.defaultModel.first() }
         val creds = preferencesManager.credentialsFor(modelId)
         // 17.5 #1: from-scratch generation pulls gallery style references.
-        // 17.5 #2: a refine places the cleaned result one sketch-width to the
-        // right of the original so the two sit side by side.
+        // 17.5 #2: a refine fits the cleaned result into a sketch-sized box one
+        // sketch-width to the right of the original so the two sit side by side.
         val styleReferences = if (generate && !refine) loadStyleReferenceIcons() else emptyList()
-        val authoredOffset = if (refine) refinePlacementOffset(selection) else null
+        val authoredFit = if (refine) refinePlacementTarget(selection) else null
         val request = AskRequest(
             note = _note.value,
             allItems = items.toList(),
@@ -3533,7 +3541,7 @@ class NoteEditorViewModel @Inject constructor(
                         is AiChunk.Complete -> turn.copy(state = TurnState.Done)
                         is AiChunk.Error -> turn.copy(state = TurnState.Error(chunk.message))
                         is AiChunk.EditPreview -> {
-                            stagePendingEdit(chunk, editDescription, authoredOffset)
+                            stagePendingEdit(chunk, editDescription, authoredFit)
                             val message = chunk.doc.summary.ifBlank {
                                 if (chunk.doc.ops.isEmpty()) "No changes proposed."
                                 else "Preview ready (${chunk.doc.ops.size} ops)."
@@ -3601,7 +3609,7 @@ class NoteEditorViewModel @Inject constructor(
     private fun stagePendingEdit(
         chunk: AiChunk.EditPreview,
         description: String,
-        authoredOffset: FloatArray? = null,
+        authoredFit: FloatArray? = null,
     ) {
         val simulation = EditPreviewController.simulate(
             currentItems = items.toList(),
@@ -3610,7 +3618,7 @@ class NoteEditorViewModel @Inject constructor(
             layerMap = chunk.layerMap,
             layers = _layers.value,
             newItemNoteId = _note.value.id,
-            authoredOffset = authoredOffset,
+            authoredFit = authoredFit,
         )
         _pendingEdit.value = PendingEdit(
             description = description,
