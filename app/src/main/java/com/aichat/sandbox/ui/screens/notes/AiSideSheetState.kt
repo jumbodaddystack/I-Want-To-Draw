@@ -64,6 +64,7 @@ enum class AiFooterMode { ASK, EDIT }
  * colour.
  */
 enum class IconQuickAction(val label: String) {
+    MAKE_REAL("Make real"),
     SIMPLIFY("Simplify"),
     FLAT_STYLE("Flat style"),
     ADD_DETAIL("Add detail"),

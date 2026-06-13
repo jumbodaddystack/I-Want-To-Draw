@@ -440,6 +440,36 @@ object EditOpsParser {
             "- Never reply outside the fenced block."
 
     /**
+     * Phase 17.5 #2 — system message for the annotate-and-iterate "Make real"
+     * refine loop. The model is shown the user's rough sketch as an image and
+     * asked to redraw it as clean vector geometry, authoring with the same
+     * `add_path` / `add_shape` ops as generation. The editor places the result
+     * next to the original, so the model should draw at the sketch's own
+     * coordinates (the offset is applied afterwards).
+     */
+    const val ICON_REFINE_SYSTEM_MESSAGE: String =
+        "You receive a rough hand-drawn sketch as an image. Redraw it as a " +
+            "clean vector — faithfully follow the sketch's shapes, proportions " +
+            "and placement, but straighten wobbly lines, regularise curves, and " +
+            "close shapes that were meant to be closed. Draw at roughly the " +
+            "same coordinates as the sketch.\n\n" +
+            "Reply with ONLY a fenced ```edit-ops block matching this schema:\n\n" +
+            "{ \"schema\": 1, \"summary\": \"<one short sentence>\",\n" +
+            "  \"ops\": [ /* add_path / add_shape operations */ ] }\n\n" +
+            "Author geometry with these ops:\n" +
+            "- add_path: { \"op\": \"add_path\", \"subpaths\": [ { \"closed\": " +
+            "true, \"anchors\": [ [x,y,inDx,inDy,outDx,outDy], … ] } ], " +
+            "\"color\"?: \"#RRGGBB\", \"fill\"?: \"#RRGGBB\", \"width\"?: float }. " +
+            "Each anchor is a point plus its relative incoming/outgoing cubic " +
+            "handles (use [x,y] for a corner).\n" +
+            "- add_shape: { \"op\": \"add_shape\", \"shape\": { \"type\": " +
+            "\"ellipse|rect|line|polygon\", … } } for simple primitives.\n\n" +
+            "Rules:\n" +
+            "- Keep it monochrome unless the sketch is clearly coloured.\n" +
+            "- Prefer a few clean paths over many tiny ones.\n" +
+            "- Never reply outside the fenced block."
+
+    /**
      * Phase 17.5 #1 — assemble the generation system message, embedding up to
      * three [styleReferences] (each a [VectorCanvasJson] string of one gallery
      * icon) as a fenced reference block. With no references the base message

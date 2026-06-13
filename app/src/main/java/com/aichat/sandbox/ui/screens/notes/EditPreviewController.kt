@@ -57,6 +57,13 @@ object EditPreviewController {
          * passes the live note id explicitly so generated items persist.
          */
         newItemNoteId: String? = null,
+        /**
+         * Phase 17.5 #2 — translation `[dx, dy]` applied to items the model
+         * *authors* (`add_path` / `add_shape`), so a "Make real" refine lands
+         * the cleaned vector *next to* the original sketch rather than on top
+         * of it. Null leaves authored geometry at the model's coordinates.
+         */
+        authoredOffset: FloatArray? = null,
     ): Simulation {
         val byShortId: Map<String, NoteItem> = buildMap {
             for ((short, uuid) in idMap) {
@@ -238,10 +245,10 @@ object EditPreviewController {
                         continue
                     }
                     nextAuthoredZ++
-                    toAdd += item
+                    toAdd += offsetAuthored(item, authoredOffset)
                 }
                 is EditOp.AddShape -> {
-                    toAdd += buildAddedShape(op, authorNoteId, nextAuthoredZ)
+                    toAdd += offsetAuthored(buildAddedShape(op, authorNoteId, nextAuthoredZ), authoredOffset)
                     nextAuthoredZ++
                 }
                 is EditOp.Group -> {
@@ -448,6 +455,18 @@ object EditPreviewController {
             baseWidthPx = op.width ?: DEFAULT_AUTHORED_WIDTH,
             payload = ShapeCodec.encode(shape, fillArgb = op.fillArgb ?: 0),
         )
+    }
+
+    /**
+     * 17.5 #2 — translate an authored item by [offset] (`[dx, dy]`) so a
+     * refine result lands beside the original sketch. No-op for a null / zero
+     * offset; reuses the per-kind [transformItem] so path / shape geometry is
+     * shifted exactly as a user drag would.
+     */
+    private fun offsetAuthored(item: NoteItem, offset: FloatArray?): NoteItem {
+        if (offset == null || offset.size < 2 || (offset[0] == 0f && offset[1] == 0f)) return item
+        val m = StrokeTransform.translation(offset[0], offset[1])
+        return transformItem(item, m) ?: item
     }
 
     /** Defaults for model-authored geometry (17.5 #1). */

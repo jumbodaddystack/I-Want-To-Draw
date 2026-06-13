@@ -46,6 +46,14 @@ data class AskRequest(
      * reference. Ignored unless [generate] is true.
      */
     val styleReferences: List<String> = emptyList(),
+    /**
+     * Phase 17.5 #2 — annotate-and-iterate "Make real" refine. Implies
+     * [generate] (the model authors a fresh, cleaned vector with `add_path` /
+     * `add_shape`), but the request also rasterizes [selection] so a
+     * vision-capable model redraws the sketch faithfully. The editor places
+     * the result beside the original (a placement offset, not in-place).
+     */
+    val refine: Boolean = false,
 )
 
 /** Top-level dispatch for [NoteAiService] — see [AskRequest.mode]. */

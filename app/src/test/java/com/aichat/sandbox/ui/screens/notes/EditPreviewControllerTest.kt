@@ -294,6 +294,63 @@ class EditPreviewControllerTest {
         assertEquals(9, sim.added[1].zIndex)
     }
 
+    @Test
+    fun authoredOffsetShiftsAddedGeometryBesideOriginal() {
+        val doc = EditOpsDoc(1, "refine", listOf(
+            EditOp.AddPath(
+                subpaths = listOf(
+                    EditOp.SubpathSpec(
+                        anchors = listOf(
+                            EditOp.AnchorSpec(0f, 0f),
+                            EditOp.AnchorSpec(10f, 0f),
+                            EditOp.AnchorSpec(10f, 10f),
+                        ),
+                        closed = true,
+                    ),
+                ),
+                colorArgb = null, fillArgb = null, width = null,
+            ),
+        ))
+        val sim = EditPreviewController.simulate(
+            currentItems = emptyList(),
+            doc = doc,
+            idMap = emptyMap(),
+            layerMap = emptyMap(),
+            layers = emptyList(),
+            newItemNoteId = "icon-1",
+            authoredOffset = floatArrayOf(100f, 5f),
+        )
+        val payload = com.aichat.sandbox.ui.components.notes.PathCodec.decode(sim.added[0].payload)
+        // Every anchor shifted by (+100, +5); handles (zero here) unchanged.
+        assertEquals(100f, payload.subpaths[0].anchors[0].x, 1e-3f)
+        assertEquals(5f, payload.subpaths[0].anchors[0].y, 1e-3f)
+        assertEquals(110f, payload.subpaths[0].anchors[1].x, 1e-3f)
+    }
+
+    @Test
+    fun zeroAuthoredOffsetLeavesGeometryInPlace() {
+        val doc = EditOpsDoc(1, "", listOf(
+            EditOp.AddPath(
+                subpaths = listOf(
+                    EditOp.SubpathSpec(listOf(EditOp.AnchorSpec(3f, 4f), EditOp.AnchorSpec(7f, 8f)), false),
+                ),
+                colorArgb = null, fillArgb = null, width = null,
+            ),
+        ))
+        val sim = EditPreviewController.simulate(
+            currentItems = emptyList(),
+            doc = doc,
+            idMap = emptyMap(),
+            layerMap = emptyMap(),
+            layers = emptyList(),
+            newItemNoteId = "icon-1",
+            authoredOffset = floatArrayOf(0f, 0f),
+        )
+        val payload = com.aichat.sandbox.ui.components.notes.PathCodec.decode(sim.added[0].payload)
+        assertEquals(3f, payload.subpaths[0].anchors[0].x, 1e-3f)
+        assertEquals(4f, payload.subpaths[0].anchors[0].y, 1e-3f)
+    }
+
     private fun pathItem(x: Float, colorArgb: Int = 0xFF000000.toInt()): NoteItem {
         val payload = com.aichat.sandbox.ui.components.notes.PathCodec.PathPayload(
             anchors = listOf(

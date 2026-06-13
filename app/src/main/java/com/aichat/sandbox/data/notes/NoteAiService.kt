@@ -49,7 +49,7 @@ class NoteAiService @Inject constructor(
         val caps = ModelCapabilities.of(request.modelId)
         if (request.mode == AskMode.EDIT) {
             if (request.generate) {
-                collectGenerate(request)
+                collectGenerate(request, caps.supportsVision)
             } else {
                 collectEdit(request, caps.supportsVision)
             }
@@ -133,18 +133,32 @@ class NoteAiService @Inject constructor(
      * would reference a non-existent id) is dropped — only `add_*` ops survive.
      * Emits a single [AiChunk.EditPreview] with empty id / layer maps.
      */
-    private suspend fun FlowCollector<AiChunk>.collectGenerate(request: AskRequest) {
-        val systemMessage = EditOpsParser.buildIconGenerateSystemMessage(request.styleReferences)
-        val userMessage = Message(
-            chatId = SYNTHETIC_CHAT_ID,
-            role = MessageRole.USER.value,
-            content = buildGeneratePromptBody(request.userPrompt),
-            contentType = "text",
-            metadata = null,
-        )
+    private suspend fun FlowCollector<AiChunk>.collectGenerate(
+        request: AskRequest,
+        supportsVision: Boolean,
+    ) {
+        // 17.5 #2 — "Make real" refines a selected sketch: show the model the
+        // rasterized sketch (vision) and ask it to redraw it cleanly. Falls
+        // back to text-only authoring when the model can't see images.
+        val refineItems = request.selection?.takeIf { request.refine && it.isNotEmpty() }
+        val refining = refineItems != null
+        val systemMessage = if (refining) EditOpsParser.ICON_REFINE_SYSTEM_MESSAGE
+            else EditOpsParser.buildIconGenerateSystemMessage(request.styleReferences)
+        val userMessage = if (refining && supportsVision) {
+            buildRefineVisionMessage(request, refineItems!!) ?: return emit(AiChunk.Error(RENDER_FAILED_MESSAGE))
+        } else {
+            Message(
+                chatId = SYNTHETIC_CHAT_ID,
+                role = MessageRole.USER.value,
+                content = if (refining) buildRefinePromptBody(request.userPrompt)
+                    else buildGeneratePromptBody(request.userPrompt),
+                contentType = "text",
+                metadata = null,
+            )
+        }
         val chat = Chat(
             id = SYNTHETIC_CHAT_ID,
-            title = "Icon Generate",
+            title = if (refining) "Icon Refine" else "Icon Generate",
             model = request.modelId,
             systemMessage = systemMessage,
         )
@@ -199,6 +213,49 @@ class NoteAiService @Inject constructor(
         append("×")
         append(ICON_ARTBOARD_WORLD.toInt())
         append(" units, top-left at (0,0). Author the geometry with add_path / add_shape ops.")
+    }
+
+    /**
+     * 17.5 #2 — build the multimodal refine message: the rasterized sketch as
+     * an image plus the refine instruction. Returns null when rasterization
+     * fails so the caller can surface [RENDER_FAILED_MESSAGE].
+     */
+    private suspend fun buildRefineVisionMessage(
+        request: AskRequest,
+        items: List<NoteItem>,
+    ): Message? = withContext(Dispatchers.Default) {
+        val pngBytes = try {
+            imageRenderer.renderToPng(
+                items = items,
+                backgroundStyle = request.note.backgroundStyle,
+                maxEdgePx = MAX_EDGE_PX,
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to rasterize sketch for refine", t)
+            null
+        } ?: return@withContext null
+        val dataUri = "data:image/png;base64,${Base64.getEncoder().encodeToString(pngBytes)}"
+        val metadata = gson.toJson(
+            ImageMetadata(images = listOf(ImageAttachment(dataUri = dataUri)))
+        )
+        Message(
+            chatId = SYNTHETIC_CHAT_ID,
+            role = MessageRole.USER.value,
+            content = buildRefinePromptBody(request.userPrompt),
+            contentType = "multimodal",
+            metadata = metadata,
+        )
+    }
+
+    /** 17.5 #2 — refine instruction body (shared by the vision + text paths). */
+    internal fun buildRefinePromptBody(userPrompt: String): String = buildString {
+        append("Redraw the sketch in the image as a clean vector, authoring the ")
+        append("geometry with add_path / add_shape ops at roughly the sketch's ")
+        append("own coordinates.")
+        if (userPrompt.isNotBlank()) {
+            append("\n\n")
+            append(userPrompt)
+        }
     }
 
     private suspend fun buildVisionStream(request: AskRequest): Flow<StreamEvent> {

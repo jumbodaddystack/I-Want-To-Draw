@@ -2739,6 +2739,10 @@ class NoteEditorViewModel @Inject constructor(
         if (_aiSheetState.value.isStreaming) return
         val scope = _aiSheetState.value.pendingSelection
         when (action) {
+            // 17.5 #2 — refine the selected sketch (or the whole icon) into a
+            // clean vector placed beside it; the footer text, if any, steers
+            // the redraw and enables the annotate-and-iterate loop.
+            IconQuickAction.MAKE_REAL -> refineSketch(_aiSheetState.value.inputText)
             IconQuickAction.SIMPLIFY -> submitAiEdit(
                 CannedEditAction.SIMPLIFY.undoDescription, CannedEditAction.SIMPLIFY.prompt, scope,
             )
@@ -3163,12 +3167,14 @@ class NoteEditorViewModel @Inject constructor(
         userPrompt: String,
         selection: List<NoteItem>? = null,
         generate: Boolean = false,
+        refine: Boolean = false,
     ) {
         val snapshot = _aiSheetState.value
         if (snapshot.isStreaming) return
-        // Generation authors a new icon from scratch — it deliberately ignores
-        // any frozen selection so the model isn't asked to "edit" nothing.
-        val resolvedSelection = if (generate) null else selection
+        // From-scratch generation deliberately ignores any frozen selection so
+        // the model isn't asked to "edit" nothing. A refine (17.5 #2) keeps the
+        // selection: it's the sketch the model rasterizes and redraws beside.
+        val resolvedSelection = if (generate && !refine) null else selection
             ?: snapshot.pendingSelection
             ?: items.filter { it.id in _selection.value }.takeIf { it.isNotEmpty() }
         val turnId = UUID.randomUUID().toString()
@@ -3194,6 +3200,7 @@ class NoteEditorViewModel @Inject constructor(
                 mode = AskMode.EDIT,
                 editDescription = description,
                 generate = generate,
+                refine = refine,
             )
         }
     }
@@ -3210,6 +3217,29 @@ class NoteEditorViewModel @Inject constructor(
             userPrompt = prompt,
             selection = null,
             generate = true,
+        )
+    }
+
+    /**
+     * Phase 17.5 #2 — "Make real" / annotate-and-iterate refine. Rasterizes
+     * the selected sketch, asks the model to redraw it as a clean vector, and
+     * stages the result *beside* the original (a placement offset) so the user
+     * can compare, mark up, and refine again. [extraInstruction] (the footer
+     * text, if any) lets the user steer or re-prompt the redraw. Falls back to
+     * the whole-icon scope when nothing is selected.
+     */
+    fun refineSketch(extraInstruction: String = "") {
+        if (_aiSheetState.value.isStreaming) return
+        val scope = _aiSheetState.value.pendingSelection
+            ?: items.filter { it.id in _selection.value }.takeIf { it.isNotEmpty() }
+            ?: items.toList()
+        if (scope.isEmpty()) return
+        submitAiEdit(
+            description = "AI Make real",
+            userPrompt = extraInstruction.trim(),
+            selection = scope,
+            generate = true,
+            refine = true,
         )
     }
 
@@ -3350,6 +3380,19 @@ class NoteEditorViewModel @Inject constructor(
         return kotlin.math.atan2(sumSin, sumCos).toFloat()
     }
 
+    /**
+     * Phase 17.5 #2 — placement offset for a refine result: one sketch-width
+     * (plus a small gap) to the right of the original, so the cleaned vector
+     * sits beside the source for side-by-side comparison. Null when the
+     * selection has no measurable bounds (the result then lands in-place).
+     */
+    private fun refinePlacementOffset(selection: List<NoteItem>?): FloatArray? {
+        val bounds = NoteRasterizer.computeBounds(selection ?: return null) ?: return null
+        val width = bounds[2] - bounds[0]
+        if (width <= 0f) return null
+        return floatArrayOf(width + width * REFINE_GAP_FRACTION, 0f)
+    }
+
     private suspend fun runStream(
         turnId: String,
         prompt: String,
@@ -3357,11 +3400,16 @@ class NoteEditorViewModel @Inject constructor(
         mode: AskMode = AskMode.ASK,
         editDescription: String = "AI edit",
         generate: Boolean = false,
+        refine: Boolean = false,
     ) {
         val modelId = _aiSheetState.value.activeModelId
             .ifEmpty { preferencesManager.defaultModel.first() }
         val creds = preferencesManager.credentialsFor(modelId)
-        val styleReferences = if (generate) loadStyleReferenceIcons() else emptyList()
+        // 17.5 #1: from-scratch generation pulls gallery style references.
+        // 17.5 #2: a refine places the cleaned result one sketch-width to the
+        // right of the original so the two sit side by side.
+        val styleReferences = if (generate && !refine) loadStyleReferenceIcons() else emptyList()
+        val authoredOffset = if (refine) refinePlacementOffset(selection) else null
         val request = AskRequest(
             note = _note.value,
             allItems = items.toList(),
@@ -3375,6 +3423,7 @@ class NoteEditorViewModel @Inject constructor(
             isIcon = _note.value.isIcon,
             generate = generate,
             styleReferences = styleReferences,
+            refine = refine,
         )
         try {
             aiService.ask(request).collect { chunk ->
@@ -3384,7 +3433,7 @@ class NoteEditorViewModel @Inject constructor(
                         is AiChunk.Complete -> turn.copy(state = TurnState.Done)
                         is AiChunk.Error -> turn.copy(state = TurnState.Error(chunk.message))
                         is AiChunk.EditPreview -> {
-                            stagePendingEdit(chunk, editDescription)
+                            stagePendingEdit(chunk, editDescription, authoredOffset)
                             val message = chunk.doc.summary.ifBlank {
                                 if (chunk.doc.ops.isEmpty()) "No changes proposed."
                                 else "Preview ready (${chunk.doc.ops.size} ops)."
@@ -3449,7 +3498,11 @@ class NoteEditorViewModel @Inject constructor(
      * the parser already validated, but items could have changed since the
      * request was made).
      */
-    private fun stagePendingEdit(chunk: AiChunk.EditPreview, description: String) {
+    private fun stagePendingEdit(
+        chunk: AiChunk.EditPreview,
+        description: String,
+        authoredOffset: FloatArray? = null,
+    ) {
         val simulation = EditPreviewController.simulate(
             currentItems = items.toList(),
             doc = chunk.doc,
@@ -3457,6 +3510,7 @@ class NoteEditorViewModel @Inject constructor(
             layerMap = chunk.layerMap,
             layers = _layers.value,
             newItemNoteId = _note.value.id,
+            authoredOffset = authoredOffset,
         )
         _pendingEdit.value = PendingEdit(
             description = description,
@@ -3980,6 +4034,10 @@ class NoteEditorViewModel @Inject constructor(
         const val HIGHLIGHTER_Z_BASE = -1_000_000
 
         private const val STROKE_KIND = "stroke"
+
+        /** 17.5 #2 — gap (as a fraction of sketch width) between a refine's
+         *  source sketch and the cleaned result placed beside it. */
+        private const val REFINE_GAP_FRACTION = 0.2f
 
         /** Offset applied when duplicating a selection in-place. */
         private const val DUPLICATE_OFFSET_WORLD = 24f

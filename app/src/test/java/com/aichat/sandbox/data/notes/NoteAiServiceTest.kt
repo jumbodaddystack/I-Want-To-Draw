@@ -308,6 +308,83 @@ class NoteAiServiceTest {
         assertTrue(sent.content.contains("a settings gear"))
     }
 
+    @Test
+    fun refineModeRastersSketchAndUsesRefineSystemMessage() = runTest {
+        val streamer = RecordingChatStreamer(
+            flow = flowOf(
+                StreamEvent.Delta("```edit-ops\n{ \"schema\": 1, \"summary\": \"clean\", "),
+                StreamEvent.Delta("\"ops\": [ { \"op\": \"add_path\", \"closed\": false, "),
+                StreamEvent.Delta("\"anchors\": [ [0,0], [10,10] ] } ] }\n```"),
+                StreamEvent.Complete(null),
+            ),
+        )
+        val service = NoteAiService(
+            chatStreamer = streamer,
+            ocr = FakeRecognizer(""),
+            imageRenderer = FakeImageRenderer(ByteArray(8) { 7 }),
+        )
+        val sketch = strokeItem()
+        val chunks = service.ask(
+            AskRequest(
+                note = sampleNote(),
+                allItems = listOf(sketch),
+                selection = listOf(sketch),
+                userPrompt = "make the corners sharper",
+                modelId = "gpt-4o", // vision-capable
+                baseUrl = "https://example.invalid/v1/",
+                apiKey = "test-key",
+                mode = AskMode.EDIT,
+                isIcon = true,
+                generate = true,
+                refine = true,
+            )
+        ).toList()
+
+        val preview = chunks.filterIsInstance<AiChunk.EditPreview>().single()
+        assertTrue(preview.doc.ops.single() is EditOp.AddPath)
+        assertEquals(EditOpsParser.ICON_REFINE_SYSTEM_MESSAGE, streamer.lastChat!!.systemMessage)
+        val sent = streamer.lastMessages.single()
+        // Vision refine: the sketch raster rides as a multimodal image.
+        assertEquals("multimodal", sent.contentType)
+        assertTrue(sent.metadata!!.contains("data:image/png;base64,"))
+        assertTrue(sent.content.contains("make the corners sharper"))
+    }
+
+    @Test
+    fun refineFallsBackToTextWhenModelHasNoVision() = runTest {
+        val streamer = RecordingChatStreamer(
+            flow = flowOf(
+                StreamEvent.Delta("```edit-ops\n{ \"schema\": 1, \"summary\": \"\", \"ops\": [] }\n```"),
+                StreamEvent.Complete(null),
+            ),
+        )
+        val service = NoteAiService(
+            chatStreamer = streamer,
+            ocr = FakeRecognizer(""),
+            imageRenderer = ExplodingImageRenderer, // must not rasterize without vision
+        )
+        val sketch = strokeItem()
+        service.ask(
+            AskRequest(
+                note = sampleNote(),
+                allItems = listOf(sketch),
+                selection = listOf(sketch),
+                userPrompt = "",
+                modelId = "gpt-3.5-turbo", // no vision
+                baseUrl = "https://example.invalid/v1/",
+                apiKey = "test-key",
+                mode = AskMode.EDIT,
+                isIcon = true,
+                generate = true,
+                refine = true,
+            )
+        ).toList()
+
+        val sent = streamer.lastMessages.single()
+        assertEquals("text", sent.contentType)
+        assertEquals(EditOpsParser.ICON_REFINE_SYSTEM_MESSAGE, streamer.lastChat!!.systemMessage)
+    }
+
     // ---- helpers ----
 
     private fun visionRequest(strokes: List<NoteItem>): AskRequest = AskRequest(
