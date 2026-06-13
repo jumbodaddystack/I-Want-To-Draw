@@ -102,6 +102,40 @@ class StrokeVectorizerTest {
     }
 
     @Test
+    fun outlineFillModeProducesClosedFilledPathForVariableWidth() {
+        // Strong pressure variation along a curve → a pen stroke whose width
+        // genuinely varies, so OUTLINE_FILL traces a filled boundary.
+        val src = (0..20).map { i -> i.toFloat() to (4f * sin(i / 4f)) }
+        val pressures = (0..20).map { i -> 0.2f + 0.7f * (sin(i / 3f) * 0.5f + 0.5f) }
+        val item = strokeItem(src, pressures, colorArgb = 0xFF204060.toInt(), baseWidth = 10f)
+        val editable = StrokeVectorizer.toEditablePath(
+            item, widthMode = WidthMode.OUTLINE_FILL, autoShape = false,
+        )!!
+        assertEquals(1, editable.subpaths.size)
+        assertTrue("outline should close", editable.subpaths[0].closed)
+        assertTrue("outline needs ≥3 boundary anchors", editable.subpaths[0].anchors.size >= 3)
+        // Filled, not stroked.
+        assertEquals("#FF204060", editable.style.fillColor)
+        assertEquals(null, editable.style.strokeColor)
+        // Boundary anchors are plain corners (straight segments between samples).
+        editable.subpaths[0].anchors.forEach { assertEquals(AnchorType.CORNER, it.type) }
+    }
+
+    @Test
+    fun outlineFillModeFallsBackToCenterlineForUniformWidth() {
+        // Constant pressure → uniform width → outlining buys nothing, so the
+        // bridge falls back to the stroked centerline path.
+        val src = (0..10).map { i -> i.toFloat() to (3f * sin(i / 3f)) }
+        val item = strokeItem(src, List(src.size) { 1f }, baseWidth = 4f)
+        val editable = StrokeVectorizer.toEditablePath(
+            item, widthMode = WidthMode.OUTLINE_FILL, autoShape = false,
+        )!!
+        assertTrue("centerline stays open", !editable.subpaths[0].closed)
+        assertEquals(null, editable.style.fillColor)
+        assertTrue(editable.style.strokeColor != null)
+    }
+
+    @Test
     fun interiorAnchorsAreSmoothEndpointsCorner() {
         val src = (0..20).map { i -> i.toFloat() to (5f * sin(i / 3f)) }
         val editable = StrokeVectorizer.toEditablePath(strokeItem(src), autoShape = false)!!
