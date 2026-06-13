@@ -25,6 +25,7 @@ import com.aichat.sandbox.data.local.MIGRATION_17_18
 import com.aichat.sandbox.data.local.MIGRATION_18_19
 import com.aichat.sandbox.data.local.MIGRATION_19_20
 import com.aichat.sandbox.data.local.MIGRATION_20_21
+import com.aichat.sandbox.data.local.MIGRATION_21_22
 import com.aichat.sandbox.data.local.createNotesSearchIndex
 import com.aichat.sandbox.data.local.NoteAudioDao
 import com.aichat.sandbox.data.local.NoteDao
@@ -33,6 +34,7 @@ import com.aichat.sandbox.data.local.NoteSearchDao
 import com.aichat.sandbox.data.local.NoteTagDao
 import com.aichat.sandbox.data.local.NotebookDao
 import com.aichat.sandbox.data.local.StampDao
+import com.aichat.sandbox.data.local.StampTagDao
 import com.aichat.sandbox.data.local.UserTemplateDao
 import com.aichat.sandbox.data.local.VectorSymbolDao
 import com.aichat.sandbox.data.local.VectorTuneupDao
@@ -82,6 +84,7 @@ object AppModule {
             MIGRATION_18_19,
             MIGRATION_19_20,
             MIGRATION_20_21,
+            MIGRATION_21_22,
         ).addCallback(object : androidx.room.RoomDatabase.Callback() {
             // `notes_ocr_fts` is not a Room entity, so fresh installs (which
             // skip migrations) must create it here. Upgrades get the same DDL
@@ -120,6 +123,11 @@ object AppModule {
     @Provides
     fun provideStampDao(database: AppDatabase): StampDao {
         return database.stampDao()
+    }
+
+    @Provides
+    fun provideStampTagDao(database: AppDatabase): StampTagDao {
+        return database.stampTagDao()
     }
 
     @Provides

@@ -9,6 +9,7 @@ import com.aichat.sandbox.data.vector.edit.EditAnchor
 import com.aichat.sandbox.data.vector.edit.EditSubpath
 import com.aichat.sandbox.data.vector.edit.EditablePath
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
+import com.aichat.sandbox.ui.components.notes.StrokeOutliner
 import kotlin.math.max
 
 /**
@@ -34,6 +35,9 @@ object StrokeVectorizer {
     /** RDP tolerance (viewport units) applied to the raw centerline before fitting. */
     const val SIMPLIFY_TOLERANCE = 0.75f
 
+    /** RDP tolerance applied to the [WidthMode.OUTLINE_FILL] boundary polygon. */
+    const val OUTLINE_SIMPLIFY_TOLERANCE = 0.4f
+
     fun toEditablePath(
         item: NoteItem,
         widthMode: WidthMode = WidthMode.CENTERLINE_UNIFORM,
@@ -48,6 +52,14 @@ object StrokeVectorizer {
         val stride = StrokeCodec.FLOATS_PER_SAMPLE
         val count = decoded.size / stride
         if (count < 1) return null
+
+        // Phase 17.5 follow-on — OUTLINE_FILL: trace the pressure-modulated
+        // stroke edges into one closed filled path so the width profile
+        // survives export. Only worth it when the width actually varies;
+        // constant-width strokes fall through to the cheaper centerline path.
+        if (widthMode == WidthMode.OUTLINE_FILL) {
+            outlineFillPath(item, decoded)?.let { return it }
+        }
 
         val raw = ArrayList<VectorPoint>(count)
         var sumPressure = 0f
@@ -78,6 +90,49 @@ object StrokeVectorizer {
             name = null,
             subpaths = listOf(subpath),
             style = style,
+        )
+    }
+
+    /**
+     * Phase 17.5 follow-on — build a closed **filled** [EditablePath] from the
+     * stroke's pressure-modulated outline (via [StrokeOutliner]). Returns null
+     * when the width is effectively uniform (outlining would only bloat the
+     * geometry — the caller then exports a plain centerline stroke) or when the
+     * outline degenerates. The polygon is RDP-simplified to corner anchors and
+     * styled as a fill with no stroke, so it round-trips losslessly to SVG/VD.
+     */
+    private fun outlineFillPath(item: NoteItem, samples: FloatArray): EditablePath? {
+        if (!StrokeOutliner.hasVariableWidth(samples, item.tool, item.baseWidthPx)) return null
+        val poly = StrokeOutliner.outline(samples, item.tool, item.baseWidthPx)
+        if (poly.size < 6) return null // need ≥3 boundary points for an area
+        val pts = ArrayList<VectorPoint>(poly.size / 2)
+        var i = 0
+        while (i < poly.size) {
+            pts += VectorPoint(poly[i], poly[i + 1])
+            i += 2
+        }
+        val simplified = PolylineSimplify.simplify(pts, OUTLINE_SIMPLIFY_TOLERANCE)
+        if (simplified.size < 3) return null
+        val pathId = NoteVectorBridge.pathId(item)
+        val anchors = ArrayList<EditAnchor>(simplified.size)
+        for ((k, p) in simplified.withIndex()) {
+            anchors += EditAnchor(
+                id = "$pathId.s0.a$k",
+                x = p.x, y = p.y,
+                inHandle = null, outHandle = null,
+                type = AnchorType.CORNER,
+            )
+        }
+        val subpath = EditSubpath(id = "$pathId.s0", anchors = anchors, closed = true)
+        return EditablePath(
+            pathId = pathId,
+            name = null,
+            subpaths = listOf(subpath),
+            style = VectorStyle(
+                fillColor = ColorHex.argb(item.colorArgb),
+                strokeColor = null,
+                strokeWidth = null,
+            ),
         )
     }
 

@@ -55,10 +55,14 @@ object EditOpToManualEdit {
             // merge_paths (17.5) folds note-canvas path payloads into one
             // multi-subpath item; the vector lane has no equivalent single-op,
             // so it stays on the notes side.
+            // add_path / add_shape (17.5 #1) author new note-canvas geometry;
+            // the vector lane re-vectorizes rather than mirroring authoring ops.
             is EditOp.Transform,
             is EditOp.ReplaceWithShape,
             is EditOp.Smooth,
             is EditOp.MergePaths,
+            is EditOp.AddPath,
+            is EditOp.AddShape,
             is EditOp.SetLayer,
             is EditOp.Group,
             -> null

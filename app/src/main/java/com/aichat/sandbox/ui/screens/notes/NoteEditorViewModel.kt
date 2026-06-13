@@ -33,6 +33,7 @@ import com.aichat.sandbox.data.notes.NoteSvgExporter
 import com.aichat.sandbox.data.notes.PdfLayout
 import com.aichat.sandbox.data.notes.PendingDraftStore
 import com.aichat.sandbox.data.notes.RecentColorsStore
+import com.aichat.sandbox.data.notes.StampSearch
 import com.aichat.sandbox.data.notes.ToolPalettePrefsStore
 import com.aichat.sandbox.data.repository.BrushPresetRepository
 import com.aichat.sandbox.data.repository.ChatRepository
@@ -40,6 +41,7 @@ import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.data.repository.StampRepository
 import com.aichat.sandbox.data.vector.edit.boolean.PathBoolean
 import com.aichat.sandbox.ui.components.notes.AlignmentMath
+import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import com.aichat.sandbox.ui.components.notes.FillStyle
 import com.aichat.sandbox.ui.components.notes.HitTest
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
@@ -919,11 +921,66 @@ class NoteEditorViewModel @Inject constructor(
             initialValue = emptyList(),
         )
 
+    // ── Stamp library tags + search (Phase 17.5 follow-on, mirrors 17.1) ──
+
+    /** `stampId → normalized tags`, derived from the junction table. */
+    val stampTags: StateFlow<Map<String, List<String>>> = stampRepository.observeAllTags()
+        .map { rows -> StampSearch.groupTags(rows.map { it.stampId to it.tag }) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = emptyMap(),
+        )
+
+    /** Distinct stamp tags with counts — the drawer's filter-chip row. */
+    val stampTagCounts: StateFlow<List<com.aichat.sandbox.data.local.TagCount>> =
+        stampRepository.observeTagCounts()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000L),
+                initialValue = emptyList(),
+            )
+
+    private val _stampQuery = MutableStateFlow("")
+    val stampQuery: StateFlow<String> = _stampQuery.asStateFlow()
+
+    private val _stampTagFilter = MutableStateFlow<String?>(null)
+    val stampTagFilter: StateFlow<String?> = _stampTagFilter.asStateFlow()
+
+    /** Stamps after the active search query + tag-chip filter (drawer content). */
+    val filteredStamps: StateFlow<List<Stamp>> = combine(
+        stamps, stampTags, _stampQuery, _stampTagFilter,
+    ) { all, tags, query, tagFilter ->
+        StampSearch.filter(all, tags, query, tagFilter)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000L),
+        initialValue = emptyList(),
+    )
+
+    fun setStampQuery(query: String) { _stampQuery.value = query }
+
+    /** Toggle a tag chip: tapping the active one clears the filter. */
+    fun setStampTagFilter(tag: String?) {
+        _stampTagFilter.value = if (tag != null && tag == _stampTagFilter.value) null else tag
+    }
+
+    /** Replace a stamp's tag set (free-form input parsed via [com.aichat.sandbox.data.notes.IconTags]). */
+    fun setStampTags(stampId: String, rawInput: String) {
+        viewModelScope.launch {
+            stampRepository.setTags(stampId, com.aichat.sandbox.data.notes.IconTags.parse(rawInput))
+        }
+    }
+
     private val _stampDrawerOpen = MutableStateFlow(false)
     val stampDrawerOpen: StateFlow<Boolean> = _stampDrawerOpen.asStateFlow()
 
     fun openStampDrawer() { _stampDrawerOpen.value = true }
-    fun closeStampDrawer() { _stampDrawerOpen.value = false }
+    fun closeStampDrawer() {
+        _stampDrawerOpen.value = false
+        _stampQuery.value = ""
+        _stampTagFilter.value = null
+    }
 
     /**
      * Sub-phase 8.3 — save the current selection as a reusable stamp.
@@ -2294,6 +2351,17 @@ class NoteEditorViewModel @Inject constructor(
         return false
     }
 
+    /**
+     * Phase 17.5 follow-on — gate for the selection "Tidy" action: there's
+     * something simplify / snap / merge could act on (a path or a stroke).
+     * Tidy itself no-ops gracefully when nothing actually changes.
+     */
+    fun selectionCanTidy(): Boolean {
+        val ids = _selection.value
+        if (ids.isEmpty()) return false
+        return items.any { it.id in ids && (it.kind == PathCodec.KIND || it.kind == STROKE_KIND) }
+    }
+
     private fun pathsMergeable(a: NoteItem, b: NoteItem): Boolean =
         a.colorArgb == b.colorArgb && a.baseWidthPx == b.baseWidthPx &&
             PathMerge.compatible(PathCodec.decode(a.payload), PathCodec.decode(b.payload))
@@ -2352,8 +2420,40 @@ class NoteEditorViewModel @Inject constructor(
         _selectionMatrix.value = StrokeTransform.IDENTITY
     }
 
-    // ── Phase 13.3 — eyedropper + style copy/paste ───────────────────────
+    /**
+     * Phase 17.5 follow-on — one-tap **tidy** over the selection: simplify
+     * strokes, snap path anchors to the icon grid, and fold style-compatible
+     * paths together ([NoteTidy]). Lands as a single `CompositeEdit("Tidy")`.
+     * Grid snapping only applies to icons (the artboard grid); plain notes get
+     * simplify + merge. No-ops when nothing changes.
+     */
+    fun tidySelection(selection: List<NoteItem>? = null) {
+        val target = selection ?: items.filter { it.id in _selection.value }
+        if (target.isEmpty()) return
+        val step = if (_note.value.isIcon) BackgroundLayer.SPACING_WORLD else 0f
+        val result = com.aichat.sandbox.data.notes.NoteTidy.tidy(
+            items = target,
+            gridStep = step,
+            bounds = currentFrameBounds(),
+            newItemNoteId = resolvedNoteId,
+        )
+        if (result.isEmpty) return
+        apply(EditorAction.CompositeEdit(
+            description = "Tidy",
+            added = result.added,
+            removed = result.removed,
+            modified = result.modified,
+        ))
+        val removedIds = result.removed.mapTo(HashSet(result.removed.size)) { it.id }
+        val newSelection = target.mapNotNull { it.id.takeUnless { id -> id in removedIds } }
+            .toMutableSet()
+        newSelection += result.added.map { it.id }
+        _selection.value = newSelection
+        _selectionWorldBounds.value = recomputeSelectionBounds()
+        _selectionMatrix.value = StrokeTransform.IDENTITY
+    }
 
+    // ── Phase 13.3 — eyedropper + style copy/paste ───────────────────────
     /** True when exactly one styleable item is selected (gates "Copy style"). */
     fun selectionIsSingleStyleSource(): Boolean {
         val ids = _selection.value
@@ -2711,11 +2811,20 @@ class NoteEditorViewModel @Inject constructor(
         if (snapshot.inputText.isBlank() || snapshot.isStreaming) return
         when (snapshot.footerMode) {
             AiFooterMode.ASK -> submitAiPrompt()
-            AiFooterMode.EDIT -> submitAiEdit(
-                description = "AI edit",
-                userPrompt = snapshot.inputText.trim(),
-                selection = snapshot.pendingSelection,
-            )
+            AiFooterMode.EDIT -> {
+                // 17.5 #1 — an empty icon artboard + an EDIT instruction means
+                // "generate a new icon" (there's nothing to edit yet); a
+                // populated canvas edits the existing geometry as before.
+                val generate = snapshot.isIcon &&
+                    snapshot.pendingSelection.isNullOrEmpty() &&
+                    items.isEmpty()
+                submitAiEdit(
+                    description = if (generate) "AI Generate icon" else "AI edit",
+                    userPrompt = snapshot.inputText.trim(),
+                    selection = snapshot.pendingSelection,
+                    generate = generate,
+                )
+            }
         }
     }
 
@@ -2730,6 +2839,10 @@ class NoteEditorViewModel @Inject constructor(
         if (_aiSheetState.value.isStreaming) return
         val scope = _aiSheetState.value.pendingSelection
         when (action) {
+            // 17.5 #2 — refine the selected sketch (or the whole icon) into a
+            // clean vector placed beside it; the footer text, if any, steers
+            // the redraw and enables the annotate-and-iterate loop.
+            IconQuickAction.MAKE_REAL -> refineSketch(_aiSheetState.value.inputText)
             IconQuickAction.SIMPLIFY -> submitAiEdit(
                 CannedEditAction.SIMPLIFY.undoDescription, CannedEditAction.SIMPLIFY.prompt, scope,
             )
@@ -3149,10 +3262,19 @@ class NoteEditorViewModel @Inject constructor(
      * reply isn't shown as prose; the user sees a preview overlay and an
      * Accept / Reject affordance from [pendingEdit].
      */
-    fun submitAiEdit(description: String, userPrompt: String, selection: List<NoteItem>? = null) {
+    fun submitAiEdit(
+        description: String,
+        userPrompt: String,
+        selection: List<NoteItem>? = null,
+        generate: Boolean = false,
+        refine: Boolean = false,
+    ) {
         val snapshot = _aiSheetState.value
         if (snapshot.isStreaming) return
-        val resolvedSelection = selection
+        // From-scratch generation deliberately ignores any frozen selection so
+        // the model isn't asked to "edit" nothing. A refine (17.5 #2) keeps the
+        // selection: it's the sketch the model rasterizes and redraws beside.
+        val resolvedSelection = if (generate && !refine) null else selection
             ?: snapshot.pendingSelection
             ?: items.filter { it.id in _selection.value }.takeIf { it.isNotEmpty() }
         val turnId = UUID.randomUUID().toString()
@@ -3177,8 +3299,48 @@ class NoteEditorViewModel @Inject constructor(
                 selection = resolvedSelection,
                 mode = AskMode.EDIT,
                 editDescription = description,
+                generate = generate,
+                refine = refine,
             )
         }
+    }
+
+    /**
+     * Phase 17.5 #1 — generate a new icon on the current artboard in the style
+     * of a few existing gallery icons. Lands as a staged preview (add_path /
+     * add_shape ops) the user accepts or rejects, exactly like an AI edit.
+     */
+    fun generateIcon(prompt: String) {
+        if (prompt.isBlank()) return
+        submitAiEdit(
+            description = "AI Generate icon",
+            userPrompt = prompt,
+            selection = null,
+            generate = true,
+        )
+    }
+
+    /**
+     * Phase 17.5 #2 — "Make real" / annotate-and-iterate refine. Rasterizes
+     * the selected sketch, asks the model to redraw it as a clean vector, and
+     * stages the result *beside* the original (a placement offset) so the user
+     * can compare, mark up, and refine again. [extraInstruction] (the footer
+     * text, if any) lets the user steer or re-prompt the redraw. Falls back to
+     * the whole-icon scope when nothing is selected.
+     */
+    fun refineSketch(extraInstruction: String = "") {
+        if (_aiSheetState.value.isStreaming) return
+        val scope = _aiSheetState.value.pendingSelection
+            ?: items.filter { it.id in _selection.value }.takeIf { it.isNotEmpty() }
+            ?: items.toList()
+        if (scope.isEmpty()) return
+        submitAiEdit(
+            description = "AI Make real",
+            userPrompt = extraInstruction.trim(),
+            selection = scope,
+            generate = true,
+            refine = true,
+        )
     }
 
     /**
@@ -3318,16 +3480,36 @@ class NoteEditorViewModel @Inject constructor(
         return kotlin.math.atan2(sumSin, sumCos).toFloat()
     }
 
+    /**
+     * Phase 17.5 #2 — placement offset for a refine result: one sketch-width
+     * (plus a small gap) to the right of the original, so the cleaned vector
+     * sits beside the source for side-by-side comparison. Null when the
+     * selection has no measurable bounds (the result then lands in-place).
+     */
+    private fun refinePlacementOffset(selection: List<NoteItem>?): FloatArray? {
+        val bounds = NoteRasterizer.computeBounds(selection ?: return null) ?: return null
+        val width = bounds[2] - bounds[0]
+        if (width <= 0f) return null
+        return floatArrayOf(width + width * REFINE_GAP_FRACTION, 0f)
+    }
+
     private suspend fun runStream(
         turnId: String,
         prompt: String,
         selection: List<NoteItem>?,
         mode: AskMode = AskMode.ASK,
         editDescription: String = "AI edit",
+        generate: Boolean = false,
+        refine: Boolean = false,
     ) {
         val modelId = _aiSheetState.value.activeModelId
             .ifEmpty { preferencesManager.defaultModel.first() }
         val creds = preferencesManager.credentialsFor(modelId)
+        // 17.5 #1: from-scratch generation pulls gallery style references.
+        // 17.5 #2: a refine places the cleaned result one sketch-width to the
+        // right of the original so the two sit side by side.
+        val styleReferences = if (generate && !refine) loadStyleReferenceIcons() else emptyList()
+        val authoredOffset = if (refine) refinePlacementOffset(selection) else null
         val request = AskRequest(
             note = _note.value,
             allItems = items.toList(),
@@ -3339,6 +3521,9 @@ class NoteEditorViewModel @Inject constructor(
             mode = mode,
             layers = _layers.value,
             isIcon = _note.value.isIcon,
+            generate = generate,
+            styleReferences = styleReferences,
+            refine = refine,
         )
         try {
             aiService.ask(request).collect { chunk ->
@@ -3348,7 +3533,7 @@ class NoteEditorViewModel @Inject constructor(
                         is AiChunk.Complete -> turn.copy(state = TurnState.Done)
                         is AiChunk.Error -> turn.copy(state = TurnState.Error(chunk.message))
                         is AiChunk.EditPreview -> {
-                            stagePendingEdit(chunk, editDescription)
+                            stagePendingEdit(chunk, editDescription, authoredOffset)
                             val message = chunk.doc.summary.ifBlank {
                                 if (chunk.doc.ops.isEmpty()) "No changes proposed."
                                 else "Preview ready (${chunk.doc.ops.size} ops)."
@@ -3379,19 +3564,53 @@ class NoteEditorViewModel @Inject constructor(
     }
 
     /**
+     * Phase 17.5 #1 — load up to three other gallery icons, serialized as
+     * [com.aichat.sandbox.data.notes.VectorCanvasJson], to seed the generation
+     * system prompt with a concrete style reference. Skips the current note and
+     * any empty icons. Best-effort: returns empty on any failure so generation
+     * still proceeds (just without a style anchor).
+     */
+    private suspend fun loadStyleReferenceIcons(): List<String> = try {
+        val icons = repository.observeIcons().first()
+            .filter { it.id != resolvedNoteId }
+        val refs = ArrayList<String>(3)
+        for (icon in icons) {
+            if (refs.size >= 3) break
+            val iconItems = repository.getItems(icon.id)
+            if (iconItems.isEmpty()) continue
+            val serialized = com.aichat.sandbox.data.notes.VectorCanvasJson.serialize(
+                items = iconItems,
+                bounds = null,
+                layers = repository.getLayers(icon.id),
+            )
+            refs += serialized.json
+        }
+        refs
+    } catch (t: Throwable) {
+        Log.w("NoteEditorViewModel", "style reference load failed", t)
+        emptyList()
+    }
+
+    /**
      * Sub-phase 7.4 — convert an EDIT-mode terminal chunk into a staged
      * [PendingEdit] the UI can render as a translucent preview overlay.
      * Re-simulates the ops against the live item list (defense in depth —
      * the parser already validated, but items could have changed since the
      * request was made).
      */
-    private fun stagePendingEdit(chunk: AiChunk.EditPreview, description: String) {
+    private fun stagePendingEdit(
+        chunk: AiChunk.EditPreview,
+        description: String,
+        authoredOffset: FloatArray? = null,
+    ) {
         val simulation = EditPreviewController.simulate(
             currentItems = items.toList(),
             doc = chunk.doc,
             idMap = chunk.idMap,
             layerMap = chunk.layerMap,
             layers = _layers.value,
+            newItemNoteId = _note.value.id,
+            authoredOffset = authoredOffset,
         )
         _pendingEdit.value = PendingEdit(
             description = description,
@@ -3915,6 +4134,10 @@ class NoteEditorViewModel @Inject constructor(
         const val HIGHLIGHTER_Z_BASE = -1_000_000
 
         private const val STROKE_KIND = "stroke"
+
+        /** 17.5 #2 — gap (as a fraction of sketch width) between a refine's
+         *  source sketch and the cleaned result placed beside it. */
+        private const val REFINE_GAP_FRACTION = 0.2f
 
         /** Offset applied when duplicating a selection in-place. */
         private const val DUPLICATE_OFFSET_WORLD = 24f

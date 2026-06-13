@@ -48,7 +48,11 @@ class NoteAiService @Inject constructor(
     fun ask(request: AskRequest): Flow<AiChunk> = flow {
         val caps = ModelCapabilities.of(request.modelId)
         if (request.mode == AskMode.EDIT) {
-            collectEdit(request, caps.supportsVision)
+            if (request.generate) {
+                collectGenerate(request, caps.supportsVision)
+            } else {
+                collectEdit(request, caps.supportsVision)
+            }
             return@flow
         }
         val upstream = if (caps.supportsVision) {
@@ -119,6 +123,139 @@ class NoteAiService @Inject constructor(
                 emit(AiChunk.Error(PARSE_FAILED_MESSAGE))
             },
         )
+    }
+
+    /**
+     * Phase 17.5 #1 — generation dispatcher. The model authors a brand-new
+     * icon from scratch (no raster, no existing-item id space) in the style of
+     * [AskRequest.styleReferences], which ride in the system message. The reply
+     * is parsed with an empty `knownIds` set so any stray modify op (which
+     * would reference a non-existent id) is dropped — only `add_*` ops survive.
+     * Emits a single [AiChunk.EditPreview] with empty id / layer maps.
+     */
+    private suspend fun FlowCollector<AiChunk>.collectGenerate(
+        request: AskRequest,
+        supportsVision: Boolean,
+    ) {
+        // 17.5 #2 — "Make real" refines a selected sketch: show the model the
+        // rasterized sketch (vision) and ask it to redraw it cleanly. Falls
+        // back to text-only authoring when the model can't see images.
+        val refineItems = request.selection?.takeIf { request.refine && it.isNotEmpty() }
+        val refining = refineItems != null
+        val systemMessage = if (refining) EditOpsParser.ICON_REFINE_SYSTEM_MESSAGE
+            else EditOpsParser.buildIconGenerateSystemMessage(request.styleReferences)
+        val userMessage = if (refining && supportsVision) {
+            buildRefineVisionMessage(request, refineItems!!) ?: return emit(AiChunk.Error(RENDER_FAILED_MESSAGE))
+        } else {
+            Message(
+                chatId = SYNTHETIC_CHAT_ID,
+                role = MessageRole.USER.value,
+                content = if (refining) buildRefinePromptBody(request.userPrompt)
+                    else buildGeneratePromptBody(request.userPrompt),
+                contentType = "text",
+                metadata = null,
+            )
+        }
+        val chat = Chat(
+            id = SYNTHETIC_CHAT_ID,
+            title = if (refining) "Icon Refine" else "Icon Generate",
+            model = request.modelId,
+            systemMessage = systemMessage,
+        )
+        val upstream = chatStreamer.sendMessageStream(
+            baseUrl = request.baseUrl,
+            apiKey = request.apiKey,
+            chat = chat,
+            messages = listOf(userMessage),
+        )
+        val buffer = StringBuilder()
+        var lastUsage: com.aichat.sandbox.data.model.Usage? = null
+        var errored = false
+        upstream.collect { event ->
+            when (event) {
+                is StreamEvent.Delta -> buffer.append(event.content)
+                is StreamEvent.Complete -> { lastUsage = event.usage }
+                is StreamEvent.Error -> {
+                    errored = true
+                    emit(AiChunk.Error(event.message))
+                }
+                is StreamEvent.ToolCallDelta -> { /* impossible in this flow */ }
+            }
+        }
+        if (errored) return
+        EditOpsParser.parse(raw = buffer.toString(), knownIds = emptySet(), knownLayers = emptySet())
+            .fold(
+                onSuccess = { doc ->
+                    emit(AiChunk.EditPreview(
+                        doc = doc,
+                        idMap = emptyMap(),
+                        layerMap = emptyMap(),
+                        usage = lastUsage,
+                    ))
+                },
+                onFailure = { t ->
+                    Log.w(TAG, "icon-generate parse failed: ${t.message}")
+                    emit(AiChunk.Error(PARSE_FAILED_MESSAGE))
+                },
+            )
+    }
+
+    /**
+     * Build the generation prompt body. Exposed `internal` so the Phase 17.5
+     * test can pin the wire format. Includes the artboard edge so the model's
+     * coordinates land inside the icon canvas.
+     */
+    internal fun buildGeneratePromptBody(userPrompt: String): String = buildString {
+        append(userPrompt)
+        append("\n\n")
+        append("Design this as a new icon on a square artboard, ")
+        append(ICON_ARTBOARD_WORLD.toInt())
+        append("×")
+        append(ICON_ARTBOARD_WORLD.toInt())
+        append(" units, top-left at (0,0). Author the geometry with add_path / add_shape ops.")
+    }
+
+    /**
+     * 17.5 #2 — build the multimodal refine message: the rasterized sketch as
+     * an image plus the refine instruction. Returns null when rasterization
+     * fails so the caller can surface [RENDER_FAILED_MESSAGE].
+     */
+    private suspend fun buildRefineVisionMessage(
+        request: AskRequest,
+        items: List<NoteItem>,
+    ): Message? = withContext(Dispatchers.Default) {
+        val pngBytes = try {
+            imageRenderer.renderToPng(
+                items = items,
+                backgroundStyle = request.note.backgroundStyle,
+                maxEdgePx = MAX_EDGE_PX,
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to rasterize sketch for refine", t)
+            null
+        } ?: return@withContext null
+        val dataUri = "data:image/png;base64,${Base64.getEncoder().encodeToString(pngBytes)}"
+        val metadata = gson.toJson(
+            ImageMetadata(images = listOf(ImageAttachment(dataUri = dataUri)))
+        )
+        Message(
+            chatId = SYNTHETIC_CHAT_ID,
+            role = MessageRole.USER.value,
+            content = buildRefinePromptBody(request.userPrompt),
+            contentType = "multimodal",
+            metadata = metadata,
+        )
+    }
+
+    /** 17.5 #2 — refine instruction body (shared by the vision + text paths). */
+    internal fun buildRefinePromptBody(userPrompt: String): String = buildString {
+        append("Redraw the sketch in the image as a clean vector, authoring the ")
+        append("geometry with add_path / add_shape ops at roughly the sketch's ")
+        append("own coordinates.")
+        if (userPrompt.isNotBlank()) {
+            append("\n\n")
+            append(userPrompt)
+        }
     }
 
     private suspend fun buildVisionStream(request: AskRequest): Flow<StreamEvent> {
@@ -343,6 +480,13 @@ class NoteAiService @Inject constructor(
          * rejecting requests; see Phase 2.5 risks.
          */
         const val MAX_EDGE_PX: Int = 1536
+
+        /**
+         * Icon artboard edge in world units, mirroring the editor's
+         * `ICON_ARTBOARD_WORLD` (768 = 24 × the 32-unit grid). Used only to
+         * tell the model where to lay generated geometry (17.5 #1).
+         */
+        const val ICON_ARTBOARD_WORLD: Float = 768f
 
         internal const val SYSTEM_INSTRUCTION: String =
             "You are helping the user with a handwritten note. Be concise. " +

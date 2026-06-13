@@ -3,7 +3,11 @@ package com.aichat.sandbox.data.repository
 import android.content.Context
 import android.graphics.Bitmap
 import com.aichat.sandbox.data.local.StampDao
+import com.aichat.sandbox.data.local.StampTagDao
+import com.aichat.sandbox.data.local.TagCount
 import com.aichat.sandbox.data.model.Stamp
+import com.aichat.sandbox.data.model.StampTag
+import com.aichat.sandbox.data.notes.IconTags
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -26,9 +30,31 @@ import javax.inject.Singleton
 class StampRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val dao: StampDao,
+    private val tagDao: StampTagDao,
 ) {
 
     fun observeAll(): Flow<List<Stamp>> = dao.observeAll()
+
+    // ── Phase 17.5 follow-on — stamp tags (mirrors the 17.1 icon tag model) ──
+
+    /** Every (stamp, tag) row, for the drawer's `stampId → tags` lookup. */
+    fun observeAllTags(): Flow<List<StampTag>> = tagDao.observeAll()
+
+    /** Distinct tags with counts — the drawer's filter-chip row. */
+    fun observeTagCounts(): Flow<List<TagCount>> = tagDao.observeTagCounts()
+
+    suspend fun getTagsFor(stampId: String): List<String> = withContext(Dispatchers.IO) {
+        tagDao.getTagsFor(stampId)
+    }
+
+    /** Replace a stamp's tag set atomically; input is normalized via [IconTags]. */
+    suspend fun setTags(stampId: String, rawTags: List<String>) = withContext(Dispatchers.IO) {
+        val normalized = rawTags.map { IconTags.normalize(it) }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .take(IconTags.MAX_TAGS_PER_NOTE)
+        tagDao.setTags(stampId, normalized)
+    }
 
     suspend fun getStamp(stampId: String): Stamp? = withContext(Dispatchers.IO) {
         dao.getStamp(stampId)

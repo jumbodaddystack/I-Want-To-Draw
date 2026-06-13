@@ -125,6 +125,11 @@ fun NoteEditorScreen(
     val presentationIndex by viewModel.presentationIndex.collectAsState()
     val presenting = presentationIndex != null
     val stamps by viewModel.stamps.collectAsState()
+    val filteredStamps by viewModel.filteredStamps.collectAsState()
+    val stampTags by viewModel.stampTags.collectAsState()
+    val stampTagCounts by viewModel.stampTagCounts.collectAsState()
+    val stampQuery by viewModel.stampQuery.collectAsState()
+    val stampTagFilter by viewModel.stampTagFilter.collectAsState()
     val stampDrawerOpen by viewModel.stampDrawerOpen.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
     val notebook by viewModel.notebook.collectAsState()
@@ -726,6 +731,8 @@ fun NoteEditorScreen(
                     canCombine = viewModel.selectionCanCombine(),
                     onCombine = viewModel::combineSelection,
                     canMergePaths = viewModel.selectionCanMergePaths(),
+                    canTidy = viewModel.selectionCanTidy(),
+                    onTidy = { viewModel.tidySelection() },
                     onMergePaths = viewModel::mergeSelectionPaths,
                     onSetGradient = viewModel::setSelectionGradient,
                     canCopyStyle = viewModel.selectionIsSingleStyleSource(),
@@ -1112,7 +1119,17 @@ fun NoteEditorScreen(
                 contentAlignment = Alignment.BottomCenter,
             ) {
                 StampDrawer(
-                    stamps = stamps,
+                    stamps = filteredStamps,
+                    totalStampCount = stamps.size,
+                    query = stampQuery,
+                    onQueryChange = viewModel::setStampQuery,
+                    tagCounts = stampTagCounts.map {
+                        com.aichat.sandbox.ui.components.notes.StampTagChip(it.tag, it.count)
+                    },
+                    activeTag = stampTagFilter,
+                    onTagClick = { viewModel.setStampTagFilter(it) },
+                    tagsByStamp = stampTags,
+                    onSetTags = viewModel::setStampTags,
                     onInsert = { stampId ->
                         val vp = viewportController
                         val cx: Float

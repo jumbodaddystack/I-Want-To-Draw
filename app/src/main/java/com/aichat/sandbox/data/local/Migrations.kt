@@ -705,3 +705,26 @@ val MIGRATION_20_21 = object : Migration(20, 21) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_tags_tag` ON `note_tags` (`tag`)")
     }
 }
+
+/**
+ * Migration from version 21 to 22:
+ * Phase 17.5 follow-on — stamp tags. Adds the `stamp_tags` junction table (one
+ * row per stamp/tag pair, cascade-deleted with the stamp) and an index on
+ * `tag` for the drawer's search / chip-filter and per-tag count queries.
+ * Mirrors `note_tags` (MIGRATION_20_21). Purely additive.
+ */
+val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `stamp_tags` (
+                `stampId` TEXT NOT NULL,
+                `tag` TEXT NOT NULL,
+                PRIMARY KEY(`stampId`, `tag`),
+                FOREIGN KEY(`stampId`) REFERENCES `stamps`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_stamp_tags_tag` ON `stamp_tags` (`tag`)")
+    }
+}

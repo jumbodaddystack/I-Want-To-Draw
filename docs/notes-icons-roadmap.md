@@ -20,6 +20,8 @@ Read `CLAUDE.md` first for build/SDK setup and the known test baseline.
 | 17.2 | Multi-subpath node editing: lifted the 16.1 single-subpath gate. `PathNodeMath` ops take a trailing `subpath` index (default 0 → existing call sites/tests byte-identical) and rebuild one subpath via `PathPayload.withSubpath`; `nearestOnPath` scans every contour; `deleteAnchor` drops a sub-2-anchor contour and returns null only when the last empties. `PathNodeEditor` renders all subpaths, `(subpath, anchor)` selection, deletes the item when the final anchors go. | `ui/components/notes/PathNodeMath.kt`, `PathCodec.PathPayload.withSubpath`, `ui/screens/notes/PathNodeEditor.kt`, `NoteEditorViewModel.{selectionIsSinglePath,enterNodeEdit,deleteNodeEditItem}` |
 | 17.3 | Structure-preserving export: optional `layers` list on `renderSvg` / VD `render`. SVG emits one `<g id="layer-N">` per layer (ordinal order, `opacity` baked, name as comment, hidden dropped, null-layer items in a `layer-default` group); VD emits `<group android:name>` baking layer opacity into path alpha (VD groups have no opacity). Empty list = byte-identical flat output. | `data/notes/NoteSvgExporter.kt`, `NoteVectorDrawableExporter.kt`, `NoteEditorViewModel` export calls |
 | 17.5#3 | Local `merge_paths`: fold style-compatible paths into one multi-subpath payload (no clipping; holes kept). `PathMerge` (pure), `EditOp.MergePaths` + parser + `EditPreviewController` applier, `NoteEditorViewModel.mergeSelectionPaths` + selection-overlay "Merge" action. | `ui/components/notes/PathMerge.kt`, `EditProtocol.kt`, `EditOpsParser.kt`, `EditPreviewController.kt`, `SelectionOverlay.kt` |
+| 17.5#1 | Style-matched icon generation: authoring edit-ops `add_path` / `add_shape` (the model creates new geometry, mirroring `VectorCanvasJson`'s anchor format) land via the existing edit-ops → `EditPreviewController` (`newItemNoteId`) → `CompositeEdit` plumbing. `NoteAiService` gains a generation branch (no raster, empty id space) whose system prompt embeds 2–3 gallery icons as style reference (`EditOpsParser.buildIconGenerateSystemMessage`); `NoteEditorViewModel.generateIcon` loads the references and an EDIT instruction on an empty icon artboard routes to generation. | `EditProtocol.kt`, `EditOpsParser.kt`, `EditPreviewController.kt`, `data/vector/notesbridge/EditOpToManualEdit.kt`, `AskRequest.kt`, `NoteAiService.kt`, `NoteEditorViewModel.kt` |
+| 17.5#2 | Annotate-and-iterate "Make real" refine loop: select a sketch → vision raster + `ICON_REFINE_SYSTEM_MESSAGE` ask the model to redraw it as clean vector (`add_*` ops) → `EditPreviewController.simulate(authoredOffset=…)` places the result one sketch-width beside the original → user marks it up / re-prompts (footer text) and refines again. `IconQuickAction.MAKE_REAL` + `NoteEditorViewModel.refineSketch`; falls back to text-only authoring on non-vision models. | `EditOpsParser.kt`, `NoteAiService.kt`, `EditPreviewController.kt`, `AskRequest.kt`, `NoteEditorViewModel.kt`, `AiSideSheetState.kt` |
 
 Pre-existing hold-to-snap shape recognition (sub-phase 11.3) and the stamp
 library (10.x) already cover two items from the original brainstorm — do not
@@ -43,10 +45,10 @@ rebuild them.
 
 ## Remaining work, in recommended order
 
-**Status (updated):** 17.1, 17.2, 17.3 and 17.5 #3 have shipped (see the table
-above). Still open: **17.4** (androidx.ink — *deferred*, see note below),
-**17.5 #1 and #2**, and the smaller follow-ons. The detailed plans below are
-kept for the shipped items as a record; the open items are 17.4 onward.
+**Status (updated):** 17.1, 17.2, 17.3 and all of 17.5 (#1, #2, #3) have shipped
+(see the table above). Still open: **17.4** (androidx.ink — *deferred*, see note
+below) and the smaller follow-ons. The detailed plans below are kept for the
+shipped items as a record.
 
 > **17.4 deferral note:** the androidx.ink experiment's only meaningful
 > verification is stroke *feel* + screenshot diffs on a real device/emulator,
@@ -155,30 +157,40 @@ Phase A. Verification is feel + screenshot tests, not JVM.
 Foundations are in place (icons are editable paths; `VectorCanvasJson`
 serializes subpaths; `EditOpsParser` is lenient).
 
-1. **Style-matched icon generation** (Recraft pattern): extend
-   `data/vector/VectorRedrawAiService` / `NoteAiService` EDIT — include 2–3
-   gallery icons (their `VectorCanvasJson` or SVG) as style reference in the
-   system prompt ("generate a `settings` icon matching these"), land the
-   reply as items on a new icon artboard via the existing edit-ops →
-   `CompositeEdit` plumbing.
-2. **Annotate-and-iterate refine loop** (tldraw "Make Real" pattern): select
-   sketch → AI returns a cleaned vector placed *next to* the original →
-   user marks it up / re-prompts → regenerate. Mostly UX orchestration in
-   `AiSideSheet` + a placement offset; reuse ASK (vision raster) + EDIT.
+1. ✅ **shipped** — Style-matched icon generation (Recraft pattern): see the
+   17.5#1 row above. Authoring ops `add_path` / `add_shape` let the model
+   create geometry from scratch; the generation system prompt embeds 2–3
+   gallery icons as style reference, and the reply lands as items via the
+   existing edit-ops → `CompositeEdit` plumbing.
+2. ✅ **shipped** — Annotate-and-iterate "Make real" refine loop (tldraw
+   pattern): see the 17.5#2 row above. Vision raster of the selected sketch +
+   `add_*` authoring + a placement offset (`authoredOffset`) drop the cleaned
+   vector beside the original; the footer text re-prompts for the iterate step.
 3. ✅ **shipped** — Local `merge_paths` edit-op (see 17.5#3 row above). The
    broader "tidy" pass (one-tap simplify + snap-to-grid bundled with merge)
    is still open; `simplify` already exists as an op, so a tidy action would
    just compose simplify + `mergeSelectionPaths` + grid-snap over a selection.
 
-#3's merge primitive is done. Next: #1 (style-matched generation), then #2.
-Effort: ~1 session each.
+All three 17.5 items are done. Remaining 17.5 follow-on: the bundled "tidy"
+pass (#3 note above). Otherwise see 17.4 (deferred) and the smaller
+follow-ons.
 
 ### Smaller follow-ons
 
-- **Wire `WidthMode.OUTLINE_FILL`** in
-  `data/vector/notesbridge/NoteVectorBridge.kt` (documented deferral; the
-  geometry — `StrokeOutliner` / `VariableWidthOutliner` — already exists).
+- ✅ **shipped** — **Wire `WidthMode.OUTLINE_FILL`**: `StrokeVectorizer` now
+  traces a stroke's pressure-modulated edges (`StrokeOutliner`) into a closed,
+  RDP-simplified filled `EditablePath` when `OUTLINE_FILL` is requested;
+  uniform-width strokes fall back to the stroked centerline. JVM-tested.
+- ✅ **shipped** — **Bundled "tidy" pass**: `NoteTidy` (pure) composes
+  simplify + snap-to-grid + `merge_paths` over a selection into one
+  `CompositeEdit`; `NoteEditorViewModel.tidySelection` + a SelectionOverlay
+  "Tidy" action. JVM-tested.
+- ✅ **shipped** — **Stamp library tagging/search**: mirrors 17.1's tag model
+  — `stamp_tags` junction table (DB v21→22, cascade, indexed), `StampTagDao`,
+  `StampRepository.setTags`/`observeAllTags`/`observeTagCounts` (reusing
+  `IconTags` normalization), pure `StampSearch` filter (name + tag, ANDed with
+  a tag chip), and a search field + chip row + tag editing in `StampDrawer`.
+  JVM-tested (`StampSearchTest`).
 - **Nested groups** (Phase 10.4 limitation: flat groups only).
 - **Import clip-path support** (parser warns today; either rasterize-clip or
   boolean-intersect the clip path against children using `PathBoolean`).
-- **Stamp library tagging/search** (stamps exist; mirror 17.1's tag model).

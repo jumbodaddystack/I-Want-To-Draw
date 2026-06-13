@@ -3,6 +3,7 @@ package com.aichat.sandbox.data.notes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
@@ -57,6 +58,82 @@ class EditOpsParserTest {
         val doc = EditOpsParser.parse(raw).getOrThrow()
         assertEquals(0, doc.ops.size)
         assertFalse(doc.rejected.isEmpty())
+    }
+
+    @Test
+    fun parsesAddPathWithSubpathsAndStyle() {
+        val raw = """{ "summary": "gear", "ops": [
+            { "op": "add_path",
+              "subpaths": [
+                { "closed": true, "anchors": [ [10,10,0,0,2,0], [20,10], [20,20] ] },
+                { "closed": false, "anchors": [ [5,5], [6,6] ] }
+              ],
+              "color": "#112233", "fill": "#445566", "width": 3, "fillRule": "evenodd" }
+        ]}"""
+        val doc = EditOpsParser.parse(raw).getOrThrow()
+        val op = doc.ops.single() as EditOp.AddPath
+        assertEquals(2, op.subpaths.size)
+        assertEquals(3, op.subpaths[0].anchors.size)
+        assertTrue(op.subpaths[0].closed)
+        // Relative handles survive on the first anchor.
+        assertEquals(2f, op.subpaths[0].anchors[0].outDx, 0f)
+        assertEquals(0xFF112233.toInt(), op.colorArgb)
+        assertEquals(0xFF445566.toInt(), op.fillArgb)
+        assertEquals(3f, op.width!!, 0f)
+        assertTrue(op.evenOdd)
+        // Authoring ops carry no target ids.
+        assertTrue(op.ids.isEmpty())
+    }
+
+    @Test
+    fun parsesAddPathSingleSubpathShorthand() {
+        // Mirrors VectorCanvasJson's single-subpath output: closed + anchors
+        // at the op's top level rather than wrapped in a subpaths array.
+        val raw = """{ "summary": "", "ops": [
+            { "op": "add_path", "closed": true, "anchors": [ [0,0], [10,0], [10,10] ] }
+        ]}"""
+        val op = EditOpsParser.parse(raw).getOrThrow().ops.single() as EditOp.AddPath
+        assertEquals(1, op.subpaths.size)
+        assertEquals(3, op.subpaths[0].anchors.size)
+        assertNull(op.colorArgb)
+        assertNull(op.fillArgb)
+    }
+
+    @Test
+    fun addPathWithNoAnchorsIsRejected() {
+        val raw = """{ "summary": "", "ops": [
+            { "op": "add_path", "subpaths": [ { "closed": true, "anchors": [] } ] }
+        ]}"""
+        val doc = EditOpsParser.parse(raw).getOrThrow()
+        assertTrue(doc.ops.isEmpty())
+        assertFalse(doc.rejected.isEmpty())
+    }
+
+    @Test
+    fun parsesAddShape() {
+        val raw = """{ "summary": "", "ops": [
+            { "op": "add_shape",
+              "shape": { "type": "ellipse", "cx": 10, "cy": 10, "rx": 5, "ry": 5 },
+              "color": "#000000", "fill": "#FF0000" }
+        ]}"""
+        val op = EditOpsParser.parse(raw).getOrThrow().ops.single() as EditOp.AddShape
+        assertTrue(op.shape is EditOp.ShapeSpec.Ellipse)
+        assertEquals(0xFFFF0000.toInt(), op.fillArgb)
+    }
+
+    @Test
+    fun generateSystemMessageEmbedsStyleReferences() {
+        val base = EditOpsParser.buildIconGenerateSystemMessage(emptyList())
+        assertEquals(EditOpsParser.ICON_GENERATE_SYSTEM_MESSAGE, base)
+
+        val withRefs = EditOpsParser.buildIconGenerateSystemMessage(
+            listOf("{\"ref\":1}", "{\"ref\":2}", "{\"ref\":3}", "{\"ref\":4}"),
+        )
+        assertTrue(withRefs.contains("Reference 1:"))
+        assertTrue(withRefs.contains("Reference 3:"))
+        // Capped at three references.
+        assertFalse(withRefs.contains("Reference 4:"))
+        assertTrue(withRefs.contains("{\"ref\":1}"))
     }
 
     @Test

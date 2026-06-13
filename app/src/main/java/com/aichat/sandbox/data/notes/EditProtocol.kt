@@ -84,6 +84,49 @@ sealed interface EditOp {
         override val ids: List<String>,
     ) : EditOp
 
+    /**
+     * `{ "op": "add_path", "subpaths": [ { "closed": true, "anchors": [...] } ],
+     *    "color"?: "#RRGGBB", "fill"?: "#RRGGBB", "width"?: float,
+     *    "fillRule"?: "evenodd" }` — Phase 17.5 #1 (style-matched generation).
+     *
+     * Authors a **new** `kind=path` item from scratch. Unlike
+     * [ReplaceWithShape] this references no source: it exists so the model can
+     * lay down geometry on a fresh icon artboard (matching the style of the
+     * reference icons it was shown). Each anchor mirrors the
+     * [com.aichat.sandbox.data.notes.VectorCanvasJson] wire format —
+     * `[x, y, inDx, inDy, outDx, outDy]` with relative cubic handles — so the
+     * model replies in exactly the format it saw the references in.
+     *
+     * Authoring ops carry no [ids]; the applier inserts them into [ids]-free
+     * `added` output. Empty subpaths are rejected by the parser.
+     */
+    data class AddPath(
+        val subpaths: List<SubpathSpec>,
+        val colorArgb: Int?,
+        val fillArgb: Int?,
+        val width: Float?,
+        val evenOdd: Boolean = false,
+    ) : EditOp {
+        override val ids: List<String> get() = emptyList()
+    }
+
+    /**
+     * `{ "op": "add_shape", "shape": { … }, "color"?: "#RRGGBB",
+     *    "fill"?: "#RRGGBB", "width"?: float }` — Phase 17.5 #1. Authors a
+     * new `kind=shape` item from a [ShapeSpec] (the same shape vocabulary
+     * [ReplaceWithShape] uses). Convenient for primitive icon parts (a
+     * bounding circle, a connecting line) the model would otherwise have to
+     * spell out as a path.
+     */
+    data class AddShape(
+        val shape: ShapeSpec,
+        val colorArgb: Int?,
+        val fillArgb: Int?,
+        val width: Float?,
+    ) : EditOp {
+        override val ids: List<String> get() = emptyList()
+    }
+
     /** `{ "op": "delete", "ids": [...] }`. */
     data class Delete(
         override val ids: List<String>,
@@ -105,7 +148,31 @@ sealed interface EditOp {
         override val ids: List<String>,
     ) : EditOp
 
-    /** Minimal shape description used by [ReplaceWithShape]. */
+    /**
+     * One contour of an [AddPath]. [anchors] is a flat list of cubic anchors
+     * (point + relative in/out handles); [closed] adds the wrap-around
+     * segment. Mirrors [com.aichat.sandbox.ui.components.notes.PathCodec.Subpath].
+     */
+    data class SubpathSpec(
+        val anchors: List<AnchorSpec>,
+        val closed: Boolean,
+    )
+
+    /**
+     * One cubic anchor of a [SubpathSpec]: the point and its relative
+     * incoming / outgoing bezier handles. Zero handles degrade the adjacent
+     * segments to straight lines.
+     */
+    data class AnchorSpec(
+        val x: Float,
+        val y: Float,
+        val inDx: Float = 0f,
+        val inDy: Float = 0f,
+        val outDx: Float = 0f,
+        val outDy: Float = 0f,
+    )
+
+    /** Minimal shape description used by [ReplaceWithShape] / [AddShape]. */
     sealed interface ShapeSpec {
         data class Line(val x0: Float, val y0: Float, val x1: Float, val y1: Float) : ShapeSpec
         data class Rect(val x0: Float, val y0: Float, val x1: Float, val y1: Float, val r: Float = 0f) : ShapeSpec

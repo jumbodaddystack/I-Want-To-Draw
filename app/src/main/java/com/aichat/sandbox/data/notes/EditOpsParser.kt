@@ -177,6 +177,19 @@ object EditOpsParser {
                 if (ids.size < 2) throw IllegalArgumentException("merge_paths: need ≥2 ids")
                 EditOp.MergePaths(ids)
             }
+            "add_path", "add_paths" -> parseAddPath(obj)
+            "add_shape" -> {
+                val shape = parseShape(obj.get("shape") as? JsonObject
+                    ?: throw IllegalArgumentException("add_shape: missing shape"))
+                EditOp.AddShape(
+                    shape = shape,
+                    colorArgb = obj.get("color")?.takeIf { it.isJsonPrimitive }?.asString
+                        ?.let { parseColor(it) },
+                    fillArgb = obj.get("fill")?.takeIf { it.isJsonPrimitive }?.asString
+                        ?.let { parseColor(it) },
+                    width = obj.get("width")?.takeIf { it.isJsonPrimitive }?.asFloat,
+                )
+            }
             "delete" -> {
                 val ids = parseIdList(obj, knownIds)
                 if (ids.isEmpty()) throw IllegalArgumentException("delete: no valid ids")
@@ -296,6 +309,59 @@ object EditOpsParser {
     }
 
     /**
+     * Phase 17.5 #1 — parse an `add_path` op. Accepts either a `subpaths`
+     * array (`[{ "closed": bool, "anchors": [...] }]`) or the single-subpath
+     * shorthand (`"closed"` + `"anchors"` at the op's top level — exactly the
+     * shape [VectorCanvasJson] emits for a one-contour path). Each anchor is a
+     * `[x, y, inDx, inDy, outDx, outDy]` array; a 2-element `[x, y]` is a
+     * corner with no handles. Throws (→ rejected) when no anchors survive.
+     */
+    private fun parseAddPath(obj: JsonObject): EditOp.AddPath {
+        val subObjs = obj.get("subpaths") as? JsonArray
+        val subpaths = ArrayList<EditOp.SubpathSpec>()
+        if (subObjs != null) {
+            for (el in subObjs) {
+                val sub = el as? JsonObject ?: continue
+                parseSubpath(sub)?.let { subpaths += it }
+            }
+        } else {
+            // Single-subpath shorthand at the op's top level.
+            parseSubpath(obj)?.let { subpaths += it }
+        }
+        if (subpaths.isEmpty() || subpaths.all { it.anchors.isEmpty() }) {
+            throw IllegalArgumentException("add_path: no anchors")
+        }
+        val fillRule = obj.get("fillRule")?.takeIf { it.isJsonPrimitive }?.asString?.lowercase()
+        return EditOp.AddPath(
+            subpaths = subpaths,
+            colorArgb = obj.get("color")?.takeIf { it.isJsonPrimitive }?.asString?.let { parseColor(it) },
+            fillArgb = obj.get("fill")?.takeIf { it.isJsonPrimitive }?.asString?.let { parseColor(it) },
+            width = obj.get("width")?.takeIf { it.isJsonPrimitive }?.asFloat,
+            evenOdd = fillRule == "evenodd" || fillRule == "even-odd",
+        )
+    }
+
+    private fun parseSubpath(obj: JsonObject): EditOp.SubpathSpec? {
+        val anchorsArr = obj.get("anchors") as? JsonArray ?: return null
+        val anchors = ArrayList<EditOp.AnchorSpec>(anchorsArr.size())
+        for (el in anchorsArr) {
+            val a = el as? JsonArray ?: continue
+            if (a.size() < 2) continue
+            anchors += EditOp.AnchorSpec(
+                x = a[0].asFloat, y = a[1].asFloat,
+                inDx = a.floatAt(2), inDy = a.floatAt(3),
+                outDx = a.floatAt(4), outDy = a.floatAt(5),
+            )
+        }
+        if (anchors.isEmpty()) return null
+        val closed = obj.get("closed")?.takeIf { it.isJsonPrimitive }?.asBoolean ?: false
+        return EditOp.SubpathSpec(anchors, closed)
+    }
+
+    private fun JsonArray.floatAt(i: Int): Float =
+        if (i < size()) this[i]?.takeIf { it.isJsonPrimitive }?.asFloat ?: 0f else 0f
+
+    /**
      * The Phase 7.2 system message the EDIT request injects. Kept here so
      * tests can assert the prompt content without reaching into
      * [NoteAiService].
@@ -339,4 +405,89 @@ object EditOpsParser {
             "- Do not target items on locked or hidden layers.\n" +
             "- If you can't fulfil the request, return an empty ops array and " +
             "explain in `summary`. Never reply outside the fenced block."
+
+    /**
+     * Phase 17.5 #1 — base system message for *generating* a new icon from
+     * scratch in the style of reference icons. Unlike [ICON_SYSTEM_MESSAGE]
+     * (which edits existing geometry) this asks the model to author new items
+     * with `add_path` / `add_shape`. [buildIconGenerateSystemMessage] appends
+     * the style-reference block.
+     */
+    const val ICON_GENERATE_SYSTEM_MESSAGE: String =
+        "You are an assistant that designs a brand-new vector icon from " +
+            "scratch, matching the visual style of the reference icons below. " +
+            "The icon sits on a square artboard whose top-left is (0,0) and " +
+            "whose edge length is given in the user's message; keep all " +
+            "geometry inside it with a little padding and aim for a balanced, " +
+            "centred composition. Match the references' stroke weight, corner " +
+            "treatment, fill-vs-outline choice, and level of detail.\n\n" +
+            "Reply with ONLY a fenced ```edit-ops block matching this schema:\n\n" +
+            "{ \"schema\": 1, \"summary\": \"<one short sentence>\",\n" +
+            "  \"ops\": [ /* add_path / add_shape operations */ ] }\n\n" +
+            "Author geometry with these ops:\n" +
+            "- add_path: { \"op\": \"add_path\", \"subpaths\": [ { \"closed\": " +
+            "true, \"anchors\": [ [x,y,inDx,inDy,outDx,outDy], … ] } ], " +
+            "\"color\": \"#RRGGBB\", \"fill\"?: \"#RRGGBB\", \"width\"?: float }. " +
+            "Each anchor is a point plus its relative incoming/outgoing cubic " +
+            "handles (use [x,y,0,0,0,0] or [x,y] for a corner). This is the " +
+            "exact format the reference icons are shown in below.\n" +
+            "- add_shape: { \"op\": \"add_shape\", \"shape\": { \"type\": " +
+            "\"ellipse|rect|line|polygon\", … }, \"color\": \"#RRGGBB\", " +
+            "\"fill\"?: \"#RRGGBB\" } for simple primitives.\n\n" +
+            "Rules:\n" +
+            "- Keep it monochrome unless the user asks for colour.\n" +
+            "- Prefer a few clean paths over many tiny ones.\n" +
+            "- Never reply outside the fenced block."
+
+    /**
+     * Phase 17.5 #2 — system message for the annotate-and-iterate "Make real"
+     * refine loop. The model is shown the user's rough sketch as an image and
+     * asked to redraw it as clean vector geometry, authoring with the same
+     * `add_path` / `add_shape` ops as generation. The editor places the result
+     * next to the original, so the model should draw at the sketch's own
+     * coordinates (the offset is applied afterwards).
+     */
+    const val ICON_REFINE_SYSTEM_MESSAGE: String =
+        "You receive a rough hand-drawn sketch as an image. Redraw it as a " +
+            "clean vector — faithfully follow the sketch's shapes, proportions " +
+            "and placement, but straighten wobbly lines, regularise curves, and " +
+            "close shapes that were meant to be closed. Draw at roughly the " +
+            "same coordinates as the sketch.\n\n" +
+            "Reply with ONLY a fenced ```edit-ops block matching this schema:\n\n" +
+            "{ \"schema\": 1, \"summary\": \"<one short sentence>\",\n" +
+            "  \"ops\": [ /* add_path / add_shape operations */ ] }\n\n" +
+            "Author geometry with these ops:\n" +
+            "- add_path: { \"op\": \"add_path\", \"subpaths\": [ { \"closed\": " +
+            "true, \"anchors\": [ [x,y,inDx,inDy,outDx,outDy], … ] } ], " +
+            "\"color\"?: \"#RRGGBB\", \"fill\"?: \"#RRGGBB\", \"width\"?: float }. " +
+            "Each anchor is a point plus its relative incoming/outgoing cubic " +
+            "handles (use [x,y] for a corner).\n" +
+            "- add_shape: { \"op\": \"add_shape\", \"shape\": { \"type\": " +
+            "\"ellipse|rect|line|polygon\", … } } for simple primitives.\n\n" +
+            "Rules:\n" +
+            "- Keep it monochrome unless the sketch is clearly coloured.\n" +
+            "- Prefer a few clean paths over many tiny ones.\n" +
+            "- Never reply outside the fenced block."
+
+    /**
+     * Phase 17.5 #1 — assemble the generation system message, embedding up to
+     * three [styleReferences] (each a [VectorCanvasJson] string of one gallery
+     * icon) as a fenced reference block. With no references the base message
+     * is returned unchanged, so the model still generates (just without a
+     * concrete style anchor).
+     */
+    fun buildIconGenerateSystemMessage(styleReferences: List<String>): String {
+        val refs = styleReferences.filter { it.isNotBlank() }.take(3)
+        if (refs.isEmpty()) return ICON_GENERATE_SYSTEM_MESSAGE
+        return buildString {
+            append(ICON_GENERATE_SYSTEM_MESSAGE)
+            append("\n\nStyle reference icons (JSON, same anchor format as ")
+            append("`add_path`):\n")
+            refs.forEachIndexed { i, json ->
+                append("\nReference ${i + 1}:\n```json\n")
+                append(json)
+                append("\n```\n")
+            }
+        }
+    }
 }
