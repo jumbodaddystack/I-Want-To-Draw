@@ -5,10 +5,12 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.ui.components.notes.ConnectorCodec
 import com.aichat.sandbox.ui.components.notes.ConnectorRouter
 import com.aichat.sandbox.ui.components.notes.FillStyle
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
+import com.aichat.sandbox.ui.components.notes.LayerLookup
 import com.aichat.sandbox.ui.components.notes.PathCodec
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.StickyCodec
@@ -35,9 +37,11 @@ import kotlin.math.roundToInt
  *
  * Strokes serialize as quadratic-Bezier paths matching the renderer's
  * mid-point smoothing; shapes emit native SVG primitives; text items
- * become `<text>` runs. Layers are not yet a first-class concept (Phase
- * 6.4 deferred); for now everything lives in a single `<g>` group with
- * z-order preserved.
+ * become `<text>` runs. Phase 17.3 — when the caller passes the note's
+ * layers, the output preserves them as one `<g>` per layer (ordinal order,
+ * `opacity` baked from the layer's percent, hidden layers dropped to match
+ * the on-screen render); with no layers the output stays a single
+ * `<g id="items">` so pre-17.3 fixtures are byte-identical.
  *
  * Stroke widths are reduced to a single mean per stroke because SVG `path`
  * does not support per-segment widths. This is a documented lossy step:
@@ -58,8 +62,10 @@ class NoteSvgExporter @Inject constructor(
         frameBounds: FloatArray? = null,
         /** Phase 15.1 — export variable-width strokes as filled outlines. */
         preservePressure: Boolean = false,
+        /** Phase 17.3 — preserve these layers as `<g>` groups; empty = flat. */
+        layers: List<NoteLayer> = emptyList(),
     ): Uri = withContext(Dispatchers.IO) {
-        val svg = renderSvg(note, items, context.filesDir, frameBounds, preservePressure)
+        val svg = renderSvg(note, items, context.filesDir, frameBounds, preservePressure, layers)
         val dir = exportsDir().apply { if (!exists()) mkdirs() }
         val outName = "${NoteExporter.sanitizeBaseName(note.title)}-${System.currentTimeMillis()}.svg"
         val finalFile = File(dir, outName)
@@ -100,6 +106,8 @@ class NoteSvgExporter @Inject constructor(
             frameBounds: FloatArray? = null,
             /** Phase 15.1 — export variable-width strokes as filled outlines. */
             preservePressure: Boolean = false,
+            /** Phase 17.3 — preserve these layers as `<g>` groups; empty = flat. */
+            layers: List<NoteLayer> = emptyList(),
         ): String {
             val baseBounds = frameBounds
                 ?: NoteRasterizer.computeBounds(items)
@@ -139,7 +147,6 @@ class NoteSvgExporter @Inject constructor(
                 }
                 sb.append("  </defs>\n")
             }
-            sb.append("  <g id=\"items\">\n")
             // 11.2 — connectors resolve bound endpoints against the *full*
             // item set (not just the frame-visible subset) so a connector
             // whose target sits outside the frame still points at it.
@@ -148,20 +155,90 @@ class NoteSvgExporter @Inject constructor(
                 byId[id]?.takeIf { it.kind != ConnectorCodec.KIND }
                     ?.let { NoteRasterizer.computeBounds(listOf(it)) }
             }
-            for (item in visibleItems.sortedBy { it.zIndex }) {
-                val gradId = gradients[item.id]?.first
-                when (item.kind) {
-                    "stroke" -> appendStroke(sb, item, preservePressure)
-                    Shape.KIND -> appendShape(sb, item, gradId)
-                    TextItemCodec.KIND -> appendText(sb, item)
-                    NoteItem.KIND_IMAGE -> appendImage(sb, item, filesDir)
-                    StickyCodec.KIND -> appendSticky(sb, item, gradId)
-                    ConnectorCodec.KIND -> appendConnector(sb, item, connectorLookup)
-                    PathCodec.KIND -> appendPathItem(sb, item, gradId)
+            if (layers.isEmpty()) {
+                sb.append("  <g id=\"items\">\n")
+                for (item in visibleItems.sortedBy { it.zIndex }) {
+                    appendItem(sb, item, gradients, connectorLookup, filesDir, preservePressure)
                 }
+                sb.append("  </g>\n")
+            } else {
+                appendLayeredItems(
+                    sb, visibleItems, layers, gradients, connectorLookup, filesDir, preservePressure,
+                )
             }
-            sb.append("  </g>\n</svg>\n")
+            sb.append("</svg>\n")
             return sb.toString()
+        }
+
+        /**
+         * 17.3 — emit one `<g>` per layer (ordinal order), with items inside
+         * sorted by zIndex. Hidden-layer items are dropped (mirrors
+         * [LayerLookup.renderOrder] / the on-screen render); a layer's
+         * opacity becomes the group's `opacity` attribute. Items whose
+         * `layerId` is null or dangling fall into a final "default" group
+         * rendered on top, matching the synthesized-default convention.
+         * Empty groups are skipped so the output never carries dead `<g>`s.
+         */
+        private fun appendLayeredItems(
+            sb: StringBuilder,
+            visibleItems: List<NoteItem>,
+            layers: List<NoteLayer>,
+            gradients: Map<String, Pair<String, FillStyle.Gradient>>,
+            connectorLookup: (String) -> FloatArray?,
+            filesDir: java.io.File?,
+            preservePressure: Boolean,
+        ) {
+            val lookup = LayerLookup(layers)
+            fun emitGroup(id: String, name: String?, opacity: Float, layerItems: List<NoteItem>) {
+                if (layerItems.isEmpty()) return
+                if (name != null) sb.append("  <!-- layer: ").append(escapeXml(name)).append(" -->\n")
+                sb.append("  <g id=\"").append(id).append('"')
+                if (opacity < 1f) sb.append(" opacity=\"").append(fmt(opacity)).append('"')
+                sb.append(">\n")
+                for (item in layerItems.sortedWith(compareBy({ it.zIndex }, { it.id }))) {
+                    appendItem(sb, item, gradients, connectorLookup, filesDir, preservePressure)
+                }
+                sb.append("  </g>\n")
+            }
+            // Named layers in ordinal order; hidden layers contribute nothing.
+            for ((index, layer) in lookup.layers.withIndex()) {
+                if (!layer.visible) continue
+                val opacity = layer.opacityPercent.coerceIn(0, 100) / 100f
+                emitGroup(
+                    id = "layer-$index",
+                    name = layer.name,
+                    opacity = opacity,
+                    layerItems = visibleItems.filter { it.layerId == layer.id },
+                )
+            }
+            // Default-on-top bucket: null / dangling layerId (always visible).
+            emitGroup(
+                id = "layer-default",
+                name = null,
+                opacity = 1f,
+                layerItems = visibleItems.filter { lookup.get(it.layerId) == null },
+            )
+        }
+
+        /** Emit one item's SVG element(s) — shared by the flat and layered paths. */
+        private fun appendItem(
+            sb: StringBuilder,
+            item: NoteItem,
+            gradients: Map<String, Pair<String, FillStyle.Gradient>>,
+            connectorLookup: (String) -> FloatArray?,
+            filesDir: java.io.File?,
+            preservePressure: Boolean,
+        ) {
+            val gradId = gradients[item.id]?.first
+            when (item.kind) {
+                "stroke" -> appendStroke(sb, item, preservePressure)
+                Shape.KIND -> appendShape(sb, item, gradId)
+                TextItemCodec.KIND -> appendText(sb, item)
+                NoteItem.KIND_IMAGE -> appendImage(sb, item, filesDir)
+                StickyCodec.KIND -> appendSticky(sb, item, gradId)
+                ConnectorCodec.KIND -> appendConnector(sb, item, connectorLookup)
+                PathCodec.KIND -> appendPathItem(sb, item, gradId)
+            }
         }
 
         private fun appendStroke(sb: StringBuilder, item: NoteItem, preservePressure: Boolean) {

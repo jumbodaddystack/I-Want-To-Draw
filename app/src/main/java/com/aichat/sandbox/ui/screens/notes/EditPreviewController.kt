@@ -7,6 +7,8 @@ import com.aichat.sandbox.data.notes.EditOpsDoc
 import com.aichat.sandbox.data.vector.VectorPoint
 import com.aichat.sandbox.data.vector.notesbridge.PolylineSimplify
 import com.aichat.sandbox.ui.components.notes.ImageItemCodec
+import com.aichat.sandbox.ui.components.notes.PathCodec
+import com.aichat.sandbox.ui.components.notes.PathMerge
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.StrokeCodec
@@ -148,6 +150,30 @@ object EditPreviewController {
                         }
                         stash(sid, simplified)
                     }
+                }
+                is EditOp.MergePaths -> {
+                    // Collect the live path items (post any earlier ops), in
+                    // input order, then fold style-compatible ones together.
+                    val sourceShortIds = ArrayList<String>()
+                    val sources = ArrayList<NoteItem>()
+                    for (sid in op.ids) {
+                        val current = fetch(sid) ?: continue
+                        if (current.kind != PathCodec.KIND) continue
+                        sourceShortIds += sid
+                        sources += current
+                    }
+                    if (sources.size < 2) {
+                        skipped += "merge_paths (need ≥2 path items)"
+                        continue
+                    }
+                    val merged = mergePathItems(sources)
+                    if (merged == null) {
+                        skipped += "merge_paths (incompatible styles)"
+                        continue
+                    }
+                    for (sid in sourceShortIds) working.remove(sid)
+                    for (s in sources) toRemove += s.id
+                    toAdd += merged
                 }
                 is EditOp.Delete -> {
                     for (sid in op.ids) {
@@ -320,6 +346,28 @@ object EditPreviewController {
             out[out.size - stride + k] = samples[samples.size - stride + k]
         }
         return out
+    }
+
+    /**
+     * 17.5 — fold style-compatible path [sources] into one multi-subpath
+     * path item. Items must share the carrying-item style (colour + width)
+     * and a compatible payload (fill / stroke styling); otherwise the merge
+     * would silently restyle geometry, so we return null and the caller
+     * skips. The merged item takes the bottom-most (lowest-zIndex) source's
+     * z / layer / group and a fresh id.
+     */
+    internal fun mergePathItems(sources: List<NoteItem>): NoteItem? {
+        if (sources.size < 2) return null
+        val ordered = sources.sortedBy { it.zIndex }
+        val base = ordered.first()
+        if (ordered.any { it.colorArgb != base.colorArgb || it.baseWidthPx != base.baseWidthPx }) {
+            return null
+        }
+        val merged = PathMerge.merge(ordered.map { PathCodec.decode(it.payload) }) ?: return null
+        return base.copy(
+            id = java.util.UUID.randomUUID().toString(),
+            payload = PathCodec.encode(merged),
+        )
     }
 
     private fun buildShapeReplacement(source: NoteItem, spec: EditOp.ShapeSpec): NoteItem {

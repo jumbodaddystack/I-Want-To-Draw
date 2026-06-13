@@ -73,6 +73,17 @@ sealed interface EditOp {
         val tolerance: Float,
     ) : EditOp
 
+    /**
+     * `{ "op": "merge_paths", "ids": [...] }` — Phase 17.5. Fold two or more
+     * style-compatible `kind=path` items into one multi-subpath path
+     * (concatenation, no clipping; holes preserved via subpaths). Sources are
+     * removed and one merged path is inserted in the bottom-most source's
+     * place. Incompatible styles / non-path ids are dropped by the applier.
+     */
+    data class MergePaths(
+        override val ids: List<String>,
+    ) : EditOp
+
     /** `{ "op": "delete", "ids": [...] }`. */
     data class Delete(
         override val ids: List<String>,

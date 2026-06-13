@@ -5,8 +5,10 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aichat.sandbox.data.local.TagCount
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteFrame
+import com.aichat.sandbox.data.notes.IconTags
 import com.aichat.sandbox.data.notes.NoteRasterizer
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.data.repository.NoteSearchRepository
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -45,6 +48,11 @@ import javax.inject.Inject
  * parses through the tune-up lane's parsers, converts to editable path items
  * via [DocumentToNoteItems], and lands as a new icon note (graph background +
  * artboard frame, matching the editor's icon seed) that opens immediately.
+ *
+ * Phase 17.1 adds IconJar-style organization: tag chips that filter the
+ * gallery (combining with search via a client-side id intersection), a tag
+ * editor behind the tile long-press sheet, and "duplicate as variant" which
+ * deep-copies an icon (shared tags, " — outlined" title) and opens the copy.
  */
 @HiltViewModel
 class IconsListViewModel @Inject constructor(
@@ -64,14 +72,40 @@ class IconsListViewModel @Inject constructor(
         _query.value = value
     }
 
+    // Phase 17.1 — tag-chip filter. Null = no filter. Combines with search:
+    // FTS results are intersected client-side with the tagged ids (result
+    // sets are capped at 100, so the in-memory filter is cheap).
+    private val _selectedTag = MutableStateFlow<String?>(null)
+    val selectedTag: StateFlow<String?> = _selectedTag.asStateFlow()
+
+    /** Tap toggles: selecting the active chip clears the filter. */
+    fun toggleTag(tag: String) {
+        _selectedTag.value = if (_selectedTag.value == tag) null else tag
+    }
+
+    /** Every icon tag + count, feeding the gallery chip row. */
+    val tagCounts: StateFlow<List<TagCount>> = repository.observeIconTagCounts()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
-    val icons: StateFlow<List<Note>> = _query
-        .debounce { if (it.isBlank()) 0L else QUERY_DEBOUNCE_MS }
-        .flatMapLatest { q ->
-            if (q.isBlank()) {
-                repository.observeIcons()
-            } else {
-                flow { emit(searchRepository.searchIcons(q)) }
+    val icons: StateFlow<List<Note>> = combine(
+        _query.debounce { if (it.isBlank()) 0L else QUERY_DEBOUNCE_MS },
+        _selectedTag,
+    ) { q, tag -> q to tag }
+        .flatMapLatest { (q, tag) ->
+            when {
+                q.isBlank() && tag == null -> repository.observeIcons()
+                q.isBlank() && tag != null -> repository.observeIconsWithTag(tag)
+                else -> flow {
+                    val results = searchRepository.searchIcons(q)
+                    emit(
+                        if (tag == null) results
+                        else {
+                            val tagged = repository.getNoteIdsWithTag(tag).toHashSet()
+                            results.filter { it.id in tagged }
+                        },
+                    )
+                }
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -88,10 +122,69 @@ class IconsListViewModel @Inject constructor(
     init {
         // Backfill thumbnails for icons saved before thumbnails existed.
         viewModelScope.launch { repository.renderMissingThumbnails() }
+        // If the active tag filter loses its last bearer (delete / re-tag),
+        // drop the filter instead of pinning the gallery to an empty grid
+        // behind a chip that no longer renders.
+        viewModelScope.launch {
+            tagCounts.collect { counts ->
+                val selected = _selectedTag.value
+                if (selected != null && counts.isNotEmpty() && counts.none { it.tag == selected }) {
+                    _selectedTag.value = null
+                }
+            }
+        }
     }
 
     fun delete(note: Note) {
         viewModelScope.launch { repository.deleteNote(note.id) }
+    }
+
+    // ── Phase 17.1 — tag editing + duplicate-as-variant ─────────────────
+
+    /** Backing state for the "Edit tags" dialog. */
+    data class TagEditState(
+        val noteId: String,
+        val title: String,
+        val initialTags: List<String>,
+    )
+
+    private val _tagEdit = MutableStateFlow<TagEditState?>(null)
+    val tagEdit: StateFlow<TagEditState?> = _tagEdit.asStateFlow()
+
+    fun beginEditTags(note: Note) {
+        viewModelScope.launch {
+            _tagEdit.value = TagEditState(note.id, note.title, repository.getTags(note.id))
+        }
+    }
+
+    fun dismissEditTags() {
+        _tagEdit.value = null
+    }
+
+    /** Parse the dialog's free-form input and replace the note's tag set. */
+    fun saveTags(input: String) {
+        val state = _tagEdit.value ?: return
+        _tagEdit.value = null
+        viewModelScope.launch { repository.setTags(state.noteId, IconTags.parse(input)) }
+    }
+
+    private val _variantCreated = MutableSharedFlow<String>()
+
+    /** New note ids from [duplicateAsVariant]; the screen opens them in the editor. */
+    val variantCreated: SharedFlow<String> = _variantCreated.asSharedFlow()
+
+    /**
+     * Deep-copy [note] as a sibling variant (filled ↔ outlined workflow):
+     * same content and tags, " — outlined" title suffix, then straight into
+     * the editor so the user can restyle the copy.
+     */
+    fun duplicateAsVariant(note: Note) {
+        viewModelScope.launch {
+            val newId = repository.duplicateNote(note.id, IconTags.variantTitle(note.title))
+                ?: return@launch
+            repository.renderThumbnailAsync(newId)
+            _variantCreated.emit(newId)
+        }
     }
 
     fun importIcon(uri: Uri) {

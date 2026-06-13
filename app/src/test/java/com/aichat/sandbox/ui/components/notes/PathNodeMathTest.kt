@@ -177,4 +177,112 @@ class PathNodeMathTest {
         assertEquals(payload.anchors[2].inDx, a.inDx, 1e-4f)
         assertEquals(payload.anchors[2].inDy, a.inDy, 1e-4f)
     }
+
+    // ── Phase 17.2 — multi-subpath node editing ──────────────────────────
+
+    /** Even-odd donut: outer square + inner hole, both closed contours. */
+    private fun donut() = PathCodec.PathPayload(
+        subpaths = listOf(
+            PathCodec.Subpath(
+                anchors = listOf(
+                    PathCodec.Anchor(0f, 0f),
+                    PathCodec.Anchor(100f, 0f),
+                    PathCodec.Anchor(100f, 100f),
+                    PathCodec.Anchor(0f, 100f),
+                ),
+                closed = true,
+            ),
+            PathCodec.Subpath(
+                anchors = listOf(
+                    PathCodec.Anchor(30f, 30f),
+                    PathCodec.Anchor(70f, 30f),
+                    PathCodec.Anchor(70f, 70f),
+                    PathCodec.Anchor(30f, 70f),
+                ),
+                closed = true,
+            ),
+        ),
+        fillRule = PathCodec.FILL_RULE_EVEN_ODD,
+        fillArgb = 0xFF112233.toInt(),
+    )
+
+    @Test
+    fun nearestOnPathPicksTheNearerSubpath() {
+        // A point hugging the inner contour's top edge resolves to subpath 1.
+        val near = PathNodeMath.nearestOnPath(donut(), 50f, 30f)!!
+        assertEquals(1, near.subpath)
+        assertTrue(near.distance < 0.5f)
+    }
+
+    @Test
+    fun insertAnchorOnSecondSubpathPreservesFirst() {
+        val payload = donut()
+        val after = PathNodeMath.insertAnchor(payload, segment = 0, t = 0.5f, subpath = 1)
+        // Edited contour gained an anchor; the other contour is untouched.
+        assertEquals(5, after.subpaths[1].anchors.size)
+        assertEquals(payload.subpaths[0].anchors, after.subpaths[0].anchors)
+        // Style fields ride along.
+        assertEquals(PathCodec.FILL_RULE_EVEN_ODD, after.fillRule)
+        assertEquals(0xFF112233.toInt(), after.fillArgb)
+    }
+
+    @Test
+    fun moveAnchorOnSecondSubpathLeavesFirstAlone() {
+        val payload = donut()
+        val moved = PathNodeMath.moveAnchor(payload, index = 0, x = 35f, y = 35f, subpath = 1)
+        assertEquals(35f, moved.subpaths[1].anchors[0].x, 1e-4f)
+        assertEquals(35f, moved.subpaths[1].anchors[0].y, 1e-4f)
+        assertEquals(payload.subpaths[0].anchors, moved.subpaths[0].anchors)
+    }
+
+    @Test
+    fun toggleTypeOnSecondSubpathTargetsTheRightAnchor() {
+        val payload = donut()
+        val toggled = PathNodeMath.toggleType(payload, index = 0, subpath = 1)
+        assertEquals(PathCodec.TYPE_SMOOTH, toggled.subpaths[1].anchors[0].type)
+        // First subpath's anchors stay corners.
+        assertTrue(toggled.subpaths[0].anchors.all { it.type == PathCodec.TYPE_CORNER })
+    }
+
+    @Test
+    fun deleteAnchorDropsAContourBelowTwoButKeepsOthers() {
+        // Square + a 2-anchor open contour; deleting from the small contour
+        // removes it entirely while the square survives.
+        val payload = PathCodec.PathPayload(
+            subpaths = listOf(
+                donut().subpaths[0],
+                PathCodec.Subpath(
+                    anchors = listOf(PathCodec.Anchor(10f, 10f), PathCodec.Anchor(20f, 20f)),
+                    closed = false,
+                ),
+            ),
+            fillRule = PathCodec.FILL_RULE_EVEN_ODD,
+        )
+        val after = PathNodeMath.deleteAnchor(payload, index = 0, subpath = 1)!!
+        assertEquals(1, after.subpaths.size)
+        assertEquals(4, after.subpaths[0].anchors.size)
+        assertEquals(PathCodec.FILL_RULE_EVEN_ODD, after.fillRule)
+    }
+
+    @Test
+    fun deleteAnchorReturnsNullWhenTheLastContourEmpties() {
+        val payload = PathCodec.PathPayload(
+            subpaths = listOf(
+                PathCodec.Subpath(
+                    anchors = listOf(PathCodec.Anchor(0f, 0f), PathCodec.Anchor(50f, 0f)),
+                    closed = false,
+                ),
+            ),
+        )
+        assertNull(PathNodeMath.deleteAnchor(payload, index = 0, subpath = 0))
+    }
+
+    @Test
+    fun deleteAnchorAboveTwoKeepsTheContour() {
+        val payload = donut()
+        val after = PathNodeMath.deleteAnchor(payload, index = 1, subpath = 0)!!
+        assertEquals(3, after.subpaths[0].anchors.size)
+        // The hole is untouched.
+        assertEquals(payload.subpaths[1].anchors, after.subpaths[1].anchors)
+    }
 }

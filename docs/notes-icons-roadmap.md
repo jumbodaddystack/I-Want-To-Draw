@@ -16,6 +16,10 @@ Read `CLAUDE.md` first for build/SDK setup and the known test baseline.
 | 16.1 | Multi-subpath path codec (v2 wire format + nonZero/evenOdd fill rule). Boolean ops return ONE payload with holes as subpaths — a subtracted donut punches through. Single-subpath/nonZero payloads still encode byte-identical v1 (hard compatibility rule). Node editing gated to single-subpath payloads. | `ui/components/notes/PathCodec.kt`, `PathBooleanBridge.kt`, `PathRenderer.kt`, `HitTest.kt`, both exporters, `data/notes/VectorCanvasJson.kt` |
 | 16.2 | Vector import: `.xml`/`.svg` → editable icon note. `DocumentToNoteItems` composes group transforms, normalizes commands to absolute cubics (quad lift, spec arc→cubic), preserves holes/fill rules. Import chip in the Icons gallery. | `data/vector/notesbridge/DocumentToNoteItems.kt`, `ui/screens/icons/IconsListViewModel.kt`, `IconsListScreen.kt` |
 | 16.3 | Icons gallery search over the existing `notes_ocr_fts` FTS4 index (title + OCR), `isIcon = 1` filter, no migration. | `data/local/NoteSearchDao.searchIcons`, `data/repository/NoteSearchRepository.kt` |
+| 17.1 | Icon tags & variants: `note_tags` junction table (DB v20→21, cascade-deleted, indexed on `tag`), gallery tag-chip filter combined with FTS search (client-side id intersection), long-press action sheet (Edit tags / Duplicate as variant / Delete), `IconTags` JVM-pure tag normalization, `NoteRepository.duplicateNote` deep copy (items/layers/frames/tags, ids remapped). | `data/model/NoteTag.kt`, `data/local/NoteTagDao.kt`, `Migrations.MIGRATION_20_21`, `data/notes/IconTags.kt`, `ui/screens/icons/IconsList{ViewModel,Screen}.kt` |
+| 17.2 | Multi-subpath node editing: lifted the 16.1 single-subpath gate. `PathNodeMath` ops take a trailing `subpath` index (default 0 → existing call sites/tests byte-identical) and rebuild one subpath via `PathPayload.withSubpath`; `nearestOnPath` scans every contour; `deleteAnchor` drops a sub-2-anchor contour and returns null only when the last empties. `PathNodeEditor` renders all subpaths, `(subpath, anchor)` selection, deletes the item when the final anchors go. | `ui/components/notes/PathNodeMath.kt`, `PathCodec.PathPayload.withSubpath`, `ui/screens/notes/PathNodeEditor.kt`, `NoteEditorViewModel.{selectionIsSinglePath,enterNodeEdit,deleteNodeEditItem}` |
+| 17.3 | Structure-preserving export: optional `layers` list on `renderSvg` / VD `render`. SVG emits one `<g id="layer-N">` per layer (ordinal order, `opacity` baked, name as comment, hidden dropped, null-layer items in a `layer-default` group); VD emits `<group android:name>` baking layer opacity into path alpha (VD groups have no opacity). Empty list = byte-identical flat output. | `data/notes/NoteSvgExporter.kt`, `NoteVectorDrawableExporter.kt`, `NoteEditorViewModel` export calls |
+| 17.5#3 | Local `merge_paths`: fold style-compatible paths into one multi-subpath payload (no clipping; holes kept). `PathMerge` (pure), `EditOp.MergePaths` + parser + `EditPreviewController` applier, `NoteEditorViewModel.mergeSelectionPaths` + selection-overlay "Merge" action. | `ui/components/notes/PathMerge.kt`, `EditProtocol.kt`, `EditOpsParser.kt`, `EditPreviewController.kt`, `SelectionOverlay.kt` |
 
 Pre-existing hold-to-snap shape recognition (sub-phase 11.3) and the stamp
 library (10.x) already cover two items from the original brainstorm — do not
@@ -39,7 +43,19 @@ rebuild them.
 
 ## Remaining work, in recommended order
 
-### 17.1 Icon tags & variants (Tier 2 remainder)
+**Status (updated):** 17.1, 17.2, 17.3 and 17.5 #3 have shipped (see the table
+above). Still open: **17.4** (androidx.ink — *deferred*, see note below),
+**17.5 #1 and #2**, and the smaller follow-ons. The detailed plans below are
+kept for the shipped items as a record; the open items are 17.4 onward.
+
+> **17.4 deferral note:** the androidx.ink experiment's only meaningful
+> verification is stroke *feel* + screenshot diffs on a real device/emulator,
+> which a headless CI/cloud session can't produce. It also rewrites the wet-
+> stroke path of the ~2400-line `DrawingSurface`. It should be picked up in an
+> interactive session with a device in the loop, not shipped blind behind a
+> flag. Prefer doing 17.5 #1/#2 and the smaller follow-ons first.
+
+### 17.1 Icon tags & variants (Tier 2 remainder) — ✅ shipped
 
 **Goal:** IconJar-style organization: tag icons, filter the gallery by tag,
 and "duplicate as variant" (filled/outlined siblings).
@@ -70,7 +86,7 @@ mirror `MIGRATION_19_20`):
 `app/src/androidTest`); otherwise JVM tests for tag-set logic + a manual
 migration sanity pass. Effort: ~1 session.
 
-### 17.2 Multi-subpath node editing (lift the 16.1 gate)
+### 17.2 Multi-subpath node editing (lift the 16.1 gate) — ✅ shipped
 
 **Goal:** "Edit nodes" on boolean results and imported icons.
 
@@ -92,7 +108,7 @@ remain); undo flows are already payload-snapshot-based so they need no
 changes. Effort: ~1 session; pure-JVM `PathNodeMathTest` extensions cover
 most of it.
 
-### 17.3 Structure-preserving export (Tier 3 #9)
+### 17.3 Structure-preserving export (Tier 3 #9) — ✅ shipped
 
 **Goal:** stop flattening layers/groups on export (documented Phase 6.4
 deferral, noted in `NoteSvgExporter`'s KDoc).
@@ -110,7 +126,7 @@ deferral, noted in `NoteSvgExporter`'s KDoc).
 Effort: ~half session. Tests: extend `NoteSvgExporterTest` with a 2-layer
 fixture asserting two `<g>` elements + opacity attr.
 
-### 17.4 androidx.ink adoption experiment (Tier 1 #2)
+### 17.4 androidx.ink adoption experiment (Tier 1 #2) — ⏸ deferred (needs device verification; see note at top of this section)
 
 **Goal:** the single biggest stroke-feel upgrade — low-latency wet-stroke
 rendering with brush dynamics. androidx.ink hit **1.0.0 stable Dec 17,
@@ -149,13 +165,13 @@ serializes subpaths; `EditOpsParser` is lenient).
    sketch → AI returns a cleaned vector placed *next to* the original →
    user marks it up / re-prompts → regenerate. Mostly UX orchestration in
    `AiSideSheet` + a placement offset; reuse ASK (vision raster) + EDIT.
-3. **Local "tidy" pass + `merge_paths` edit-op**: one-tap simplify +
-   merge-compatible-paths + snap-to-grid over a selection. `smooth`/
-   `simplify` ops exist in `EditOpsParser`; add `merge_paths(ids)` which is
-   now representable thanks to 16.1 subpaths (concatenate payloads with the
-   same style into one multi-subpath payload).
+3. ✅ **shipped** — Local `merge_paths` edit-op (see 17.5#3 row above). The
+   broader "tidy" pass (one-tap simplify + snap-to-grid bundled with merge)
+   is still open; `simplify` already exists as an op, so a tidy action would
+   just compose simplify + `mergeSelectionPaths` + grid-snap over a selection.
 
-Start with #3 (pure-local, testable), then #1. Effort: ~1 session each.
+#3's merge primitive is done. Next: #1 (style-matched generation), then #2.
+Effort: ~1 session each.
 
 ### Smaller follow-ons
 

@@ -682,3 +682,26 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
         )
     }
 }
+
+/**
+ * Migration from version 20 to 21:
+ * Phase 17.1 — icon tags. Adds the `note_tags` junction table (one row per
+ * note/tag pair, cascade-deleted with the note) and an index on `tag` for
+ * the gallery's chip-filter and per-tag count queries. Purely additive —
+ * existing rows are untouched and untagged notes simply have no rows here.
+ */
+val MIGRATION_20_21 = object : Migration(20, 21) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `note_tags` (
+                `noteId` TEXT NOT NULL,
+                `tag` TEXT NOT NULL,
+                PRIMARY KEY(`noteId`, `tag`),
+                FOREIGN KEY(`noteId`) REFERENCES `notes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_tags_tag` ON `note_tags` (`tag`)")
+    }
+}

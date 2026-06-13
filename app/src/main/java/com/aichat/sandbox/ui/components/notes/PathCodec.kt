@@ -165,13 +165,29 @@ object PathCodec {
 
         /**
          * Node-edit helper: rebuild the geometry of a **single-subpath**
-         * payload. The node editor is gated to single-subpath payloads
-         * (16.1), so this never has trailing subpaths to preserve.
+         * payload, replacing all subpaths with one. Used where the result is
+         * intentionally collapsed to a single contour (stroke→path
+         * conversion, JSON round-trips).
          */
         fun withSingleSubpath(
             anchors: List<Anchor>,
             closed: Boolean = this.closed,
         ): PathPayload = copy(subpaths = listOf(Subpath(anchors, closed)))
+
+        /**
+         * Node-edit helper (17.2): rebuild the geometry of subpath [index],
+         * preserving every other subpath and all style fields. The closed
+         * flag defaults to the subpath's current value. This is the
+         * multi-subpath generalization the node editor uses now that the
+         * single-subpath gate is lifted.
+         */
+        fun withSubpath(
+            index: Int,
+            anchors: List<Anchor>,
+            closed: Boolean = subpaths[index].closed,
+        ): PathPayload = copy(
+            subpaths = subpaths.toMutableList().also { it[index] = Subpath(anchors, closed) },
+        )
     }
 
     fun encode(payload: PathPayload): ByteArray =

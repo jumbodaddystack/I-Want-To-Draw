@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteItem
+import com.aichat.sandbox.data.model.NoteLayer
+import com.aichat.sandbox.ui.components.notes.LayerLookup
 import com.aichat.sandbox.ui.components.notes.PathCodec
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
@@ -39,6 +41,13 @@ import kotlin.math.sin
  *
  * Text and image items have no VectorDrawable equivalent and are skipped; the
  * count is returned in [ExportResult.skippedCount] so the UI can warn.
+ *
+ * Phase 17.3 — when the caller passes the note's layers, each becomes a
+ * `<group android:name="…">` in ordinal order (hidden layers dropped to
+ * match the on-screen render). VectorDrawable `<group>` has no opacity
+ * attribute, so a layer's opacity is **baked into each path's fill/stroke
+ * alpha** instead. With no layers the output stays flat, so pre-17.3
+ * fixtures are byte-identical.
  */
 @Singleton
 class NoteVectorDrawableExporter @Inject constructor(
@@ -67,8 +76,10 @@ class NoteVectorDrawableExporter @Inject constructor(
         frameBounds: FloatArray? = null,
         /** Phase 15.1 — export variable-width strokes as filled outlines. */
         preservePressure: Boolean = false,
+        /** Phase 17.3 — preserve these layers as `<group>`s; empty = flat. */
+        layers: List<NoteLayer> = emptyList(),
     ): ExportResult = withContext(Dispatchers.IO) {
-        val rendered = render(items, sizeDp, frameBounds, preservePressure)
+        val rendered = render(items, sizeDp, frameBounds, preservePressure, layers)
         val dir = exportsDir().apply { if (!exists()) mkdirs() }
         val outName = "${NoteExporter.sanitizeBaseName(note.title)}-${System.currentTimeMillis()}.xml"
         val finalFile = File(dir, outName)
@@ -105,7 +116,8 @@ class NoteVectorDrawableExporter @Inject constructor(
             sizeDp: Int,
             frameBounds: FloatArray? = null,
             preservePressure: Boolean = false,
-        ): String = render(items, sizeDp, frameBounds, preservePressure).xml
+            layers: List<NoteLayer> = emptyList(),
+        ): String = render(items, sizeDp, frameBounds, preservePressure, layers).xml
 
         fun render(
             items: List<NoteItem>,
@@ -113,6 +125,8 @@ class NoteVectorDrawableExporter @Inject constructor(
             frameBounds: FloatArray? = null,
             /** Phase 15.1 — export variable-width strokes as filled outlines. */
             preservePressure: Boolean = false,
+            /** Phase 17.3 — preserve these layers as `<group>`s; empty = flat. */
+            layers: List<NoteLayer> = emptyList(),
         ): Rendered {
             val size = sizeDp.toFloat()
             val src = frameBounds
@@ -133,17 +147,90 @@ class NoteVectorDrawableExporter @Inject constructor(
             sb.append("    android:viewportWidth=\"").append(sizeDp).append("\"\n")
             sb.append("    android:viewportHeight=\"").append(sizeDp).append("\">\n")
 
-            var skipped = 0
-            for (item in visibleItems.sortedBy { it.zIndex }) {
-                when (item.kind) {
-                    NoteItem.KIND_STROKE -> appendStroke(sb, item, transform, preservePressure)
-                    Shape.KIND -> appendShape(sb, item, transform)
-                    PathCodec.KIND -> appendBezierPath(sb, item, transform)
-                    else -> skipped++ // text + image have no VectorDrawable equivalent
+            // Skipped count is kind-based (text + image have no <path>
+            // equivalent) and independent of layer grouping, so it matches
+            // the flat-render warning path exactly.
+            val skipped = visibleItems.count {
+                it.kind != NoteItem.KIND_STROKE && it.kind != Shape.KIND && it.kind != PathCodec.KIND
+            }
+            if (layers.isEmpty()) {
+                for (item in visibleItems.sortedBy { it.zIndex }) {
+                    appendItem(sb, item, transform, preservePressure, layerAlpha = 1f)
                 }
+            } else {
+                appendLayeredItems(sb, visibleItems, layers, transform, preservePressure)
             }
             sb.append("</vector>\n")
             return Rendered(sb.toString(), skipped)
+        }
+
+        /** True for item kinds the VectorDrawable schema can represent. */
+        private fun isSupported(item: NoteItem): Boolean =
+            item.kind == NoteItem.KIND_STROKE ||
+                item.kind == Shape.KIND ||
+                item.kind == PathCodec.KIND
+
+        private fun appendItem(
+            sb: StringBuilder,
+            item: NoteItem,
+            transform: Transform,
+            preservePressure: Boolean,
+            layerAlpha: Float,
+        ) {
+            when (item.kind) {
+                NoteItem.KIND_STROKE -> appendStroke(sb, item, transform, preservePressure, layerAlpha)
+                Shape.KIND -> appendShape(sb, item, transform, layerAlpha)
+                PathCodec.KIND -> appendBezierPath(sb, item, transform, layerAlpha)
+            }
+        }
+
+        /**
+         * 17.3 — one `<group android:name="…">` per visible layer (ordinal
+         * order), items inside by zIndex. VD `<group>` carries no opacity, so
+         * the layer's opacity is baked into each path's alpha. Null / dangling
+         * `layerId` items fall into a final default group on top. Empty groups
+         * are skipped.
+         */
+        private fun appendLayeredItems(
+            sb: StringBuilder,
+            visibleItems: List<NoteItem>,
+            layers: List<NoteLayer>,
+            transform: Transform,
+            preservePressure: Boolean,
+        ) {
+            val lookup = LayerLookup(layers)
+            fun emitGroup(name: String, alpha: Float, layerItems: List<NoteItem>) {
+                if (layerItems.isEmpty()) return
+                sb.append("  <group android:name=\"").append(escapeXmlAttr(name)).append("\">\n")
+                for (item in layerItems.sortedWith(compareBy({ it.zIndex }, { it.id }))) {
+                    appendItem(sb, item, transform, preservePressure, alpha)
+                }
+                sb.append("  </group>\n")
+            }
+            for ((index, layer) in lookup.layers.withIndex()) {
+                if (!layer.visible) continue
+                emitGroup(
+                    name = layer.name.ifBlank { "layer_$index" },
+                    alpha = layer.opacityPercent.coerceIn(0, 100) / 100f,
+                    layerItems = visibleItems.filter { it.layerId == layer.id && isSupported(it) },
+                )
+            }
+            emitGroup(
+                name = "layer_default",
+                alpha = 1f,
+                layerItems = visibleItems.filter { lookup.get(it.layerId) == null && isSupported(it) },
+            )
+        }
+
+        /** Escape a string for use inside a double-quoted XML attribute. */
+        private fun escapeXmlAttr(s: String): String = buildString(s.length + 8) {
+            for (c in s) when (c) {
+                '&' -> append("&amp;")
+                '<' -> append("&lt;")
+                '>' -> append("&gt;")
+                '"' -> append("&quot;")
+                else -> append(c)
+            }
         }
 
         // ---- coordinate fitting ----
@@ -186,6 +273,7 @@ class NoteVectorDrawableExporter @Inject constructor(
             item: NoteItem,
             t: Transform,
             preservePressure: Boolean,
+            layerAlpha: Float = 1f,
         ) {
             val samples = StrokeCodec.decode(item.payload)
             val count = samples.size / StrokeCodec.FLOATS_PER_SAMPLE
@@ -193,7 +281,7 @@ class NoteVectorDrawableExporter @Inject constructor(
             if (preservePressure &&
                 StrokeOutliner.hasVariableWidth(samples, item.tool, item.baseWidthPx)
             ) {
-                appendStrokeOutline(sb, item, samples, t)
+                appendStrokeOutline(sb, item, samples, t, layerAlpha)
                 return
             }
             val s = StrokeCodec.FLOATS_PER_SAMPLE
@@ -230,6 +318,7 @@ class NoteVectorDrawableExporter @Inject constructor(
                 strokeWidth = max(0.1f, t.len(strokeMeanWidth(item, samples))),
                 strokeAlpha = alpha,
                 cap = if (highlighter) "square" else "round",
+                layerAlpha = layerAlpha,
             )
         }
 
@@ -244,6 +333,7 @@ class NoteVectorDrawableExporter @Inject constructor(
             item: NoteItem,
             samples: FloatArray,
             t: Transform,
+            layerAlpha: Float = 1f,
         ) {
             val outline = StrokeOutliner.outline(samples, item.tool, item.baseWidthPx)
             if (outline.size < 6) return
@@ -262,6 +352,7 @@ class NoteVectorDrawableExporter @Inject constructor(
                 strokeColor = null,
                 strokeWidth = 0f,
                 fillAlpha = alpha,
+                layerAlpha = layerAlpha,
             )
         }
 
@@ -276,7 +367,12 @@ class NoteVectorDrawableExporter @Inject constructor(
 
         // ---- bezier paths (12.5) ----
 
-        private fun appendBezierPath(sb: StringBuilder, item: NoteItem, t: Transform) {
+        private fun appendBezierPath(
+            sb: StringBuilder,
+            item: NoteItem,
+            t: Transform,
+            layerAlpha: Float = 1f,
+        ) {
             val payload = PathCodec.decode(item.payload)
             if (payload.subpaths.none { it.anchors.size >= 2 }) return
             // 16.1 — every subpath in one android:pathData so holes punch
@@ -320,12 +416,18 @@ class NoteVectorDrawableExporter @Inject constructor(
                     PathCodec.JOIN_BEVEL -> "bevel"
                     else -> "round"
                 },
+                layerAlpha = layerAlpha,
             )
         }
 
         // ---- shapes ----
 
-        private fun appendShape(sb: StringBuilder, item: NoteItem, t: Transform) {
+        private fun appendShape(
+            sb: StringBuilder,
+            item: NoteItem,
+            t: Transform,
+            layerAlpha: Float = 1f,
+        ) {
             val decoded = ShapeCodec.decode(item.payload)
             val strokeColor = colorToHex(item.colorArgb)
             val fillColor = if (decoded.fillArgb == 0) null else colorToHex(decoded.fillArgb)
@@ -334,7 +436,8 @@ class NoteVectorDrawableExporter @Inject constructor(
                 is Shape.Line -> {
                     val d = "M${f(t.x(shape.x0))},${f(t.y(shape.y0))}" +
                         "L${f(t.x(shape.x1))},${f(t.y(shape.y1))}"
-                    appendPath(sb, d, fillColor = null, strokeColor = strokeColor, strokeWidth = strokeWidth)
+                    appendPath(sb, d, fillColor = null, strokeColor = strokeColor,
+                        strokeWidth = strokeWidth, layerAlpha = layerAlpha)
                 }
                 is Shape.Rect -> {
                     appendPath(
@@ -343,6 +446,7 @@ class NoteVectorDrawableExporter @Inject constructor(
                         fillColor = fillColor,
                         strokeColor = strokeColor,
                         strokeWidth = strokeWidth,
+                        layerAlpha = layerAlpha,
                     )
                 }
                 is Shape.Ellipse -> {
@@ -356,17 +460,19 @@ class NoteVectorDrawableExporter @Inject constructor(
                         sb.append("  <group android:rotation=\"").append(f(deg))
                             .append("\" android:pivotX=\"").append(f(cx))
                             .append("\" android:pivotY=\"").append(f(cy)).append("\">\n")
-                        appendPath(sb, d, fillColor, strokeColor, strokeWidth, indent = "    ")
+                        appendPath(sb, d, fillColor, strokeColor, strokeWidth,
+                            indent = "    ", layerAlpha = layerAlpha)
                         sb.append("  </group>\n")
                     } else {
-                        appendPath(sb, d, fillColor, strokeColor, strokeWidth)
+                        appendPath(sb, d, fillColor, strokeColor, strokeWidth, layerAlpha = layerAlpha)
                     }
                 }
                 is Shape.Arrow -> {
                     val x0 = t.x(shape.x0); val y0 = t.y(shape.y0)
                     val x1 = t.x(shape.x1); val y1 = t.y(shape.y1)
                     appendPath(sb, "M${f(x0)},${f(y0)}L${f(x1)},${f(y1)}",
-                        fillColor = null, strokeColor = strokeColor, strokeWidth = strokeWidth)
+                        fillColor = null, strokeColor = strokeColor,
+                        strokeWidth = strokeWidth, layerAlpha = layerAlpha)
                     val dx = x1 - x0; val dy = y1 - y0
                     val len = hypot(dx, dy)
                     if (len >= 1e-3f) {
@@ -383,6 +489,7 @@ class NoteVectorDrawableExporter @Inject constructor(
                             fillColor = strokeColor,
                             strokeColor = null,
                             strokeWidth = 0f,
+                            layerAlpha = layerAlpha,
                         )
                     }
                 }
@@ -402,6 +509,7 @@ class NoteVectorDrawableExporter @Inject constructor(
                         fillColor = if (shape.closed) fillColor else null,
                         strokeColor = strokeColor,
                         strokeWidth = strokeWidth,
+                        layerAlpha = layerAlpha,
                     )
                 }
             }
@@ -442,12 +550,19 @@ class NoteVectorDrawableExporter @Inject constructor(
             join: String = "round",
             fillAlpha: Float = 1f,
             fillType: String? = null,
+            /** 17.3 — owning layer's opacity, baked in (VD `<group>` has none). */
+            layerAlpha: Float = 1f,
         ) {
+            // VectorDrawable groups carry no opacity, so fold the layer's
+            // opacity into each path's alpha. Defaults to 1f (flat export),
+            // keeping the pre-17.3 wire format byte-identical.
+            val effFillAlpha = fillAlpha * layerAlpha
+            val effStrokeAlpha = strokeAlpha * layerAlpha
             sb.append(indent).append("<path\n")
             sb.append(indent).append("    android:pathData=\"").append(pathData).append("\"\n")
             sb.append(indent).append("    android:fillColor=\"").append(fillColor ?: "#00000000").append("\"")
-            if (fillColor != null && fillAlpha < 1f) {
-                sb.append("\n").append(indent).append("    android:fillAlpha=\"").append(f(fillAlpha)).append("\"")
+            if (fillColor != null && effFillAlpha < 1f) {
+                sb.append("\n").append(indent).append("    android:fillAlpha=\"").append(f(effFillAlpha)).append("\"")
             }
             if (fillColor != null && fillType != null) {
                 sb.append("\n").append(indent).append("    android:fillType=\"").append(fillType).append("\"")
@@ -457,8 +572,8 @@ class NoteVectorDrawableExporter @Inject constructor(
                 sb.append("\n").append(indent).append("    android:strokeWidth=\"").append(f(strokeWidth)).append("\"")
                 sb.append("\n").append(indent).append("    android:strokeLineCap=\"").append(cap ?: "round").append("\"")
                 sb.append("\n").append(indent).append("    android:strokeLineJoin=\"").append(join).append("\"")
-                if (strokeAlpha < 1f) {
-                    sb.append("\n").append(indent).append("    android:strokeAlpha=\"").append(f(strokeAlpha)).append("\"")
+                if (effStrokeAlpha < 1f) {
+                    sb.append("\n").append(indent).append("    android:strokeAlpha=\"").append(f(effStrokeAlpha)).append("\"")
                 }
             }
             sb.append("/>\n")

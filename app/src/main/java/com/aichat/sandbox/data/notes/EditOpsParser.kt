@@ -172,6 +172,11 @@ object EditOpsParser {
                     .coerceAtLeast(0f)
                 EditOp.Simplify(ids, tolerance)
             }
+            "merge_paths" -> {
+                val ids = parseIdList(obj, knownIds)
+                if (ids.size < 2) throw IllegalArgumentException("merge_paths: need ≥2 ids")
+                EditOp.MergePaths(ids)
+            }
             "delete" -> {
                 val ids = parseIdList(obj, knownIds)
                 if (ids.isEmpty()) throw IllegalArgumentException("delete: no valid ids")

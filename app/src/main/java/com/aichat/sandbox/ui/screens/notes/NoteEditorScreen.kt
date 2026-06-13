@@ -725,6 +725,8 @@ fun NoteEditorScreen(
                     // Phase 13 — booleans, gradients, style tools.
                     canCombine = viewModel.selectionCanCombine(),
                     onCombine = viewModel::combineSelection,
+                    canMergePaths = viewModel.selectionCanMergePaths(),
+                    onMergePaths = viewModel::mergeSelectionPaths,
                     onSetGradient = viewModel::setSelectionGradient,
                     canCopyStyle = viewModel.selectionIsSingleStyleSource(),
                     onCopyStyle = viewModel::copySelectionStyle,
@@ -751,6 +753,7 @@ fun NoteEditorScreen(
                         onImmediateEdit = { payload, description ->
                             viewModel.applyPathNodeEdit(nodeEditItem.id, payload, description)
                         },
+                        onDeleteItem = { viewModel.deleteNodeEditItem(nodeEditItem.id) },
                         onDone = viewModel::exitNodeEdit,
                     )
                 }

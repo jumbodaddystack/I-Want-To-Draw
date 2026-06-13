@@ -24,11 +24,13 @@ import com.aichat.sandbox.data.local.MIGRATION_16_17
 import com.aichat.sandbox.data.local.MIGRATION_17_18
 import com.aichat.sandbox.data.local.MIGRATION_18_19
 import com.aichat.sandbox.data.local.MIGRATION_19_20
+import com.aichat.sandbox.data.local.MIGRATION_20_21
 import com.aichat.sandbox.data.local.createNotesSearchIndex
 import com.aichat.sandbox.data.local.NoteAudioDao
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.local.NoteFrameDao
 import com.aichat.sandbox.data.local.NoteSearchDao
+import com.aichat.sandbox.data.local.NoteTagDao
 import com.aichat.sandbox.data.local.NotebookDao
 import com.aichat.sandbox.data.local.StampDao
 import com.aichat.sandbox.data.local.UserTemplateDao
@@ -79,6 +81,7 @@ object AppModule {
             MIGRATION_17_18,
             MIGRATION_18_19,
             MIGRATION_19_20,
+            MIGRATION_20_21,
         ).addCallback(object : androidx.room.RoomDatabase.Callback() {
             // `notes_ocr_fts` is not a Room entity, so fresh installs (which
             // skip migrations) must create it here. Upgrades get the same DDL
@@ -97,6 +100,11 @@ object AppModule {
     @Provides
     fun provideNoteDao(database: AppDatabase): NoteDao {
         return database.noteDao()
+    }
+
+    @Provides
+    fun provideNoteTagDao(database: AppDatabase): NoteTagDao {
+        return database.noteTagDao()
     }
 
     @Provides
@@ -159,9 +167,10 @@ object AppModule {
         @ApplicationContext context: Context,
         noteDao: NoteDao,
         noteFrameDao: NoteFrameDao,
+        noteTagDao: NoteTagDao,
         handwritingOcr: HandwritingOcr,
     ): NoteRepository {
-        return NoteRepository(context, noteDao, noteFrameDao, handwritingOcr)
+        return NoteRepository(context, noteDao, noteFrameDao, noteTagDao, handwritingOcr)
     }
 
     @Provides
