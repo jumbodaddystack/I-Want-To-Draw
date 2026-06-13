@@ -3352,6 +3352,16 @@ class NoteEditorViewModel @Inject constructor(
         _pendingEdit.value = null
         if (pending.simulation.isEmpty) return
         apply(pending.simulation.toCompositeEdit(pending.description))
+        // Auto-select model-authored geometry so the user can immediately see
+        // and grab it (move / resize / tweak). This is essential on a clipped
+        // icon artboard, where freshly-placed geometry is otherwise easy to
+        // miss and awkward to lasso. No-op for edits that add nothing.
+        val addedIds = pending.simulation.added.mapTo(HashSet()) { it.id }
+        if (addedIds.isNotEmpty()) {
+            _selection.value = addedIds
+            _selectionWorldBounds.value = recomputeSelectionBounds()
+            _selectionMatrix.value = StrokeTransform.IDENTITY
+        }
     }
 
     /** Sub-phase 7.4 — drop the staged AI edit without touching the canvas. */
@@ -3501,6 +3511,20 @@ class NoteEditorViewModel @Inject constructor(
         return floatArrayOf(bounds[0] + dx, bounds[1], bounds[2] + dx, bounds[3])
     }
 
+    /**
+     * Phase 17.5 #2 — in-place fit target for an *icon* refine: the original
+     * sketch's own bounds. The cleaned vector is fit onto the sketch's
+     * footprint and replaces it (see [stagePendingEdit]), so it stays inside
+     * the clipped artboard and lands exactly where the user drew. Null when
+     * the sketch has no measurable bounds (the result then lands at the
+     * model's own coordinates).
+     */
+    private fun refineInPlaceTarget(selection: List<NoteItem>?): FloatArray? {
+        val bounds = NoteRasterizer.computeBounds(selection ?: return null) ?: return null
+        if (bounds[2] - bounds[0] <= 0f || bounds[3] - bounds[1] <= 0f) return null
+        return bounds
+    }
+
     private suspend fun runStream(
         turnId: String,
         prompt: String,
@@ -3514,10 +3538,23 @@ class NoteEditorViewModel @Inject constructor(
             .ifEmpty { preferencesManager.defaultModel.first() }
         val creds = preferencesManager.credentialsFor(modelId)
         // 17.5 #1: from-scratch generation pulls gallery style references.
-        // 17.5 #2: a refine fits the cleaned result into a sketch-sized box one
-        // sketch-width to the right of the original so the two sit side by side.
+        // 17.5 #2: placement of a refine's cleaned vector. An icon is a
+        // *clipped* artboard — "beside the sketch" lands off-canvas and
+        // invisible — so we fit the result onto the sketch's own footprint and
+        // replace it (Undo restores the sketch to compare). A regular note has
+        // an infinite canvas, so the side-by-side comparison still works.
         val styleReferences = if (generate && !refine) loadStyleReferenceIcons() else emptyList()
-        val authoredFit = if (refine) refinePlacementTarget(selection) else null
+        val isIcon = _note.value.isIcon
+        val authoredFit = when {
+            !refine -> null
+            isIcon -> refineInPlaceTarget(selection)
+            else -> refinePlacementTarget(selection)
+        }
+        val refineReplaceIds: Set<String> = if (refine && isIcon) {
+            selection?.mapTo(HashSet()) { it.id } ?: emptySet()
+        } else {
+            emptySet()
+        }
         val request = AskRequest(
             note = _note.value,
             allItems = items.toList(),
@@ -3541,7 +3578,7 @@ class NoteEditorViewModel @Inject constructor(
                         is AiChunk.Complete -> turn.copy(state = TurnState.Done)
                         is AiChunk.Error -> turn.copy(state = TurnState.Error(chunk.message))
                         is AiChunk.EditPreview -> {
-                            stagePendingEdit(chunk, editDescription, authoredFit)
+                            stagePendingEdit(chunk, editDescription, authoredFit, refineReplaceIds)
                             val message = chunk.doc.summary.ifBlank {
                                 if (chunk.doc.ops.isEmpty()) "No changes proposed."
                                 else "Preview ready (${chunk.doc.ops.size} ops)."
@@ -3610,6 +3647,7 @@ class NoteEditorViewModel @Inject constructor(
         chunk: AiChunk.EditPreview,
         description: String,
         authoredFit: FloatArray? = null,
+        replaceIds: Set<String> = emptySet(),
     ) {
         val simulation = EditPreviewController.simulate(
             currentItems = items.toList(),
@@ -3620,10 +3658,21 @@ class NoteEditorViewModel @Inject constructor(
             newItemNoteId = _note.value.id,
             authoredFit = authoredFit,
         )
+        // Replace-in-place (icon refine): drop the original sketch items in the
+        // same edit so there's no invisible leftover. Guarded on the model
+        // having actually produced geometry — an empty reply must not silently
+        // wipe the sketch with nothing to show for it.
+        val finalSimulation = if (replaceIds.isNotEmpty() && simulation.added.isNotEmpty()) {
+            val alreadyRemoved = simulation.removed.mapTo(HashSet()) { it.id }
+            val extraRemoved = items.filter { it.id in replaceIds && it.id !in alreadyRemoved }
+            simulation.copy(removed = simulation.removed + extraRemoved)
+        } else {
+            simulation
+        }
         _pendingEdit.value = PendingEdit(
             description = description,
             doc = chunk.doc,
-            simulation = simulation,
+            simulation = finalSimulation,
         )
     }
 
