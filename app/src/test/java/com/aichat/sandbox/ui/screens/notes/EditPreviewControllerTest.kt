@@ -351,6 +351,113 @@ class EditPreviewControllerTest {
         assertEquals(4f, payload.subpaths[0].anchors[0].y, 1e-3f)
     }
 
+    @Test
+    fun authoredFitScalesAndCentresGeometryIntoTargetRect() {
+        // A 10×10 square authored near the origin, fit into a 100×100 box far
+        // away — it should scale ×10 and land exactly on the target rect. This
+        // is the refine-placement fix: the model's raw coordinates are
+        // arbitrary, so we fit rather than translate.
+        val doc = EditOpsDoc(1, "refine", listOf(
+            EditOp.AddPath(
+                subpaths = listOf(
+                    EditOp.SubpathSpec(
+                        anchors = listOf(
+                            EditOp.AnchorSpec(0f, 0f),
+                            EditOp.AnchorSpec(10f, 0f),
+                            EditOp.AnchorSpec(10f, 10f),
+                            EditOp.AnchorSpec(0f, 10f),
+                        ),
+                        closed = true,
+                    ),
+                ),
+                colorArgb = null, fillArgb = null, width = null,
+            ),
+        ))
+        val sim = EditPreviewController.simulate(
+            currentItems = emptyList(),
+            doc = doc,
+            idMap = emptyMap(),
+            layerMap = emptyMap(),
+            layers = emptyList(),
+            newItemNoteId = "icon-1",
+            authoredFit = floatArrayOf(1000f, 200f, 1100f, 300f),
+        )
+        assertEquals(1, sim.added.size)
+        val bounds = com.aichat.sandbox.ui.components.notes.PathCodec.boundsOf(
+            com.aichat.sandbox.ui.components.notes.PathCodec.decode(sim.added[0].payload)
+        )!!
+        assertEquals(1000f, bounds[0], 1e-2f)
+        assertEquals(200f, bounds[1], 1e-2f)
+        assertEquals(1100f, bounds[2], 1e-2f)
+        assertEquals(300f, bounds[3], 1e-2f)
+    }
+
+    @Test
+    fun authoredFitPreservesAspectAndCentres() {
+        // A 20×10 (wide) source fit into a 100×100 square: scales ×5 (limited
+        // by width), so the result is 100 wide × 50 tall, centred vertically.
+        val doc = EditOpsDoc(1, "refine", listOf(
+            EditOp.AddPath(
+                subpaths = listOf(
+                    EditOp.SubpathSpec(
+                        anchors = listOf(
+                            EditOp.AnchorSpec(0f, 0f),
+                            EditOp.AnchorSpec(20f, 0f),
+                            EditOp.AnchorSpec(20f, 10f),
+                            EditOp.AnchorSpec(0f, 10f),
+                        ),
+                        closed = true,
+                    ),
+                ),
+                colorArgb = null, fillArgb = null, width = null,
+            ),
+        ))
+        val sim = EditPreviewController.simulate(
+            currentItems = emptyList(),
+            doc = doc,
+            idMap = emptyMap(),
+            layerMap = emptyMap(),
+            layers = emptyList(),
+            newItemNoteId = "icon-1",
+            authoredFit = floatArrayOf(0f, 0f, 100f, 100f),
+        )
+        val bounds = com.aichat.sandbox.ui.components.notes.PathCodec.boundsOf(
+            com.aichat.sandbox.ui.components.notes.PathCodec.decode(sim.added[0].payload)
+        )!!
+        assertEquals(0f, bounds[0], 1e-2f)
+        assertEquals(100f, bounds[2], 1e-2f)
+        // Height scaled to 50, centred in the 100-tall box → y in [25, 75].
+        assertEquals(25f, bounds[1], 1e-2f)
+        assertEquals(75f, bounds[3], 1e-2f)
+    }
+
+    @Test
+    fun authoredFitFitsAllAuthoredItemsAsAGroup() {
+        // Two authored shapes are fit as one group, preserving their relative
+        // layout — the union of both lands on the target rect.
+        val doc = EditOpsDoc(1, "refine", listOf(
+            EditOp.AddShape(EditOp.ShapeSpec.Rect(0f, 0f, 10f, 10f), null, null, null),
+            EditOp.AddShape(EditOp.ShapeSpec.Rect(10f, 10f, 20f, 20f), null, null, null),
+        ))
+        val sim = EditPreviewController.simulate(
+            currentItems = emptyList(),
+            doc = doc,
+            idMap = emptyMap(),
+            layerMap = emptyMap(),
+            layers = emptyList(),
+            newItemNoteId = "icon-1",
+            authoredFit = floatArrayOf(0f, 0f, 40f, 40f),
+        )
+        assertEquals(2, sim.added.size)
+        // Union of the two 20×20 source rects fit into a 40×40 box ⇒ ×2 scale.
+        val b0 = ShapeCodec.boundsOf(ShapeCodec.decode(sim.added[0].payload).shape)!!
+        val b1 = ShapeCodec.boundsOf(ShapeCodec.decode(sim.added[1].payload).shape)!!
+        assertEquals(0f, minOf(b0[0], b1[0]), 1e-2f)
+        assertEquals(0f, minOf(b0[1], b1[1]), 1e-2f)
+        assertEquals(40f, maxOf(b0[2], b1[2]), 1e-2f)
+        assertEquals(40f, maxOf(b0[3], b1[3]), 1e-2f)
+    }
+
     private fun pathItem(x: Float, colorArgb: Int = 0xFF000000.toInt()): NoteItem {
         val payload = com.aichat.sandbox.ui.components.notes.PathCodec.PathPayload(
             anchors = listOf(
