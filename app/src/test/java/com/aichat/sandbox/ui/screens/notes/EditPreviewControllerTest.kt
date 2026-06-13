@@ -176,6 +176,62 @@ class EditPreviewControllerTest {
         assertNotNull(sim.skipped.firstOrNull { it.contains("locked") || it.contains("set_layer") })
     }
 
+    @Test
+    fun mergePathsFoldsCompatiblePathsIntoOne() {
+        val a = pathItem(0f)
+        val b = pathItem(20f)
+        val doc = EditOpsDoc(1, "", listOf(EditOp.MergePaths(listOf("p_001", "p_002"))))
+        val sim = EditPreviewController.simulate(
+            currentItems = listOf(a, b),
+            doc = doc,
+            idMap = mapOf("p_001" to a.id, "p_002" to b.id),
+            layerMap = emptyMap(),
+            layers = emptyList(),
+        )
+        // Both sources removed, one merged path added with two subpaths.
+        assertEquals(setOf(a.id, b.id), sim.removed.mapTo(HashSet()) { it.id })
+        assertEquals(1, sim.added.size)
+        val merged = com.aichat.sandbox.ui.components.notes.PathCodec.decode(sim.added[0].payload)
+        assertEquals(2, merged.subpaths.size)
+    }
+
+    @Test
+    fun mergePathsRefusesIncompatibleColours() {
+        val a = pathItem(0f, colorArgb = 0xFF000000.toInt())
+        val b = pathItem(20f, colorArgb = 0xFFFF0000.toInt())
+        val doc = EditOpsDoc(1, "", listOf(EditOp.MergePaths(listOf("p_001", "p_002"))))
+        val sim = EditPreviewController.simulate(
+            currentItems = listOf(a, b),
+            doc = doc,
+            idMap = mapOf("p_001" to a.id, "p_002" to b.id),
+            layerMap = emptyMap(),
+            layers = emptyList(),
+        )
+        assertTrue(sim.isEmpty)
+        assertNotNull(sim.skipped.firstOrNull { it.contains("merge_paths") })
+    }
+
+    private fun pathItem(x: Float, colorArgb: Int = 0xFF000000.toInt()): NoteItem {
+        val payload = com.aichat.sandbox.ui.components.notes.PathCodec.PathPayload(
+            anchors = listOf(
+                com.aichat.sandbox.ui.components.notes.PathCodec.Anchor(x, 0f),
+                com.aichat.sandbox.ui.components.notes.PathCodec.Anchor(x + 10f, 0f),
+                com.aichat.sandbox.ui.components.notes.PathCodec.Anchor(x + 10f, 10f),
+            ),
+            closed = true,
+        )
+        return NoteItem(
+            id = UUID.randomUUID().toString(),
+            noteId = "n1",
+            zIndex = 0,
+            kind = com.aichat.sandbox.ui.components.notes.PathCodec.KIND,
+            tool = null,
+            colorArgb = colorArgb,
+            baseWidthPx = 2f,
+            payload = com.aichat.sandbox.ui.components.notes.PathCodec.encode(payload),
+        )
+    }
+
     private fun strokeItem(colorArgb: Int = 0xFF000000.toInt()): NoteItem {
         val samples = floatArrayOf(
             0f, 0f, 1f, 0f,

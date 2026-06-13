@@ -28,13 +28,14 @@ class EditOpsParserTest {
                 { "op": "simplify",   "ids": ["s_006"], "tolerance": 1.5 },
                 { "op": "delete",     "ids": ["s_007"] },
                 { "op": "set_layer",  "ids": ["s_008"], "layer": "L1" },
-                { "op": "group",      "ids": ["s_009"] }
+                { "op": "group",      "ids": ["s_009"] },
+                { "op": "merge_paths","ids": ["s_010", "s_011"] }
               ]
             }
             ```
         """.trimIndent()
         val doc = EditOpsParser.parse(raw).getOrThrow()
-        assertEquals(9, doc.ops.size)
+        assertEquals(10, doc.ops.size)
         assertEquals("ok", doc.summary)
         assertTrue(doc.ops[0] is EditOp.Transform)
         assertTrue(doc.ops[1] is EditOp.Recolor)
@@ -45,6 +46,17 @@ class EditOpsParserTest {
         assertTrue(doc.ops[6] is EditOp.Delete)
         assertTrue(doc.ops[7] is EditOp.SetLayer)
         assertTrue(doc.ops[8] is EditOp.Group)
+        assertTrue(doc.ops[9] is EditOp.MergePaths)
+    }
+
+    @Test
+    fun mergePathsRequiresAtLeastTwoIds() {
+        val raw = """{ "summary": "", "ops": [
+            { "op": "merge_paths", "ids": ["only_one"] }
+        ]}"""
+        val doc = EditOpsParser.parse(raw).getOrThrow()
+        assertEquals(0, doc.ops.size)
+        assertFalse(doc.rejected.isEmpty())
     }
 
     @Test

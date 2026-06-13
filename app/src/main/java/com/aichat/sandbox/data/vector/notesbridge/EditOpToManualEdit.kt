@@ -52,9 +52,13 @@ object EditOpToManualEdit {
                 tolerance = op.tolerance,
             )
             // Geometry / canvas-only ops are not expressible as a VectorManualEdit.
+            // merge_paths (17.5) folds note-canvas path payloads into one
+            // multi-subpath item; the vector lane has no equivalent single-op,
+            // so it stays on the notes side.
             is EditOp.Transform,
             is EditOp.ReplaceWithShape,
             is EditOp.Smooth,
+            is EditOp.MergePaths,
             is EditOp.SetLayer,
             is EditOp.Group,
             -> null

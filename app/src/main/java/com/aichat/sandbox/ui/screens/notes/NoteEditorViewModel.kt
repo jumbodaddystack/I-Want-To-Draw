@@ -49,6 +49,7 @@ import com.aichat.sandbox.ui.components.notes.ConnectorResolver
 import com.aichat.sandbox.ui.components.notes.PathBooleanBridge
 import com.aichat.sandbox.ui.components.notes.PathCodec
 import com.aichat.sandbox.ui.components.notes.PathConversions
+import com.aichat.sandbox.ui.components.notes.PathMerge
 import com.aichat.sandbox.ui.components.notes.Shape
 import com.aichat.sandbox.ui.components.notes.ShapeCodec
 import com.aichat.sandbox.ui.components.notes.Snap
@@ -2268,6 +2269,82 @@ class NoteEditorViewModel @Inject constructor(
             description = "$opName ${eligible.size} paths",
             added = added,
             removed = eligible,
+            modified = emptyList(),
+        ))
+        _selection.value = added.mapTo(HashSet(added.size)) { it.id }
+        _selectionWorldBounds.value = recomputeSelectionBounds()
+        _selectionMatrix.value = StrokeTransform.IDENTITY
+    }
+
+    /**
+     * Phase 17.5 — true when the selection holds at least one style-compatible
+     * pair of path items (gates the local "Merge paths" action). Unlike
+     * [selectionCanCombine] this is concatenation, not a boolean op, so the
+     * inputs must already share colour / width / fill styling.
+     */
+    fun selectionCanMergePaths(): Boolean {
+        val ids = _selection.value
+        if (ids.size < 2) return false
+        val paths = items.filter { it.id in ids && it.kind == PathCodec.KIND }
+        for (i in paths.indices) {
+            for (j in i + 1 until paths.size) {
+                if (pathsMergeable(paths[i], paths[j])) return true
+            }
+        }
+        return false
+    }
+
+    private fun pathsMergeable(a: NoteItem, b: NoteItem): Boolean =
+        a.colorArgb == b.colorArgb && a.baseWidthPx == b.baseWidthPx &&
+            PathMerge.compatible(PathCodec.decode(a.payload), PathCodec.decode(b.payload))
+
+    /**
+     * Phase 17.5 — fold style-compatible selected paths into one multi-subpath
+     * path each (holes preserved as subpaths). Mixed selections are partitioned
+     * by style, so each compatible run of ≥ 2 becomes one merged path while
+     * incompatible singletons are left as-is. One `CompositeEdit("Merge N
+     * paths")` removes the sources and adds the merged results.
+     */
+    fun mergeSelectionPaths() {
+        val ids = _selection.value
+        val paths = items
+            .filter { it.id in ids && it.kind == PathCodec.KIND }
+            .sortedBy { it.zIndex }
+        if (paths.size < 2) return
+        val groups = ArrayList<MutableList<NoteItem>>()
+        outer@ for (p in paths) {
+            for (g in groups) {
+                if (pathsMergeable(g.first(), p)) {
+                    g.add(p)
+                    continue@outer
+                }
+            }
+            groups.add(mutableListOf(p))
+        }
+        val removed = ArrayList<NoteItem>()
+        val added = ArrayList<NoteItem>()
+        for (g in groups) {
+            if (g.size < 2) continue
+            val merged = PathMerge.merge(g.map { PathCodec.decode(it.payload) }) ?: continue
+            val base = g.first() // lowest zIndex — sources are zIndex-sorted
+            removed += g
+            added += NoteItem(
+                noteId = resolvedNoteId,
+                zIndex = base.zIndex,
+                kind = PathCodec.KIND,
+                tool = null,
+                colorArgb = base.colorArgb,
+                baseWidthPx = base.baseWidthPx,
+                payload = PathCodec.encode(merged),
+                layerId = base.layerId,
+                groupId = base.groupId,
+            )
+        }
+        if (added.isEmpty()) return
+        apply(EditorAction.CompositeEdit(
+            description = "Merge ${removed.size} paths",
+            added = added,
+            removed = removed,
             modified = emptyList(),
         ))
         _selection.value = added.mapTo(HashSet(added.size)) { it.id }

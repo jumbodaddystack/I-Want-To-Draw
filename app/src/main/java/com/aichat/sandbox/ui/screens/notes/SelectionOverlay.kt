@@ -141,6 +141,9 @@ fun SelectionOverlay(
     // Phase 13.1 — boolean ops; 13.2 — gradient fills; 13.3 — style tools.
     canCombine: Boolean = false,
     onCombine: ((PathBoolean.Op) -> Unit)? = null,
+    // Phase 17.5 — concatenate style-compatible paths into one (holes kept).
+    canMergePaths: Boolean = false,
+    onMergePaths: (() -> Unit)? = null,
     onSetGradient: ((FillStyle.Gradient) -> Unit)? = null,
     canCopyStyle: Boolean = false,
     onCopyStyle: (() -> Unit)? = null,
@@ -380,6 +383,8 @@ fun SelectionOverlay(
             onOutlineStroke = onOutlineStroke,
             canCombine = canCombine,
             onCombine = onCombine,
+            canMergePaths = canMergePaths,
+            onMergePaths = onMergePaths,
             onSetGradient = onSetGradient,
             canCopyStyle = canCopyStyle,
             onCopyStyle = onCopyStyle,
@@ -543,6 +548,8 @@ private fun FloatingSelectionMenu(
     onOutlineStroke: (() -> Unit)? = null,
     canCombine: Boolean = false,
     onCombine: ((PathBoolean.Op) -> Unit)? = null,
+    canMergePaths: Boolean = false,
+    onMergePaths: (() -> Unit)? = null,
     onSetGradient: ((FillStyle.Gradient) -> Unit)? = null,
     canCopyStyle: Boolean = false,
     onCopyStyle: (() -> Unit)? = null,
@@ -627,6 +634,15 @@ private fun FloatingSelectionMenu(
             // Phase 13.1 — boolean ops on ≥ 2 selected shapes / paths.
             if (canCombine && onCombine != null) {
                 CombineMenuButton(onCombine = onCombine)
+            }
+            // Phase 17.5 — merge style-compatible paths into one (no clipping;
+            // holes preserved as subpaths).
+            if (canMergePaths && onMergePaths != null) {
+                MenuButton(
+                    icon = Icons.Filled.MergeType,
+                    label = "Merge",
+                    onClick = onMergePaths,
+                )
             }
             // Phase 10.2/10.3 — restyle existing shapes (fill + line style);
             // 13.2 adds gradient presets.
