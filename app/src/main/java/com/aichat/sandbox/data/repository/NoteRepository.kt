@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.util.Log
 import com.aichat.sandbox.data.local.NoteDao
 import com.aichat.sandbox.data.local.NoteFrameDao
+import com.aichat.sandbox.data.local.NoteTagDao
+import com.aichat.sandbox.data.local.TagCount
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteFrame
 import com.aichat.sandbox.data.model.NoteItem
@@ -32,6 +34,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -41,6 +44,7 @@ class NoteRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val noteDao: NoteDao,
     private val noteFrameDao: NoteFrameDao,
+    private val noteTagDao: NoteTagDao,
     private val ocr: HandwritingOcr,
 ) {
 
@@ -121,6 +125,88 @@ class NoteRepository @Inject constructor(
         noteFrameDao.deleteFramesForNote(noteId)
         if (frames.isNotEmpty()) noteFrameDao.upsertFrames(frames)
     }
+
+    // ── Tags (Phase 17.1) ───────────────────────────────────────────────
+
+    /** Every icon tag with its icon count, for the gallery's chip row. */
+    fun observeIconTagCounts(): Flow<List<TagCount>> = noteTagDao.observeIconTagCounts()
+
+    /** Icons carrying [tag], recency-ordered like [observeIcons]. */
+    fun observeIconsWithTag(tag: String): Flow<List<Note>> = noteTagDao.observeIconsWithTag(tag)
+
+    suspend fun getTags(noteId: String): List<String> = withContext(Dispatchers.IO) {
+        noteTagDao.getTagsFor(noteId)
+    }
+
+    /** Ids of every note carrying [tag] — intersected with FTS search results. */
+    suspend fun getNoteIdsWithTag(tag: String): List<String> = withContext(Dispatchers.IO) {
+        noteTagDao.getNoteIdsWithTag(tag)
+    }
+
+    /** Replace [noteId]'s tag set atomically. Callers pass normalized tags
+     *  ([com.aichat.sandbox.data.notes.IconTags.parse] output). */
+    suspend fun setTags(noteId: String, tags: List<String>) = withContext(Dispatchers.IO) {
+        noteTagDao.setTags(noteId, tags)
+    }
+
+    /**
+     * Phase 17.1 — "duplicate as variant". Deep-copies [noteId] (items,
+     * layers, frames, tags) under fresh ids so the copy and the original
+     * never alias: items are re-pointed at the copied layers, and group ids
+     * are remapped per group so a later cross-note operation can't conflate
+     * them. The undo log is intentionally dropped (its item ids reference
+     * the source note) and the thumbnail starts null — callers follow up
+     * with [renderThumbnailAsync].
+     *
+     * Returns the new note id, or null when the source vanished underneath.
+     */
+    suspend fun duplicateNote(noteId: String, title: String): String? =
+        withContext(Dispatchers.IO) {
+            val source = noteDao.getNote(noteId) ?: return@withContext null
+            val items = noteDao.getItems(noteId)
+            val layers = noteDao.getLayers(noteId)
+            val frames = noteFrameDao.getFrames(noteId)
+            val tags = noteTagDao.getTagsFor(noteId)
+
+            val newNoteId = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            val layerIdMap = layers.associate { it.id to UUID.randomUUID().toString() }
+            val groupIdMap = HashMap<String, String>()
+
+            val copy = source.copy(
+                id = newNoteId,
+                title = title,
+                thumbnailPath = null,
+                undoLogJson = null,
+                createdAt = now,
+                updatedAt = now,
+            )
+            val newLayers = layers.map { layer ->
+                layer.copy(id = layerIdMap.getValue(layer.id), noteId = newNoteId)
+            }
+            val newItems = items.map { item ->
+                item.copy(
+                    id = UUID.randomUUID().toString(),
+                    noteId = newNoteId,
+                    // Orphaned layer ids (tolerated at render time) map to
+                    // null — same default-layer behaviour, no dangling ref.
+                    layerId = item.layerId?.let { layerIdMap[it] },
+                    groupId = item.groupId?.let { g ->
+                        groupIdMap.getOrPut(g) { UUID.randomUUID().toString() }
+                    },
+                )
+            }
+            noteDao.saveNoteWithLayers(copy, newItems, newLayers)
+            if (frames.isNotEmpty()) {
+                noteFrameDao.upsertFrames(
+                    frames.map { frame ->
+                        frame.copy(id = UUID.randomUUID().toString(), noteId = newNoteId)
+                    },
+                )
+            }
+            if (tags.isNotEmpty()) noteTagDao.setTags(newNoteId, tags)
+            newNoteId
+        }
 
     suspend fun deleteNote(noteId: String) = withContext(Dispatchers.IO) {
         // Item rows cascade via the foreign key, but the cached PNG isn't part

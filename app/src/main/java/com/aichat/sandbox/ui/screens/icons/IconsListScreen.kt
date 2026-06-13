@@ -5,7 +5,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,11 +25,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -43,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,6 +59,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.aichat.sandbox.data.model.Note
+import com.aichat.sandbox.data.notes.IconTags
 import com.aichat.sandbox.ui.components.studio.ArtboardCradle
 import com.aichat.sandbox.ui.components.studio.StudioPrimaryAction
 import com.aichat.sandbox.ui.components.studio.StudioSectionMarker
@@ -82,6 +91,9 @@ fun IconsListScreen(
 ) {
     StudioTheme(dark = isSystemInDarkTheme()) {
         val icons by viewModel.icons.collectAsState()
+        // 17.1 — long-press opens a small action sheet; delete keeps its
+        // confirm step behind it.
+        var actionTarget by remember { mutableStateOf<Note?>(null) }
         var pendingDelete by remember { mutableStateOf<Note?>(null) }
         val colors = StudioTheme.colors
         val spacing = StudioTheme.spacing
@@ -111,6 +123,10 @@ fun IconsListScreen(
                 }
             }
         }
+        // Phase 17.1 — a freshly created variant opens straight in the editor.
+        LaunchedEffect(Unit) {
+            viewModel.variantCreated.collect { noteId -> onIconClick(noteId) }
+        }
 
         BoxWithConstraints(
             modifier = Modifier
@@ -138,13 +154,39 @@ fun IconsListScreen(
                     singleLine = true,
                 )
 
-                if (icons.isEmpty() && query.isNotBlank()) {
+                // Phase 17.1 — tag filter chips; combine with the search field.
+                val tagCounts by viewModel.tagCounts.collectAsState()
+                val selectedTag by viewModel.selectedTag.collectAsState()
+                if (tagCounts.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = spacing.l),
+                        horizontalArrangement = Arrangement.spacedBy(spacing.s),
+                    ) {
+                        tagCounts.forEach { tagCount ->
+                            StudioToolChip(
+                                label = "${tagCount.tag} · ${tagCount.count}",
+                                icon = Icons.Filled.Tag,
+                                selected = tagCount.tag == selectedTag,
+                                onClick = { viewModel.toggleTag(tagCount.tag) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(spacing.s))
+                }
+
+                if (icons.isEmpty() && (query.isNotBlank() || selectedTag != null)) {
                     Box(
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                         contentAlignment = Alignment.Center,
                     ) {
                         StudioText(
-                            text = "No icons match \"$query\"",
+                            text = when {
+                                query.isNotBlank() -> "No icons match \"$query\""
+                                else -> "No icons tagged \"$selectedTag\""
+                            },
                             style = StudioTheme.type.label,
                             color = colors.inkFaint,
                         )
@@ -169,7 +211,7 @@ fun IconsListScreen(
                             IconTile(
                                 note = icon,
                                 onClick = { onIconClick(icon.id) },
-                                onLongClick = { pendingDelete = icon },
+                                onLongClick = { actionTarget = icon },
                             )
                         }
                     }
@@ -201,6 +243,84 @@ fun IconsListScreen(
                     onClick = onNewIcon,
                 )
             }
+        }
+
+        // Phase 17.1 — long-press action sheet: Edit tags / Duplicate as
+        // variant / Delete (delete keeps its confirm dialog behind it).
+        val action = actionTarget
+        if (action != null) {
+            AlertDialog(
+                onDismissRequest = { actionTarget = null },
+                title = { Text("\"${action.title.ifBlank { "Untitled" }}\"") },
+                text = {
+                    Column {
+                        IconActionRow(
+                            label = "Edit tags",
+                            icon = Icons.Filled.Label,
+                            onClick = {
+                                actionTarget = null
+                                viewModel.beginEditTags(action)
+                            },
+                        )
+                        IconActionRow(
+                            label = "Duplicate as variant",
+                            icon = Icons.Filled.ContentCopy,
+                            onClick = {
+                                actionTarget = null
+                                viewModel.duplicateAsVariant(action)
+                            },
+                        )
+                        IconActionRow(
+                            label = "Delete",
+                            icon = Icons.Filled.Delete,
+                            onClick = {
+                                actionTarget = null
+                                pendingDelete = action
+                            },
+                        )
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { actionTarget = null }) { Text("Cancel") }
+                },
+            )
+        }
+
+        // Phase 17.1 — tag editor. Free-form comma-separated input; parsing /
+        // normalization lives in IconTags so it's unit-tested.
+        val tagEdit by viewModel.tagEdit.collectAsState()
+        val editState = tagEdit
+        if (editState != null) {
+            var input by remember(editState.noteId) {
+                mutableStateOf(IconTags.format(editState.initialTags))
+            }
+            AlertDialog(
+                onDismissRequest = viewModel::dismissEditTags,
+                title = { Text("Edit tags") },
+                text = {
+                    Column {
+                        Text(
+                            "Comma-separated. Tags are shared across icons — " +
+                                "reuse one to group variants.",
+                        )
+                        Spacer(Modifier.height(spacing.s))
+                        OutlinedTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("nav, settings, filled") },
+                            leadingIcon = { Icon(Icons.Filled.Tag, contentDescription = null) },
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.saveTags(input) }) { Text("Save") }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissEditTags) { Text("Cancel") }
+                },
+            )
         }
 
         val target = pendingDelete
@@ -249,6 +369,26 @@ private fun IconsHeader(count: Int) {
         )
         Spacer(Modifier.height(spacing.s))
         com.aichat.sandbox.ui.components.studio.StudioHairline()
+    }
+}
+
+/** One row in the long-press action sheet (17.1). */
+@Composable
+private fun IconActionRow(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = StudioTheme.spacing.m),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(StudioTheme.spacing.m),
+    ) {
+        Icon(imageVector = icon, contentDescription = null)
+        Text(label)
     }
 }
 
