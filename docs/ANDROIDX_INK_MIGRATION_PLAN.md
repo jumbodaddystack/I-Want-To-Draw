@@ -70,13 +70,20 @@ Key properties worth noting for our pipelines:
    reaches visual + behavioral parity. This inverts the usual "experiment behind
    a flag" stance — ink is the intended primary, and the flag exists to fall
    *back*, not to opt *in* — but it still needs a checklist before default-on.
-2. **Storage is conservative until parity is proven.** No migration of existing
-   personal notes. `StrokeCodec` remains the canonical on-disk format through
-   I0–I2, while ink payloads may be written as optional/derived data for
-   validation. After rendering + authoring parity, choose either continued
-   `StrokeCodec` canonical storage, dual-write, or an ink-native new-stroke
-   format — but always keep legacy v1/v2 decode so nothing already drawn is
-   lost.
+2. **`StrokeCodec` stays canonical — permanently — and the AI edit pipeline is
+   inviolable.** This is a hard constraint, not a phase outcome. The AI
+   canvas-editing path (`edit-ops` via `EditPreviewController` /
+   `VectorCanvasJson` / `EditOpsParser`: `transform`, `recolor`, `restyle`,
+   `smooth`, `simplify`, `merge_paths`, `add_path`, …) reads and rewrites
+   `StrokeCodec` float samples, and **nothing in this migration may break that.**
+   Consequence: ink is a live-authoring + rendering + *derived*-geometry layer
+   only. An ink-authored stroke is converted to `StrokeCodec`
+   (`InkInterop.fromStroke`) the instant the pen lifts, so once committed it is
+   byte-indistinguishable from a stroke drawn today and the AI pipeline never
+   sees ink. **Ink-native canonical storage is explicitly ruled out** — it is the
+   one option that would force the AI edit-ops to round-trip through ink, so it is
+   off the table regardless of how well ink performs. No migration of existing
+   personal notes; legacy v1/v2 decode is kept forever.
 3. **`BrushPreset` stays user-facing; map it onto `BrushFamily`.**
    A `BrushPreset → Brush/BrushFamily` adapter preserves color / width /
    opacity / taper / jitter / pressure-curve / texture semantics. ink's brush
@@ -119,6 +126,24 @@ StrokeCodec floats  ── toInputBatch() ──▶  StrokeInputBatch / Stroke
 
 Build this first (call it `InkInterop`), unit-test the round-trip on JVM
 (ink runs headless), and the rest of the work composes on top of it.
+
+**Timestamp reconciliation is part of this seam, not deferred to I3.** Our v2
+lane stores time as **milliseconds relative to the audio recording's
+`recordingStartedAt`** (written live as
+`elapsedRealtime() - recordingStartedAt` in `DrawingSurface`). ink's
+`StrokeInput.elapsedTimeMillis` is **stroke-relative** (since the start of the
+stroke). These are two different clocks, so `InkInterop` must define explicitly:
+- **toInputBatch:** subtract the stroke's first-sample time to produce
+  stroke-relative `elapsedTimeMillis` for ink smoothing/playback.
+- **fromStroke:** re-add a stroke-origin offset to restore recording-relative
+  time for audio sync, so committed payloads keep the v2 contract.
+- **v1 strokes (no timestamps):** how time is synthesized (e.g. uniform
+  cadence) when feeding ink.
+- **export payloads:** whether an exported ink/`StrokeInputBatch` carries
+  stroke-relative or recording-relative time.
+
+Get this wrong and replay, audio sync, and "draw with me" (N4) drift. Unit-test
+the two-clock round-trip alongside pressure/tilt.
 
 ## Where ink helps each of the four capability areas
 
@@ -234,9 +259,10 @@ as migration consumers so the engine work preserves their requirements.
 |---|---|---|---|
 | **I0 — `InkInterop` seam** | Bidirectional `StrokeCodec ↔ StrokeInputBatch/Stroke`; stable `BrushPreset → Brush` adapter; JVM round-trip tests | strokes, brush, geometry | Low — no UI |
 | **I0.5 — Toolchain bump** | `compileSdk`/`targetSdk` 36, AGP 8.9+/8.11+, Gradle wrapper, re-verify build | — | Low/Med |
+| **I0.7 — Rendering fidelity spike** | Render 50–100 representative strokes through both `StrokeRenderer` and `CanvasStrokeRenderer`; pixel/visual diff; per-tool go/no-go (pen, pencil, highlighter, marker) **before** building the authoring path | rendering, brush | Low — throwaway |
 | **I1 — Authoring prototype (ink-first)** | `InProgressStrokesView` wired finish→convert→commit behind a fallback-capable runtime switch; not default until the parity checklist passes | authoring, rendering | Med |
-| **I2 — Rendering + behavior parity gate** | Match ink mesh rendering to `StrokeRenderer` (taper/jitter/texture) and verify latency, undo/redo, layer commit, eraser, shape recognition, and audio timestamp sync before default-on | rendering, brush | Med |
-| **I3 — Storage decision + optional v3 lane** | Decide `StrokeCodec` canonical vs dual-write vs ink-native new-stroke storage; define exact v3 orientation/timestamp layout if needed | strokes, storage | Med |
+| **I2 — Rendering + behavior parity gate** | Match ink mesh rendering to `StrokeRenderer` (taper/jitter/texture) and verify latency, undo/redo, layer commit, eraser (incl. **no regression for non-stroke kinds** — shapes, stickies, connectors, paths), shape recognition, and audio timestamp sync before default-on | rendering, brush | Med |
+| **I3 — Optional additive storage + v3 lane** | `StrokeCodec` stays canonical (decided). *Only* if a concrete need appears (e.g. an AI-designed `BrushFamily` per stroke, or a cross-device interchange blob), add **additive dual-write** data that existing code never reads; define the exact v3 orientation/timestamp layout if a brush needs it. Ink-native canonical is ruled out. | strokes, storage | Low/Med |
 | **I4 — Brush richness + N1 foundation** | Stable brush-family mapping first; isolate 1.1-alpha programmable brush experiments; add `DESIGN_BRUSH` only after the spec/adapter settles | brush, rendering | Med |
 | **I5 — Live beautify (N3)** | ink input smoothing into the pen-lift beautify flow | authoring, rendering | Low/Med |
 | **I6 — Mesh-backed geometry adoption** | Back `HitTest`/`LassoController` with `PartitionedMesh`; add per-stroke mesh cache, invalidation, spatial prefilter, and item/layer mapping | geometry | Low/Med |
@@ -245,9 +271,13 @@ as migration consumers so the engine work preserves their requirements.
 
 Sequencing logic: **I0 (the seam) is a hard prerequisite** for everything. The
 ink-first stance pulls the **authoring path forward to I1** — it's the headline
-win on this hardware and the rest composes around it — but I2 is the default-on
-gate, not an afterthought. I3 settles storage before the app accumulates new
-ink-authored notes. Brushes (I4) and beautify (I5) build directly on the new
+win on this hardware and the rest composes around it — but the **I0.7 fidelity
+spike gates I1**: a cheap throwaway render comparison tells us which tools can
+ship through ink rendering *before* we invest in `InProgressStrokesView` wiring,
+and I2 is the full default-on gate, not an afterthought. Storage is already
+decided (`StrokeCodec` canonical, AI pipeline inviolable), so I3 is reduced to an
+optional additive-data question rather than a fork in the road.
+Brushes (I4) and beautify (I5) build directly on the new
 authoring path; geometry/snapping/replay (I6–I8) layer on once the engine is the
 default.
 
@@ -259,11 +289,19 @@ default.
   demonstrates parity; only then retire it.
 - **Default-on checklist.** Before ink becomes default, verify latency on-device,
   pen/pencil/highlighter/marker output, undo/redo, layer commit, eraser behavior,
-  shape recognition, and audio timestamp sync. The fallback switch must be able
-  to recover without data loss.
-- **Storage ambiguity.** Keep `StrokeCodec` canonical through I0–I2; use optional
-  ink payloads only as derived/validation data. I3 must explicitly choose the
-  long-term canonical format and any v3 orientation/timestamp binary layout.
+  shape recognition, and audio timestamp sync. The eraser check must explicitly
+  confirm **no regression for non-stroke `NoteItem` kinds** — the current eraser
+  hit-tests strokes, shapes, stickies, connectors, and paths, and ink's
+  stroke-only mesh hit-testing must not displace that. The fallback switch must
+  be able to recover without data loss.
+- **Storage ambiguity — resolved.** `StrokeCodec` stays canonical permanently and
+  the AI edit-ops pipeline is an inviolable invariant (see Adoption principle 2),
+  so ink-native canonical storage is off the table. The features that seem to
+  want ink-native storage don't: select-similar/snap (N2) needs a *derived,
+  cached* `PartitionedMesh`, and replay (N4) needs the v2 timestamps `StrokeCodec`
+  already carries — neither requires changing the source of truth. I3 only
+  decides whether any *additive* dual-write data is worth its write-path
+  consistency cost, and the exact v3 orientation/timestamp layout.
 - **Toolchain upgrade.** The minSdk 36 bump drags AGP/Gradle/Kotlin forward
   (I0.5). Self-contained, but verify the build + the `CLAUDE.md` SDK-install
   steps still hold afterward.
