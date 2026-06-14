@@ -120,6 +120,24 @@ StrokeCodec floats  ── toInputBatch() ──▶  StrokeInputBatch / Stroke
 Build this first (call it `InkInterop`), unit-test the round-trip on JVM
 (ink runs headless), and the rest of the work composes on top of it.
 
+**Timestamp reconciliation is part of this seam, not deferred to I3.** Our v2
+lane stores time as **milliseconds relative to the audio recording's
+`recordingStartedAt`** (written live as
+`elapsedRealtime() - recordingStartedAt` in `DrawingSurface`). ink's
+`StrokeInput.elapsedTimeMillis` is **stroke-relative** (since the start of the
+stroke). These are two different clocks, so `InkInterop` must define explicitly:
+- **toInputBatch:** subtract the stroke's first-sample time to produce
+  stroke-relative `elapsedTimeMillis` for ink smoothing/playback.
+- **fromStroke:** re-add a stroke-origin offset to restore recording-relative
+  time for audio sync, so committed payloads keep the v2 contract.
+- **v1 strokes (no timestamps):** how time is synthesized (e.g. uniform
+  cadence) when feeding ink.
+- **export payloads:** whether an exported ink/`StrokeInputBatch` carries
+  stroke-relative or recording-relative time.
+
+Get this wrong and replay, audio sync, and "draw with me" (N4) drift. Unit-test
+the two-clock round-trip alongside pressure/tilt.
+
 ## Where ink helps each of the four capability areas
 
 ### A. Programmable brushes + textures  (`ink-brush`)
@@ -234,8 +252,9 @@ as migration consumers so the engine work preserves their requirements.
 |---|---|---|---|
 | **I0 — `InkInterop` seam** | Bidirectional `StrokeCodec ↔ StrokeInputBatch/Stroke`; stable `BrushPreset → Brush` adapter; JVM round-trip tests | strokes, brush, geometry | Low — no UI |
 | **I0.5 — Toolchain bump** | `compileSdk`/`targetSdk` 36, AGP 8.9+/8.11+, Gradle wrapper, re-verify build | — | Low/Med |
+| **I0.7 — Rendering fidelity spike** | Render 50–100 representative strokes through both `StrokeRenderer` and `CanvasStrokeRenderer`; pixel/visual diff; per-tool go/no-go (pen, pencil, highlighter, marker) **before** building the authoring path | rendering, brush | Low — throwaway |
 | **I1 — Authoring prototype (ink-first)** | `InProgressStrokesView` wired finish→convert→commit behind a fallback-capable runtime switch; not default until the parity checklist passes | authoring, rendering | Med |
-| **I2 — Rendering + behavior parity gate** | Match ink mesh rendering to `StrokeRenderer` (taper/jitter/texture) and verify latency, undo/redo, layer commit, eraser, shape recognition, and audio timestamp sync before default-on | rendering, brush | Med |
+| **I2 — Rendering + behavior parity gate** | Match ink mesh rendering to `StrokeRenderer` (taper/jitter/texture) and verify latency, undo/redo, layer commit, eraser (incl. **no regression for non-stroke kinds** — shapes, stickies, connectors, paths), shape recognition, and audio timestamp sync before default-on | rendering, brush | Med |
 | **I3 — Storage decision + optional v3 lane** | Decide `StrokeCodec` canonical vs dual-write vs ink-native new-stroke storage; define exact v3 orientation/timestamp layout if needed | strokes, storage | Med |
 | **I4 — Brush richness + N1 foundation** | Stable brush-family mapping first; isolate 1.1-alpha programmable brush experiments; add `DESIGN_BRUSH` only after the spec/adapter settles | brush, rendering | Med |
 | **I5 — Live beautify (N3)** | ink input smoothing into the pen-lift beautify flow | authoring, rendering | Low/Med |
@@ -245,8 +264,10 @@ as migration consumers so the engine work preserves their requirements.
 
 Sequencing logic: **I0 (the seam) is a hard prerequisite** for everything. The
 ink-first stance pulls the **authoring path forward to I1** — it's the headline
-win on this hardware and the rest composes around it — but I2 is the default-on
-gate, not an afterthought. I3 settles storage before the app accumulates new
+win on this hardware and the rest composes around it — but the **I0.7 fidelity
+spike gates I1**: a cheap throwaway render comparison tells us which tools can
+ship through ink rendering *before* we invest in `InProgressStrokesView` wiring,
+and I2 is the full default-on gate, not an afterthought. I3 settles storage before the app accumulates new
 ink-authored notes. Brushes (I4) and beautify (I5) build directly on the new
 authoring path; geometry/snapping/replay (I6–I8) layer on once the engine is the
 default.
@@ -259,8 +280,11 @@ default.
   demonstrates parity; only then retire it.
 - **Default-on checklist.** Before ink becomes default, verify latency on-device,
   pen/pencil/highlighter/marker output, undo/redo, layer commit, eraser behavior,
-  shape recognition, and audio timestamp sync. The fallback switch must be able
-  to recover without data loss.
+  shape recognition, and audio timestamp sync. The eraser check must explicitly
+  confirm **no regression for non-stroke `NoteItem` kinds** — the current eraser
+  hit-tests strokes, shapes, stickies, connectors, and paths, and ink's
+  stroke-only mesh hit-testing must not displace that. The fallback switch must
+  be able to recover without data loss.
 - **Storage ambiguity.** Keep `StrokeCodec` canonical through I0–I2; use optional
   ink payloads only as derived/validation data. I3 must explicitly choose the
   long-term canonical format and any v3 orientation/timestamp binary layout.
