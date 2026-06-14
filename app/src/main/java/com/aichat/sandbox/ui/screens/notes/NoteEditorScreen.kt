@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Grid4x4
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.automirrored.filled.ViewSidebar
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
@@ -49,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -413,8 +415,12 @@ fun NoteEditorScreen(
                     // entirely). The zoom chip moved onto the canvas itself.
                     Box {
                         IconButton(onClick = { panelsMenuExpanded = true }) {
+                            // V9 fix — a docked-panel glyph instead of the
+                            // generic dashboard grid, so the button reads as
+                            // "open a side panel" (Frames/Pages, Stamps,
+                            // Layers) rather than an undifferentiated icon.
                             Icon(
-                                imageVector = Icons.Filled.Dashboard,
+                                imageVector = Icons.AutoMirrored.Filled.ViewSidebar,
                                 contentDescription = "Panels",
                             )
                         }
@@ -1206,6 +1212,12 @@ fun NoteEditorScreen(
             onIconQuickAction = viewModel::submitIconQuickAction,
             onFooterModeChanged = viewModel::setAiFooterMode,
             onClearScope = viewModel::clearAiSheetScope,
+            onReScopeToSelection = viewModel::reScopeAiSheetToSelection,
+            // A6 — offer "Use selection" only when there's a live canvas
+            // selection that isn't already the frozen scope, so the chip means
+            // something when shown.
+            canReScope = selection.isNotEmpty() &&
+                aiSheetState.pendingSelection?.map { it.id }?.toSet() != selection,
             onInsertConvertResult = viewModel::insertConvertResultAsTextBox,
             onInsertReply = { turnId ->
                 // Compute the viewport-centre fallback in world coords at
@@ -1630,21 +1642,33 @@ private fun PaletteCollapseHandle(
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
+    // V10 fix — the old ~20 dp chevron was a faint signal that competed with
+    // the favourites/brush rows above it. A short grab-bar pill above the
+    // chevron reads as a draggable/tappable handle (the bottom-sheet idiom)
+    // and lifts the whole strip out of the background.
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onToggle)
-            .padding(vertical = 2.dp)
+            .padding(vertical = 6.dp)
             .semantics {
                 contentDescription = if (expanded) "Collapse tools" else "Expand tools"
             },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)),
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
