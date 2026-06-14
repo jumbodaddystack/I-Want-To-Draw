@@ -1,18 +1,19 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
 }
 
 android {
     namespace = "com.aichat.sandbox"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.aichat.sandbox"
-        minSdk = 26
-        targetSdk = 34
+        minSdk = 36
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
 
@@ -37,19 +38,17 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
-        // AndroidX Ink 1.0.0 publishes Kotlin 2.0 metadata (mv=2.0.0); the
-        // project's Kotlin 1.9.22 compiler reads it under this opt-in. The ink
-        // APIs the InkInterop seam uses are stable 1.0.0. Drop this once the
-        // I0.5 toolchain bump moves Kotlin past 2.0.
-        freeCompilerArgs += "-Xskip-metadata-version-check"
+        // The `-Xskip-metadata-version-check` opt-in is no longer needed: the
+        // I0.5 toolchain bump moved the compiler to Kotlin 2.0.21, which reads
+        // AndroidX Ink 1.0.0's Kotlin 2.0 metadata (mv=2.0.0) natively.
     }
     buildFeatures {
         compose = true
         buildConfig = true
     }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
-    }
+    // The Compose compiler version is now supplied by the
+    // `org.jetbrains.kotlin.plugin.compose` Gradle plugin (Kotlin 2.0+), so the
+    // old `composeOptions { kotlinCompilerExtensionVersion }` is gone.
     ksp {
         arg("room.schemaLocation", "$projectDir/schemas")
     }
@@ -116,8 +115,8 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
 
     // Hilt
-    implementation("com.google.dagger:hilt-android:2.50")
-    ksp("com.google.dagger:hilt-android-compiler:2.50")
+    implementation("com.google.dagger:hilt-android:2.52")
+    ksp("com.google.dagger:hilt-android-compiler:2.52")
     implementation("androidx.hilt:hilt-navigation-compose:1.1.0")
 
     // Networking

@@ -5,7 +5,7 @@ Guidance for working in the **AI Chat Sandbox** repo (Android / Kotlin / Jetpack
 ## Project shape
 
 - Android app, package `com.aichat.sandbox`. Source under `app/src/main/java/...`, unit tests under `app/src/test/java/...`.
-- Gradle (Kotlin DSL), wrapper pinned to **Gradle 8.5**. AGP **8.2.2**, Kotlin **1.9.22**, `compileSdk`/`targetSdk` **34**, `minSdk` 26. DI via Hilt; Room for storage; Retrofit/OkHttp for networking.
+- Gradle (Kotlin DSL), wrapper pinned to **Gradle 8.13**. AGP **8.11.1**, Kotlin **2.0.21** (Compose compiler supplied by the `org.jetbrains.kotlin.plugin.compose` plugin), `compileSdk`/`targetSdk` **36**, `minSdk` **36** (Android-16-only target — see `docs/ANDROIDX_INK_MIGRATION_PLAN.md` phase I0.5). DI via Hilt; Room for storage; Retrofit/OkHttp for networking.
 - Multi-provider AI client: `data/remote/` has `ApiClient` (router) + per-provider adapters (`OpenAiAdapter`, `AnthropicAdapter`, `GeminiAdapter`). Model→provider→credentials resolution lives in `ApiProvider` (`data/model/ChatSettings.kt`) and `PreferencesManager.credentialsFor()`. Per-model API quirks live in `data/model/ModelCapabilities.kt` (single source of truth — extend it instead of scattering string checks).
 
 ## Building & testing (IMPORTANT: one-time Android SDK setup)
@@ -25,10 +25,10 @@ rm -rf /tmp/cmdline-tools-extract "$ANDROID_HOME/cmdline-tools/latest"
 unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-tools-extract
 mv /tmp/cmdline-tools-extract/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
 
-# Accept licenses + install exactly what compileSdk 34 needs
+# Accept licenses + install exactly what compileSdk 36 needs
 yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
 "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-  "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+  "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
 # Point Gradle at the SDK (local.properties is gitignored). After this,
 # gradle commands work in any shell without exporting ANDROID_HOME.

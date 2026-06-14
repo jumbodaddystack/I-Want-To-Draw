@@ -24,6 +24,11 @@ object StickyRenderer {
 
     private val cache: HashMap<String, CacheEntry> = HashMap()
 
+    // Declared before `shadowPaint` so its initializer can read it: in an
+    // `object`, members initialize top-to-bottom and Kotlin 2.0 rejects a
+    // forward reference to a non-`const` `val` declared later in the file.
+    private val SHADOW_COLOR = Color.argb(40, 0, 0, 0)
+
     private val shadowPaint = Paint().apply {
         isAntiAlias = true
         style = Paint.Style.FILL
@@ -155,7 +160,6 @@ object StickyRenderer {
     )
 
     private const val SHADOW_OFFSET_WORLD = 3f
-    private val SHADOW_COLOR = Color.argb(40, 0, 0, 0)
     private const val TEXT_COLOR = Color.BLACK
     private const val MIN_FONT_SIZE = 9f
     private const val FONT_STEP = 1.5f
