@@ -217,12 +217,28 @@ object InkInterop {
      * [BrushPreset.baseWidthPx] as the brush size. (Taper / jitter /
      * pressure-curve / texture are deferred to phase I4 — see the class KDoc.)
      */
-    fun toBrush(preset: BrushPreset): Brush {
-        val family = brushFamilyForTool(preset.tool)
-        val color = applyOpacityToArgb(preset.colorArgb, preset.opacity)
-        val size = preset.baseWidthPx.coerceAtLeast(MIN_BRUSH_SIZE)
+    fun toBrush(preset: BrushPreset): Brush =
+        brushForTool(
+            toolId = preset.tool,
+            colorArgb = applyOpacityToArgb(preset.colorArgb, preset.opacity),
+            baseWidthPx = preset.baseWidthPx,
+        )
+
+    /**
+     * Build an ink [Brush] straight from a tool id, an already-resolved ARGB
+     * colour (opacity folded in), and a world-space width — the shape the live
+     * authoring path ([com.aichat.sandbox.ui.components.notes.DrawingSurface])
+     * carries while a stroke is in flight, where there isn't a [BrushPreset] to
+     * hand. [toBrush] delegates here after folding preset opacity into the
+     * colour, so both routes share one stable-API brush identity (family + size
+     * + epsilon). Width is a world value because the authoring path stores the
+     * stroke in world coordinates; the same value lands in `NoteItem.baseWidthPx`.
+     */
+    fun brushForTool(toolId: String, colorArgb: Int, baseWidthPx: Float): Brush {
+        val family = brushFamilyForTool(toolId)
+        val size = baseWidthPx.coerceAtLeast(MIN_BRUSH_SIZE)
         val epsilon = (size / 100f).coerceIn(MIN_EPSILON, MAX_EPSILON)
-        return Brush.createWithColorIntArgb(family, color, size, epsilon)
+        return Brush.createWithColorIntArgb(family, colorArgb, size, epsilon)
     }
 
     /**

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Grid4x4
 import androidx.compose.material.icons.filled.HorizontalRule
 import androidx.compose.material.icons.filled.ZoomIn
@@ -144,6 +145,7 @@ fun NoteEditorScreen(
     val audioPlaybackState by viewModel.audioPlayer.state.collectAsState()
     val audioActiveClip by viewModel.audioPlayer.activeClip.collectAsState()
     val fingerDrawing by viewModel.fingerDrawing.collectAsState()
+    val inkAuthoring by viewModel.inkAuthoring.collectAsState()
     val iconPixelGrid by viewModel.iconPixelGrid.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -507,6 +509,10 @@ fun NoteEditorScreen(
                             onToggleFingerDrawing = {
                                 viewModel.setFingerDrawing(!fingerDrawing)
                             },
+                            inkAuthoring = inkAuthoring,
+                            onToggleInkAuthoring = {
+                                viewModel.setInkAuthoring(!inkAuthoring)
+                            },
                             screenAnchoredPenSize = viewModel.palette.screenAnchoredPenSize,
                             onToggleScreenAnchoredPenSize = {
                                 viewModel.palette.setScreenAnchored(
@@ -621,6 +627,7 @@ fun NoteEditorScreen(
                     onFrameTap = viewModel::onFrameTap,
                     recordingStartedAt = recordingStartedAt,
                     fingerInkEnabled = fingerDrawing,
+                    inkAuthoringEnabled = inkAuthoring,
                     // Icons are a bounded canvas: clip ink to the artboard.
                     artboardClipBounds = if (note.isIcon) {
                         viewModel.currentFrameBounds()
@@ -1322,6 +1329,8 @@ private fun EditorOverflowMenu(
     isIcon: Boolean,
     fingerDrawing: Boolean,
     onToggleFingerDrawing: () -> Unit,
+    inkAuthoring: Boolean,
+    onToggleInkAuthoring: () -> Unit,
     screenAnchoredPenSize: Boolean,
     onToggleScreenAnchoredPenSize: () -> Unit,
     fixedWidthInk: Boolean,
@@ -1436,6 +1445,26 @@ private fun EditorOverflowMenu(
                 }
             },
             onClick = onToggleFingerDrawing,
+        )
+        // Phase I1 — experimental ink-first authoring. When on, live ink is
+        // drawn by AndroidX Ink's front-buffered low-latency layer; on pen-lift
+        // the stroke is converted back to the canonical StrokeCodec payload, so
+        // storage / undo / the AI edit pipeline are unchanged. Off by default
+        // (fallback to the custom engine) until the I2 parity gate passes.
+        DropdownMenuItem(
+            text = { Text("Ink engine (experimental)") },
+            leadingIcon = {
+                Icon(Icons.Filled.Gesture, contentDescription = null)
+            },
+            trailingIcon = {
+                if (inkAuthoring) {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = "Enabled",
+                    )
+                }
+            },
+            onClick = onToggleInkAuthoring,
         )
         // Pen-size zoom scaling — when on, a chosen pen width is anchored to
         // screen pixels at the start of each stroke, so the brush feels the

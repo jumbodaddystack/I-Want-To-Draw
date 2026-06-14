@@ -12,12 +12,18 @@ import android.graphics.PorterDuff
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.widget.FrameLayout
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.ink.authoring.InProgressStrokeId
+import androidx.ink.authoring.InProgressStrokesFinishedListener
+import androidx.ink.authoring.InProgressStrokesView
+import androidx.ink.strokes.Stroke
 import androidx.input.motionprediction.MotionEventPredictor
+import com.aichat.sandbox.data.ink.InkInterop
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.ui.screens.notes.LassoController
@@ -115,6 +121,62 @@ class DrawingSurface(context: Context) : View(context) {
      * users expect for palm rejection.
      */
     var fingerInkEnabled: Boolean = false
+
+    /**
+     * Phase I1 — ink-first authoring switch (default off, fallback-capable).
+     * When on **and** an [InProgressStrokesView] is attached (see
+     * [attachInkAuthoring]) **and** the in-flight tool is an ink tool, the live
+     * stroke is authored by AndroidX Ink's front-buffered low-latency layer
+     * instead of the custom quad-Bézier path. The pen-lift conversion
+     * (`Stroke → StrokeCodec` via [InkInterop.fromStroke]) keeps the committed
+     * payload byte-identical to a stroke drawn the old way, so storage, undo,
+     * and the AI edit pipeline never see ink. Eraser / lasso / shapes / text /
+     * etc. always stay on the existing path — ink only owns live ink authoring.
+     *
+     * Not default until the I2 parity checklist passes (see
+     * `docs/ANDROIDX_INK_MIGRATION_PLAN.md`).
+     */
+    var inkAuthoringEnabled: Boolean = false
+
+    /**
+     * The attached ink front-buffer view, or null when ink authoring is off.
+     * Owned by the [DrawingSurfaceView] host (added as a sibling overlay), wired
+     * in via [attachInkAuthoring]. `internal` so the composable can attach /
+     * detach it lazily without exposing ink types on the public surface API.
+     */
+    internal var inkAuthoringView: InProgressStrokesView? = null
+        private set
+
+    /** True while the in-flight stroke is being authored by ink (not our path). */
+    private var inkStrokeActive: Boolean = false
+
+    /** The ink id of the in-flight stroke, or null when none is active. */
+    private var activeInkStrokeId: InProgressStrokeId? = null
+
+    /**
+     * Per-in-flight-stroke metadata captured at [startInkStroke], keyed by ink
+     * id. ink hands the finished [Stroke] back asynchronously via
+     * [onInkStrokesFinished]; this map carries the tool / colour / width /
+     * recording origin / hold-recognition decision forward so the committed
+     * [NoteItem] matches what the user actually drew.
+     */
+    private data class InkPendingStroke(
+        val tool: Tool,
+        val color: Int,
+        val widthPx: Float,
+        val fixedWidth: Boolean,
+        val recordingOriginMs: Long?,
+        val holdRecognition: Boolean,
+    )
+
+    private val inkPending: HashMap<InProgressStrokeId, InkPendingStroke> = HashMap()
+
+    /** Converts each finished ink [Stroke] to a committed [NoteItem]. */
+    private val inkFinishedListener = object : InProgressStrokesFinishedListener {
+        override fun onStrokesFinished(strokes: Map<InProgressStrokeId, Stroke>) {
+            onInkStrokesFinished(strokes)
+        }
+    }
 
     private var sceneBitmap: Bitmap? = null
     private var sceneCanvas: Canvas? = null
@@ -922,8 +984,16 @@ class DrawingSurface(context: Context) : View(context) {
                 // active selection so a stray ink stroke doesn't get baked
                 // into a stale transform.
                 if (selectedIds.isNotEmpty()) selectionShouldClearListener?.invoke()
+                inkStrokeActive = false
                 if (strokeTool.isLasso) {
                     appendLassoVertex(event, idx)
+                } else if (inkAuthoringEnabled && strokeTool.isInk && inkAuthoringView != null) {
+                    // Ink-first authoring: hand the live stroke to ink's
+                    // front buffer. On failure [startInkStroke] resets
+                    // [inkStrokeActive] so the stroke is simply dropped rather
+                    // than half-drawn through two engines.
+                    inkStrokeActive = true
+                    startInkStroke(event, idx)
                 } else {
                     appendStylusSample(event, idx)
                     motionPredictor?.record(event)
@@ -936,6 +1006,17 @@ class DrawingSurface(context: Context) : View(context) {
                 true
             }
             MotionEvent.ACTION_MOVE -> {
+                if (inkStrokeActive) {
+                    addInkStroke(event, idx)
+                    // Keep the hold-to-recognize timer running so a held lift
+                    // still triggers shape recognition (handled at ACTION_UP).
+                    if (hypot(event.getX(idx) - strokeLastMoveX, event.getY(idx) - strokeLastMoveY) > tapSlopPx) {
+                        strokeLastMoveUptime = event.eventTime
+                        strokeLastMoveX = event.getX(idx)
+                        strokeLastMoveY = event.getY(idx)
+                    }
+                    return true
+                }
                 if (strokeTool.isLasso) {
                     for (h in 0 until event.historySize) {
                         appendLassoWorldPoint(
@@ -974,6 +1055,15 @@ class DrawingSurface(context: Context) : View(context) {
                 true
             }
             MotionEvent.ACTION_UP -> {
+                if (inkStrokeActive) {
+                    finishInkStroke(
+                        event, idx,
+                        holdRecognition = (strokeTool == Tool.PEN || strokeTool == Tool.PENCIL) &&
+                            event.eventTime - strokeLastMoveUptime >= ShapeRecognizer.HOLD_DURATION_MS,
+                    )
+                    inkStrokeActive = false
+                    return true
+                }
                 clearPredicted()
                 when {
                     strokeTool.isLasso -> commitLassoLoop()
@@ -986,7 +1076,12 @@ class DrawingSurface(context: Context) : View(context) {
                 true
             }
             MotionEvent.ACTION_CANCEL -> {
-                cancelLiveStroke()
+                if (inkStrokeActive) {
+                    cancelInkStroke()
+                    inkStrokeActive = false
+                } else {
+                    cancelLiveStroke()
+                }
                 true
             }
             else -> false
@@ -1249,20 +1344,14 @@ class DrawingSurface(context: Context) : View(context) {
             }
             StrokeCodec.encode(packed)
         }
-        val item = NoteItem(
-            noteId = "",
-            // VM rewrites this with a tool-aware zIndex (highlighter sits in a
-            // negative range so it always renders under ink); we still append
-            // here for instant feedback before the next update() lands.
-            zIndex = 0,
-            kind = STROKE_KIND,
-            tool = strokeTool.id,
-            colorArgb = strokeColor,
+        val item = buildStrokeItem(
+            payload = payload,
+            tool = strokeTool,
+            color = strokeColor,
             // Phase: pen-size zoom scaling — store the zoom-resolved world
             // width so the stroke keeps the on-screen thickness it had while
             // being drawn. Equals strokeWidthPx when screen-anchoring is off.
-            baseWidthPx = strokeEffectiveWidthPx,
-            payload = payload,
+            widthPx = strokeEffectiveWidthPx,
             fixedWidth = strokeFixedWidth,
         )
         committedItems = committedItems + item
@@ -1273,6 +1362,164 @@ class DrawingSurface(context: Context) : View(context) {
         // second entry and one undo restores the stroke.
         if (holdRecognition) strokeHoldRecognizeListener?.invoke(item)
         liveSampleCount = 0
+        invalidate()
+    }
+
+    /**
+     * Build the committed stroke [NoteItem] shared by the legacy commit path
+     * ([commitLiveStroke]) and the ink-authoring finish path
+     * ([onInkStrokesFinished]) so both produce identical items. The VM rewrites
+     * [NoteItem.zIndex] with a tool-aware value (highlighter sits in a negative
+     * range so it always renders under ink); we append with zIndex 0 here for
+     * instant feedback before the next `update()` lands.
+     */
+    private fun buildStrokeItem(
+        payload: ByteArray,
+        tool: Tool,
+        color: Int,
+        widthPx: Float,
+        fixedWidth: Boolean,
+    ): NoteItem = NoteItem(
+        noteId = "",
+        zIndex = 0,
+        kind = STROKE_KIND,
+        tool = tool.id,
+        colorArgb = color,
+        baseWidthPx = widthPx,
+        payload = payload,
+        fixedWidth = fixedWidth,
+    )
+
+    // ── Ink-first authoring (phase I1) ────────────────────────────────────
+    //
+    // ink owns only the live, in-progress ink layer. On pen-lift the finished
+    // `Stroke` is converted back to a `StrokeCodec` payload and committed
+    // through the normal `strokeListener` pipeline, after which our scene
+    // rasterization (StrokeRenderer) renders it — exactly like a stroke drawn
+    // the old way. The two transforms passed to ink keep the stroke in world
+    // coordinates (so the committed payload matches every other stored stroke)
+    // while ink renders it on screen through the viewport.
+
+    /** Attach the host's overlay [InProgressStrokesView] and start listening. */
+    internal fun attachInkAuthoring(view: InProgressStrokesView) {
+        if (inkAuthoringView === view) return
+        detachInkAuthoring()
+        inkAuthoringView = view
+        view.addFinishedStrokesListener(inkFinishedListener)
+    }
+
+    /** Detach the overlay, abandoning any in-flight ink stroke without loss. */
+    internal fun detachInkAuthoring() {
+        if (inkStrokeActive || activeInkStrokeId != null) cancelInkStroke()
+        inkStrokeActive = false
+        inkAuthoringView?.removeFinishedStrokesListener(inkFinishedListener)
+        inkAuthoringView = null
+    }
+
+    /**
+     * screen → world: `world = (screen - offset) / scale`. ink stores the
+     * stroke in these (world) coordinates via `motionEventToWorldTransform`.
+     */
+    private fun motionEventToWorldMatrix(): Matrix {
+        val s = viewport.scale.coerceAtLeast(MIN_DIV_SCALE)
+        return Matrix().apply {
+            setScale(1f / s, 1f / s)
+            postTranslate(-viewport.offsetX / s, -viewport.offsetY / s)
+        }
+    }
+
+    private fun startInkStroke(event: MotionEvent, idx: Int) {
+        val view = inkAuthoringView ?: run { inkStrokeActive = false; return }
+        val brush = InkInterop.brushForTool(strokeTool.id, strokeColor, strokeEffectiveWidthPx)
+        val pointerId = event.getPointerId(idx)
+        val id = try {
+            // strokeToWorldTransform defaults to identity (stroke == world at
+            // creation); motionEventToViewTransform stays identity because the
+            // overlay exactly covers this surface.
+            view.startStroke(event, pointerId, brush, motionEventToWorldMatrix())
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "ink startStroke failed; falling back (stroke dropped)", e)
+            inkStrokeActive = false
+            return
+        }
+        val origin = if (recordingStartedAt != 0L) {
+            android.os.SystemClock.elapsedRealtime() - recordingStartedAt
+        } else {
+            null
+        }
+        inkPending[id] = InkPendingStroke(
+            tool = strokeTool,
+            color = strokeColor,
+            widthPx = strokeEffectiveWidthPx,
+            fixedWidth = strokeFixedWidth,
+            recordingOriginMs = origin,
+            holdRecognition = false,
+        )
+        activeInkStrokeId = id
+    }
+
+    private fun addInkStroke(event: MotionEvent, idx: Int) {
+        val view = inkAuthoringView ?: return
+        val id = activeInkStrokeId ?: return
+        val pointerId = event.getPointerId(idx)
+        motionPredictor?.record(event)
+        val predicted = motionPredictor?.predict()
+        try {
+            view.addToStroke(event, pointerId, id, predicted)
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "ink addToStroke failed", e)
+        } finally {
+            predicted?.recycle()
+        }
+    }
+
+    private fun finishInkStroke(event: MotionEvent, idx: Int, holdRecognition: Boolean) {
+        val view = inkAuthoringView ?: return
+        val id = activeInkStrokeId ?: return
+        inkPending[id]?.let { inkPending[id] = it.copy(holdRecognition = holdRecognition) }
+        val pointerId = event.getPointerId(idx)
+        try {
+            view.finishStroke(event, pointerId, id)
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "ink finishStroke failed; stroke dropped", e)
+            inkPending.remove(id)
+        }
+        activeInkStrokeId = null
+    }
+
+    private fun cancelInkStroke() {
+        val view = inkAuthoringView
+        val id = activeInkStrokeId
+        if (view != null && id != null) {
+            try {
+                view.cancelStroke(id, null)
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "ink cancelStroke failed", e)
+            }
+        }
+        id?.let { inkPending.remove(it) }
+        activeInkStrokeId = null
+    }
+
+    /**
+     * ink finished one or more strokes (UI thread). Convert each back to a
+     * `StrokeCodec` payload — re-adding the recording-relative origin so the v2
+     * audio-sync contract holds — commit it through the normal pipeline, then
+     * tell ink to stop rendering it (we now own its pixels via the scene
+     * rasterization). Strokes with no pending metadata (e.g. a failed start)
+     * are still released so ink doesn't keep drawing them.
+     */
+    private fun onInkStrokesFinished(strokes: Map<InProgressStrokeId, Stroke>) {
+        for ((id, stroke) in strokes) {
+            val meta = inkPending.remove(id) ?: continue
+            val payload = InkInterop.fromStroke(stroke, meta.recordingOriginMs)
+            val item = buildStrokeItem(payload, meta.tool, meta.color, meta.widthPx, meta.fixedWidth)
+            committedItems = committedItems + item
+            sceneDirty = true
+            strokeListener?.invoke(item)
+            if (meta.holdRecognition) strokeHoldRecognizeListener?.invoke(item)
+        }
+        inkAuthoringView?.removeFinishedStrokes(strokes.keys)
         invalidate()
     }
 
@@ -2430,6 +2677,7 @@ class DrawingSurface(context: Context) : View(context) {
     )
 
     companion object {
+        private const val TAG = "DrawingSurface"
         const val DEFAULT_STROKE_WIDTH_PX = 4f
         const val DEFAULT_INK_COLOR = Color.BLACK
         const val STROKE_KIND = "stroke"
@@ -2542,6 +2790,12 @@ fun DrawingSurfaceView(
     artboardClipBounds: FloatArray? = null,
     // Phase 15.3 — icon pixel grid: world units per icon pixel (0 = off).
     pixelGridSpacingWorld: Float = 0f,
+    // Phase I1 — ink-first authoring switch (default off, fallback-capable).
+    // When true, an [InProgressStrokesView] overlay is attached and live ink
+    // strokes are authored by AndroidX Ink; when false (the default, and the
+    // current parity-gated behaviour) the custom quad-Bézier path is used and
+    // no ink view exists. See `docs/ANDROIDX_INK_MIGRATION_PLAN.md` (I1/I2).
+    inkAuthoringEnabled: Boolean = false,
 ) {
     val currentOnCommit by rememberUpdatedState(onStrokeCommitted)
     val currentOnErase by rememberUpdatedState(onItemsErased)
@@ -2561,8 +2815,12 @@ fun DrawingSurfaceView(
 
     AndroidView(
         modifier = modifier,
+        // The surface is wrapped in a FrameLayout so the ink-authoring overlay
+        // (an InProgressStrokesView) can be added as a sibling on top when the
+        // I1 switch is on. With the switch off (default) the container holds
+        // only the DrawingSurface and behaves exactly as before.
         factory = { ctx ->
-            DrawingSurface(ctx).apply {
+            val surface = DrawingSurface(ctx).apply {
                 this.sketchMode = sketchMode
                 strokeListener = { item -> currentOnCommit(item) }
                 eraseListener = { ids -> currentOnErase(ids) }
@@ -2577,8 +2835,38 @@ fun DrawingSurfaceView(
                 setFilesDir(ctx.filesDir)
                 currentOnViewportReady(viewport)
             }
+            FrameLayout(ctx).apply {
+                addView(
+                    surface,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                    ),
+                )
+            }
         },
-        update = { view ->
+        update = { container ->
+            val view = container.getChildAt(0) as DrawingSurface
+            // Lazily attach / detach the ink overlay so the front-buffer view
+            // only exists while the switch is on (zero overhead when off, and
+            // off is the default everywhere — sketch mode included).
+            if (inkAuthoringEnabled && view.inkAuthoringView == null) {
+                val inkView = InProgressStrokesView(container.context)
+                container.addView(
+                    inkView,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                    ),
+                )
+                inkView.eagerInit()
+                view.attachInkAuthoring(inkView)
+            } else if (!inkAuthoringEnabled && view.inkAuthoringView != null) {
+                val inkView = view.inkAuthoringView
+                view.detachInkAuthoring()
+                container.removeView(inkView)
+            }
+            view.inkAuthoringEnabled = inkAuthoringEnabled
             view.sketchMode = sketchMode
             view.fingerInkEnabled = fingerInkEnabled
             view.recordingStartedAt = recordingStartedAt

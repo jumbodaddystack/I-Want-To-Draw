@@ -63,6 +63,21 @@ configurations.all {
     exclude(group = "org.jetbrains", module = "annotations-java5")
 }
 
+// Keep the on-device (android) AndroidX Ink variants off the JVM unit-test
+// classpaths. Main code links the android variants (they ship in the APK and
+// load the arm64 `libink.so`); the headless `:app:testDebugUnitTest` host links
+// the `-jvm` variants (`testImplementation` above, with `linux-x86_64`
+// `libink.so`). Without this exclusion both would be present and the JVM would
+// pick the android `Stroke`/`Brush`, whose native lib can't load off-device.
+configurations.matching { it.name.contains("UnitTest") }.configureEach {
+    exclude(group = "androidx.ink", module = "ink-strokes")
+    exclude(group = "androidx.ink", module = "ink-brush")
+    exclude(group = "androidx.ink", module = "ink-geometry")
+    exclude(group = "androidx.ink", module = "ink-rendering")
+    exclude(group = "androidx.ink", module = "ink-authoring")
+    exclude(group = "androidx.ink", module = "ink-nativeloader")
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.02.02")
     implementation(composeBom)
@@ -85,17 +100,25 @@ dependencies {
     // Stylus input: one-frame look-ahead for ink (sub-phase 1.4).
     implementation("androidx.input:input-motionprediction:1.0.0-beta05")
 
-    // AndroidX Ink (phase I0 — the InkInterop seam). The ink engine is not yet
-    // wired into any on-device code path, so it is `compileOnly` here: the seam
-    // compiles, but no ink classes or native `.so` are packaged into the APK.
-    // The `-jvm` artifacts (which bundle `linux-x86_64/libink.so`) are added to
-    // the unit-test classpath so the round-trip tests run headless, without an
-    // emulator. Phase I1 flips these to `implementation` of the android
-    // variants when authoring moves on-device.
+    // AndroidX Ink. Phase I0 added the `InkInterop` seam as `compileOnly`;
+    // phase I1 moves authoring on-device, so the ink engine now ships in the
+    // APK. `ink-authoring` is the live front-buffer drawing view and pulls in
+    // `ink-strokes` / `ink-brush` / `ink-geometry` / `ink-rendering` /
+    // `ink-nativeloader` (incl. the arm64 `libink.so`) transitively; the
+    // explicit lines below just make our direct uses legible.
+    //
+    // Unit tests still run headless on the JVM, so the `-jvm` artifacts (which
+    // bundle `linux-x86_64/libink.so`) are on the test classpath, and the
+    // android variants are excluded from the unit-test classpaths below so the
+    // two never collide (the android `Stroke`/`Brush` classes load a native lib
+    // that doesn't exist off-device).
     val inkVersion = "1.0.0"
-    compileOnly("androidx.ink:ink-strokes-jvm:$inkVersion")
-    compileOnly("androidx.ink:ink-brush-jvm:$inkVersion")
-    compileOnly("androidx.ink:ink-geometry-jvm:$inkVersion")
+    implementation("androidx.ink:ink-strokes:$inkVersion")
+    implementation("androidx.ink:ink-brush:$inkVersion")
+    implementation("androidx.ink:ink-geometry:$inkVersion")
+    implementation("androidx.ink:ink-authoring:$inkVersion")
+    implementation("androidx.ink:ink-rendering:$inkVersion")
+    implementation("androidx.ink:ink-nativeloader:$inkVersion")
     testImplementation("androidx.ink:ink-strokes-jvm:$inkVersion")
     testImplementation("androidx.ink:ink-brush-jvm:$inkVersion")
     testImplementation("androidx.ink:ink-geometry-jvm:$inkVersion")

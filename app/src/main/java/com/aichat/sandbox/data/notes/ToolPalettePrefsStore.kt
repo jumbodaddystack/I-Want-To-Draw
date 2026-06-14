@@ -25,6 +25,8 @@ data class PalettePrefs(
     val inkWidths: Map<String, Float> = emptyMap(),
     val areaEraserRadiusPx: Float? = null,
     val fingerDrawing: Boolean = false,
+    // Phase I1 — ink-first authoring switch (default off, fallback-capable).
+    val inkAuthoring: Boolean = false,
     // Phase 10.2 — shape fill + stroke style. Null = never saved.
     val shapeFillEnabled: Boolean? = null,
     val shapeFillColor: Int? = null,
@@ -71,6 +73,7 @@ class ToolPalettePrefsStore @Inject constructor(
             }.toMap(),
             areaEraserRadiusPx = p[KEY_ERASER_RADIUS],
             fingerDrawing = p[KEY_FINGER_DRAWING] ?: false,
+            inkAuthoring = p[KEY_INK_AUTHORING] ?: false,
             shapeFillEnabled = p[KEY_SHAPE_FILL_ENABLED],
             shapeFillColor = p[KEY_SHAPE_FILL_COLOR],
             shapeStrokeStyle = p[KEY_SHAPE_STROKE_STYLE],
@@ -122,6 +125,10 @@ class ToolPalettePrefsStore @Inject constructor(
         dataStore.edit { it[KEY_FINGER_DRAWING] = enabled }
     }
 
+    suspend fun setInkAuthoring(enabled: Boolean) {
+        dataStore.edit { it[KEY_INK_AUTHORING] = enabled }
+    }
+
     suspend fun setIconPixelGrid(enabled: Boolean) {
         dataStore.edit { it[KEY_ICON_PIXEL_GRID] = enabled }
     }
@@ -133,6 +140,7 @@ class ToolPalettePrefsStore @Inject constructor(
         private val KEY_SELECTED_TOOL = stringPreferencesKey("selected_tool")
         private val KEY_ERASER_RADIUS = floatPreferencesKey("area_eraser_radius_px")
         private val KEY_FINGER_DRAWING = booleanPreferencesKey("finger_drawing")
+        private val KEY_INK_AUTHORING = booleanPreferencesKey("ink_authoring")
         private val KEY_SHAPE_FILL_ENABLED = booleanPreferencesKey("shape_fill_enabled")
         private val KEY_SHAPE_FILL_COLOR = intPreferencesKey("shape_fill_color")
         private val KEY_SHAPE_STROKE_STYLE = intPreferencesKey("shape_stroke_style")

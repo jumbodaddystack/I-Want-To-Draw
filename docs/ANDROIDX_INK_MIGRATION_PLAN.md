@@ -260,7 +260,7 @@ as migration consumers so the engine work preserves their requirements.
 | **I0 — `InkInterop` seam** | Bidirectional `StrokeCodec ↔ StrokeInputBatch/Stroke`; stable `BrushPreset → Brush` adapter; JVM round-trip tests | strokes, brush, geometry | Low — no UI |
 | **I0.5 — Toolchain bump** | `compileSdk`/`targetSdk` 36, AGP 8.9+/8.11+, Gradle wrapper, re-verify build | — | Low/Med |
 | **I0.7 — Rendering fidelity spike** ✅ **done** | Render 50–100 representative strokes through both `StrokeRenderer` and `CanvasStrokeRenderer`; pixel/visual diff; per-tool go/no-go (pen, pencil, highlighter, marker) **before** building the authoring path. **Result:** pen/pencil/marker **GO**, highlighter **GO-with-brush-work** (ink stock highlighter ~0.71× our footprint); no NO-GO — see [`INK_I07_RENDERING_FIDELITY_SPIKE.md`](INK_I07_RENDERING_FIDELITY_SPIKE.md) | rendering, brush | Low — throwaway |
-| **I1 — Authoring prototype (ink-first)** | `InProgressStrokesView` wired finish→convert→commit behind a fallback-capable runtime switch; not default until the parity checklist passes | authoring, rendering | Med |
+| **I1 — Authoring prototype (ink-first)** ✅ **done** | `InProgressStrokesView` wired finish→convert→commit behind a fallback-capable runtime switch ("Ink engine (experimental)", default **off**); not default until the I2 parity checklist passes. ink ships on-device (`ink-authoring`/`ink-rendering` + `libink.so`); the live wet layer is ink's, the pen-lift `Stroke → StrokeCodec` conversion (`InkInterop.fromStroke`) keeps the committed payload byte-identical so storage / undo / the AI edit pipeline never see ink. | authoring, rendering | Med |
 | **I2 — Rendering + behavior parity gate** | Match ink mesh rendering to `StrokeRenderer` (taper/jitter/texture) and verify latency, undo/redo, layer commit, eraser (incl. **no regression for non-stroke kinds** — shapes, stickies, connectors, paths), shape recognition, and audio timestamp sync before default-on | rendering, brush | Med |
 | **I3 — Optional additive storage + v3 lane** | `StrokeCodec` stays canonical (decided). *Only* if a concrete need appears (e.g. an AI-designed `BrushFamily` per stroke, or a cross-device interchange blob), add **additive dual-write** data that existing code never reads; define the exact v3 orientation/timestamp layout if a brush needs it. Ink-native canonical is ruled out. | strokes, storage | Low/Med |
 | **I4 — Brush richness + N1 foundation** | Stable brush-family mapping first; isolate 1.1-alpha programmable brush experiments; add `DESIGN_BRUSH` only after the spec/adapter settles | brush, rendering | Med |
@@ -280,6 +280,48 @@ optional additive-data question rather than a fork in the road.
 Brushes (I4) and beautify (I5) build directly on the new
 authoring path; geometry/snapping/replay (I6–I8) layer on once the engine is the
 default.
+
+### I1 — what shipped (and what I2 still owns)
+
+The authoring prototype is wired end-to-end behind the **"Ink engine
+(experimental)"** switch in the note editor's overflow menu (persisted via
+`ToolPalettePrefsStore.inkAuthoring`, default **off**):
+
+- **On-device engine.** `ink-authoring` + `ink-rendering` moved from
+  `compileOnly` to `implementation`, so the native core (`libink.so`) now ships
+  in the APK. The JVM round-trip tests still run headless — the android ink
+  variants are excluded from the unit-test classpaths so only the `-jvm`
+  artifacts (with `linux-x86_64/libink.so`) are present there.
+- **Overlay, not a rewrite.** `DrawingSurfaceView` wraps the existing
+  `DrawingSurface` in a `FrameLayout` and, only while the switch is on, attaches
+  an `InProgressStrokesView` sibling on top as the live wet-ink layer. With the
+  switch off the container holds just the `DrawingSurface` and behaves exactly
+  as before (zero overhead; sketch mode included).
+- **ink owns only the wet layer.** `DrawingSurface` still handles all touch.
+  When the switch is on **and** the in-flight tool is an ink tool, the stroke is
+  forwarded to ink (`startStroke`/`addToStroke`/`finishStroke`) with a
+  screen→world `motionEventToWorldTransform`, so the finished `Stroke` is in
+  world coordinates. Eraser / lasso / shapes / text / connectors / paths always
+  stay on the existing path.
+- **Inviolable commit contract.** On `onStrokesFinished`, each `Stroke` is
+  converted back to a canonical `StrokeCodec` payload via
+  `InkInterop.fromStroke` (re-adding the recording-relative origin captured at
+  pen-down so the v2 audio-sync contract holds), then committed through the
+  **same** `strokeListener` → layer/undo/storage pipeline as a hand-drawn
+  stroke and rendered by `StrokeRenderer`. ink is told to drop the finished
+  stroke (`removeFinishedStrokes`) once we own its pixels. Hold-to-recognize
+  (11.3) is preserved. The AI edit pipeline never sees ink.
+- **Fallback-capable.** Every ink call is guarded; a failure logs and drops the
+  one stroke rather than half-drawing through two engines, and toggling the
+  switch off mid-session cancels any in-flight ink stroke without data loss.
+
+Deferred to **I2 (parity gate)** — these need a real device/emulator and are
+out of scope for a headless prototype: on-device latency feel, the
+colour/opacity/texture/AA pixel diff, undo/redo + layer-commit + eraser
+(incl. non-stroke kinds) behavioural checks, the highlighter width calibration
+and pencil tilt-width/grain from I0.7/I4, and confirming the overlay's
+touch-pass-through and front-buffer compositing on the S25 Ultra panel before
+ink can become default-on.
 
 ## Risks & open questions
 

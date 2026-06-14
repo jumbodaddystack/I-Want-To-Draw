@@ -1495,6 +1495,27 @@ class NoteEditorViewModel @Inject constructor(
         }
     }
 
+    // ── Ink-first authoring (phase I1) ───────────────────────────────────
+
+    /**
+     * Experimental: route live ink through AndroidX Ink's front-buffered
+     * authoring layer instead of the custom quad-Bézier path. Off by default
+     * and fallback-capable — see `docs/ANDROIDX_INK_MIGRATION_PLAN.md` (I1/I2).
+     */
+    val inkAuthoring: StateFlow<Boolean> = palettePrefsStore.prefs
+        .map { it.inkAuthoring }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
+    fun setInkAuthoring(enabled: Boolean) {
+        viewModelScope.launch {
+            palettePrefsStore.setInkAuthoring(enabled)
+        }
+    }
+
     // ── Icon pixel grid (phase 15.3) ─────────────────────────────────────
 
     /** Snap-to-pixel + keyline overlay on icon artboards. On by default. */

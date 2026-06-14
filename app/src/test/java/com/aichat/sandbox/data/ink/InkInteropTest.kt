@@ -208,6 +208,23 @@ class InkInteropTest {
     }
 
     @Test
+    fun brushForToolCarriesColorAndWidthAndDelegatesFromToBrush() {
+        // The live authoring path (phase I1) builds a brush straight from a
+        // tool id + already-resolved colour + world width, with no preset.
+        val brush = InkInterop.brushForTool("pen", 0x80112233.toInt(), baseWidthPx = 6f)
+        assertEquals(0x80112233.toInt(), brush.colorIntArgb)
+        assertEquals(6f, brush.size, 0f)
+        assertNotNull(brush.family)
+
+        // toBrush is now a thin wrapper: it folds preset opacity into the alpha
+        // and delegates, so the two routes agree for the same effective inputs.
+        val preset = penPreset().copy(colorArgb = 0xFF112233.toInt(), opacity = 0.5f, baseWidthPx = 6f)
+        val viaPreset = InkInterop.toBrush(preset)
+        assertEquals(viaPreset.colorIntArgb, brush.colorIntArgb)
+        assertEquals(viaPreset.size, brush.size, 0f)
+    }
+
+    @Test
     fun applyOpacityToArgbClampsAndPreservesRgb() {
         assertEquals(0x00AABBCC, InkInterop.applyOpacityToArgb(0xFFAABBCC.toInt(), 0f))
         assertEquals(0xFFAABBCC.toInt(), InkInterop.applyOpacityToArgb(0xFFAABBCC.toInt(), 1f))
