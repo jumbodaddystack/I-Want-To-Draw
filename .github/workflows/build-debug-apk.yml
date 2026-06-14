@@ -43,51 +43,46 @@ jobs:
           retention-days: 14
 
   publish:
-    name: Publish APK to releases branch
+    name: Publish APK to GitHub Releases
     needs: build
     runs-on: ubuntu-latest
-    if: always() && needs.build.result == 'success'
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ github.token }}
-
-      - name: Switch to releases branch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
-          if git ls-remote --exit-code --heads origin releases; then
-            git checkout releases
-          else
-            git checkout --orphan releases
-            git rm -rf . || true
-            git commit --allow-empty -m "Initialize releases branch"
-            git push -u origin releases
-          fi
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
       - name: Download debug APK artifact
         uses: actions/download-artifact@v4
         with:
           name: debug-apk
           path: /tmp/apk-staging
 
-      - name: Commit and push APK to releases branch
+      # Publish the APK as a GitHub Release asset instead of committing it to a
+      # git branch. Git pushes hard-reject any file over 100 MB, but release
+      # assets allow up to 2 GB/file, so the debug APK can keep growing.
+      - name: Publish APK to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
           SHORT_SHA=${GITHUB_SHA::7}
 
-          mkdir -p apks
-          cp /tmp/apk-staging/app-debug.apk "apks/app-debug-${TIMESTAMP}-${SHORT_SHA}.apk"
-          cp /tmp/apk-staging/app-debug.apk apks/app-debug-latest.apk
+          TS_APK="app-debug-${TIMESTAMP}-${SHORT_SHA}.apk"
+          cp /tmp/apk-staging/app-debug.apk "${TS_APK}"
+          cp /tmp/apk-staging/app-debug.apk app-debug-latest.apk
 
-          git add apks/
-          git commit -m "Add debug APK from ${GITHUB_REF_NAME} @ ${SHORT_SHA} (${TIMESTAMP})"
-          git push origin releases
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+          # Per-build release: a permanent, timestamped download URL (history).
+          gh release create "debug-${TIMESTAMP}-${SHORT_SHA}" "${TS_APK}" \
+            --target "${GITHUB_SHA}" \
+            --title "Debug APK ${TIMESTAMP} (${SHORT_SHA})" \
+            --notes "Debug build from ${GITHUB_REF_NAME} @ ${SHORT_SHA} (${TIMESTAMP})."
+
+          # Rolling 'debug-latest' release: a stable URL that always points at
+          # the newest APK. The asset is overwritten in place each run.
+          if gh release view debug-latest >/dev/null 2>&1; then
+            gh release upload debug-latest app-debug-latest.apk --clobber
+            gh release edit debug-latest \
+              --notes "Latest debug build from ${GITHUB_REF_NAME} @ ${SHORT_SHA} (${TIMESTAMP})."
+          else
+            gh release create debug-latest app-debug-latest.apk \
+              --title "Latest Debug APK" \
+              --notes "Latest debug build from ${GITHUB_REF_NAME} @ ${SHORT_SHA} (${TIMESTAMP})."
+          fi
