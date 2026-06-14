@@ -7,6 +7,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -55,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -144,6 +147,16 @@ fun NoteEditorScreen(
     val iconPixelGrid by viewModel.iconPixelGrid.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // P0.2 (audit A2) — reserve layout for the docked AI rail so the canvas
+    // sits beside it (never underneath), using the same width the sheet draws
+    // at. Animated so opening / closing the panel slides the canvas edge in
+    // step with the sheet instead of snapping.
+    val aiDockWidth = aiSheetWidthFor(LocalConfiguration.current.screenWidthDp.dp)
+    val aiDockPad by animateDpAsState(
+        targetValue = if (aiSheetState.isOpen) aiDockWidth else 0.dp,
+        animationSpec = tween(220),
+        label = "aiDockPad",
+    )
     var menuExpanded by remember { mutableStateOf(false) }
     var panelsMenuExpanded by remember { mutableStateOf(false) }
     var pdfDialogVisible by remember { mutableStateOf(false) }
@@ -598,6 +611,9 @@ fun NoteEditorScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                // P0.2 — make room for the docked AI rail so the canvas +
+                // palette never sit under the sheet (no scrim needed).
+                .padding(end = aiDockPad)
                 .background(Color.White),
         ) {
             Box(
@@ -654,6 +670,19 @@ fun NoteEditorScreen(
                     presentationMode = presenting,
                     onPresentationAdvance = { viewModel.stepPresentation(1) },
                 )
+                // P0.1 (audit A1) — staged AI edit drawn on the canvas before
+                // Accept / Reject so the change is never committed blind. Sits
+                // above the surface bitmap, below the chrome; non-interactive,
+                // so drawing / panning continue underneath. Confined to the
+                // (docked) canvas region because it lives inside this padded
+                // column, sharing the surface's viewport.
+                pendingEdit?.let { pending ->
+                    if (!presenting) AiEditDiffOverlay(
+                        simulation = pending.simulation,
+                        viewport = viewportController,
+                        filesDir = context.filesDir,
+                    )
+                }
                 // Phase 5.4 — zoom chip + Fit / 100% / Center popover. Lives
                 // on the canvas (not the TopAppBar) so the bar keeps room for
                 // the title. Bounds are recomputed lazily on each menu open
@@ -1193,6 +1222,8 @@ fun NoteEditorScreen(
                 pending = pending,
                 onAccept = viewModel::acceptPendingEdit,
                 onReject = viewModel::rejectPendingEdit,
+                // Keep the banner left of the docked AI rail.
+                modifier = Modifier.padding(end = aiDockPad),
             )
         }
         AiSideSheet(
@@ -1563,33 +1594,24 @@ private fun OcrIndicatorBadge(state: OcrIndicator) {
 }
 
 /**
- * Sub-phase 7.4 — staged AI edit banner.
+ * Sub-phase 7.4 — staged AI edit banner; P0.1 (audit A1) added the legend.
  *
- * Renders a compact summary + Accept / Reject row pinned above the AI side
- * sheet. The proper translucent-overlay preview (alpha + magenta outline)
- * is a near-term follow-up; for v1 this surfaces "what would change" via a
- * count line so the user can already commit / discard the AI edit as one
- * undo entry.
+ * Renders a compact summary + Accept / Reject row pinned above the canvas.
+ * The colour legend keys the on-canvas [AiEditDiffOverlay] tints (green added
+ * / red removed / amber modified) so the preview is self-explanatory; the
+ * overlay does the "what would change" showing, this row does the committing
+ * (as a single undo entry).
  */
 @Composable
 private fun AiEditPreviewBanner(
     pending: PendingEdit,
     onAccept: () -> Unit,
     onReject: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val sim = pending.simulation
-    val countLine = buildString {
-        append(pending.description)
-        append(" · ")
-        append(sim.added.size).append(" added, ")
-        append(sim.removed.size).append(" removed, ")
-        append(sim.modified.size).append(" modified")
-        if (sim.skipped.isNotEmpty()) {
-            append(" · ").append(sim.skipped.size).append(" skipped")
-        }
-    }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.TopCenter,
@@ -1602,15 +1624,23 @@ private fun AiEditPreviewBanner(
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text = pending.doc.summary.ifBlank { "AI edit preview" },
+                    text = pending.doc.summary.ifBlank { pending.description.ifBlank { "AI edit preview" } },
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
-                Text(
-                    text = countLine,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    DiffLegendItem(Color(AI_DIFF_ADDED_ARGB), "${sim.added.size} added")
+                    DiffLegendItem(Color(AI_DIFF_REMOVED_ARGB), "${sim.removed.size} removed")
+                    DiffLegendItem(Color(AI_DIFF_MODIFIED_ARGB), "${sim.modified.size} modified")
+                }
+                if (sim.skipped.isNotEmpty()) {
+                    Text(
+                        text = "${sim.skipped.size} skipped",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = onReject) { Text("Reject") }
@@ -1618,6 +1648,24 @@ private fun AiEditPreviewBanner(
                 }
             }
         }
+    }
+}
+
+/** A swatch + label keying one [AiEditDiffOverlay] diff tint in the banner. */
+@Composable
+private fun DiffLegendItem(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .background(color, androidx.compose.foundation.shape.CircleShape),
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
     }
 }
 

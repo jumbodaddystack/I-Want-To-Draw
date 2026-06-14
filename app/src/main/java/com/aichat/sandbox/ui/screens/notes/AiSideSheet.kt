@@ -2,8 +2,6 @@ package com.aichat.sandbox.ui.screens.notes
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
@@ -53,13 +51,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.aichat.sandbox.ui.components.ModelSelector
 
@@ -67,11 +65,11 @@ import com.aichat.sandbox.ui.components.ModelSelector
  * Right-edge slide-in sheet that hosts the AI ask/reply loop for the note
  * editor (sub-phase 2.6 of `docs/STYLUS_NOTES_PHASE_2.md`).
  *
- * Renders on top of the editor — the scrim absorbs canvas taps while the
- * sheet is open. Width is capped at ~70% on phones and at a fixed maximum
- * on tablets so the canvas stays partially visible. Streaming replies are
- * appended to the active turn's bubble; the lazy list auto-scrolls to the
- * latest turn as it grows.
+ * P0.2 (audit A2) — a non-blocking docked rail: no scrim, and the editor
+ * reserves [aiSheetWidthFor] of layout for it so the canvas sits *beside* the
+ * sheet (fully visible and live: draw / pan / point) rather than underneath a
+ * tap-absorbing scrim. Streaming replies are appended to the active turn's
+ * bubble; the lazy list auto-scrolls to the latest turn as it grows.
  *
  * Canned prompt chips and the scope chip landed in sub-phase 2.7. Sub-phase
  * 2.8 adds the per-reply action row (Copy / Insert / Send to chat) for every
@@ -98,30 +96,16 @@ fun AiSideSheet(
     modifier: Modifier = Modifier,
 ) {
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
-    val sheetWidth = (screenWidthDp.value * SHEET_WIDTH_FRACTION).dp
-        .coerceAtLeast(MIN_SHEET_WIDTH)
-        .coerceAtMost(MAX_SHEET_WIDTH)
+    val sheetWidth = aiSheetWidthFor(screenWidthDp)
 
+    // P0.2 (audit A2) — the sheet is a non-blocking docked rail: the editor
+    // reserves `sheetWidth` of layout for it (end padding on the canvas
+    // column) so the canvas is never *underneath* the sheet. There is
+    // therefore no scrim — the canvas stays fully visible and live (draw /
+    // pan / point) while the AI panel is open, which is exactly what you want
+    // while reviewing the on-canvas edit diff. Dismissal is the header's
+    // close button (the old "tap the scrim" gesture had no visible target).
     Box(modifier = modifier.fillMaxSize()) {
-        AnimatedVisibility(
-            visible = state.isOpen,
-            enter = fadeIn(animationSpec = tween(SCRIM_ANIM_MS)),
-            exit = fadeOut(animationSpec = tween(SCRIM_ANIM_MS)),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            // Scrim — taps anywhere outside the sheet dismiss it.
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.32f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onClose,
-                    ),
-            )
-        }
-
         AnimatedVisibility(
             visible = state.isOpen,
             enter = slideInHorizontally(
@@ -145,8 +129,8 @@ fun AiSideSheet(
                 modifier = Modifier
                     .fillMaxHeight()
                     .fillMaxWidth()
-                    // Swallow taps inside the sheet so they don't reach the
-                    // scrim's `clickable` and close us.
+                    // Swallow taps inside the sheet so they don't fall through
+                    // to anything layered behind the rail.
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -681,8 +665,19 @@ private fun SheetFooter(
   }
 }
 
-private const val SHEET_WIDTH_FRACTION: Float = 0.7f
+/**
+ * Width the docked AI rail occupies for a given [screenWidthDp]. Shared by
+ * the sheet itself and by the editor, which reserves the same width as end
+ * padding on the canvas column so the two never overlap (P0.2 / audit A2).
+ * Narrower than the pre-dock 70% overlay so a phone keeps a live canvas strip
+ * beside the rail; still capped so a tablet rail doesn't sprawl.
+ */
+fun aiSheetWidthFor(screenWidthDp: Dp): Dp =
+    (screenWidthDp.value * SHEET_WIDTH_FRACTION).dp
+        .coerceAtLeast(MIN_SHEET_WIDTH)
+        .coerceAtMost(MAX_SHEET_WIDTH)
+
+private const val SHEET_WIDTH_FRACTION: Float = 0.5f
 private val MIN_SHEET_WIDTH = 280.dp
-private val MAX_SHEET_WIDTH = 480.dp
+private val MAX_SHEET_WIDTH = 460.dp
 private const val SHEET_ANIM_MS: Int = 220
-private const val SCRIM_ANIM_MS: Int = 180
