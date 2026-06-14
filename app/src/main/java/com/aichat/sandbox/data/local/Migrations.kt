@@ -728,3 +728,17 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_stamp_tags_tag` ON `stamp_tags` (`tag`)")
     }
 }
+
+/**
+ * Migration from version 22 to 23:
+ * Pen-size zoom scaling — adds the `note_items.fixedWidth` flag (Phase:
+ * fixed-width / CAD pen). When set, a stroke renders at a constant on-screen
+ * width regardless of zoom instead of scaling like an ordinary vector.
+ * Purely additive; existing strokes default to `0` (false), so they keep
+ * their current zoom-scaling behaviour.
+ */
+val MIGRATION_22_23 = object : Migration(22, 23) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `note_items` ADD COLUMN `fixedWidth` INTEGER NOT NULL DEFAULT 0")
+    }
+}

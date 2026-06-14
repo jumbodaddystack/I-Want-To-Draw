@@ -1422,6 +1422,8 @@ class NoteEditorViewModel @Inject constructor(
                 stickyFillColor = saved.stickyFillColor,
                 inkBeautify = saved.inkBeautify,
                 connectorRouteStyle = saved.connectorRouteStyle,
+                screenAnchoredPenSize = saved.screenAnchoredPenSize,
+                fixedWidthInk = saved.fixedWidthInk,
             )
             val inkTools = listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.PENCIL)
             snapshotFlow {
@@ -1436,6 +1438,8 @@ class NoteEditorViewModel @Inject constructor(
                     stickyFillColor = palette.stickyFillColor,
                     inkBeautify = palette.inkBeautify,
                     connectorRouteStyle = palette.connectorRouteStyle,
+                    screenAnchoredPenSize = palette.screenAnchoredPenSize,
+                    fixedWidthInk = palette.fixedWidthInk,
                 )
             }
                 // The first emission is the state we just restored.
@@ -1453,6 +1457,8 @@ class NoteEditorViewModel @Inject constructor(
                         stickyFillColor = snap.stickyFillColor,
                         inkBeautify = snap.inkBeautify,
                         connectorRouteStyle = snap.connectorRouteStyle,
+                        screenAnchoredPenSize = snap.screenAnchoredPenSize,
+                        fixedWidthInk = snap.fixedWidthInk,
                     )
                 }
         }
@@ -1469,6 +1475,8 @@ class NoteEditorViewModel @Inject constructor(
         val stickyFillColor: Int,
         val inkBeautify: Boolean,
         val connectorRouteStyle: Int,
+        val screenAnchoredPenSize: Boolean,
+        val fixedWidthInk: Boolean,
     )
 
     // ── "Draw with finger" (user setting) ────────────────────────────────

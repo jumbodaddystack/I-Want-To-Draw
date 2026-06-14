@@ -37,6 +37,10 @@ data class PalettePrefs(
     val connectorRouteStyle: Int? = null,
     // Phase 15.3 — icon pixel grid (snap + keylines on icon artboards).
     val iconPixelGrid: Boolean = true,
+    // Phase: pen-size zoom scaling. Screen-anchored pen sizing defaults ON;
+    // fixed-width ink defaults OFF. Null = never saved (keep the default).
+    val screenAnchoredPenSize: Boolean? = null,
+    val fixedWidthInk: Boolean? = null,
 )
 
 /**
@@ -74,6 +78,8 @@ class ToolPalettePrefsStore @Inject constructor(
             inkBeautify = p[KEY_INK_BEAUTIFY],
             connectorRouteStyle = p[KEY_CONNECTOR_ROUTE_STYLE],
             iconPixelGrid = p[KEY_ICON_PIXEL_GRID] ?: true,
+            screenAnchoredPenSize = p[KEY_SCREEN_ANCHORED_PEN_SIZE],
+            fixedWidthInk = p[KEY_FIXED_WIDTH_INK],
         )
     }
 
@@ -89,6 +95,8 @@ class ToolPalettePrefsStore @Inject constructor(
         stickyFillColor: Int,
         inkBeautify: Boolean,
         connectorRouteStyle: Int,
+        screenAnchoredPenSize: Boolean,
+        fixedWidthInk: Boolean,
     ) {
         dataStore.edit { p ->
             p[KEY_SELECTED_TOOL] = selectedToolId
@@ -105,6 +113,8 @@ class ToolPalettePrefsStore @Inject constructor(
             p[KEY_STICKY_FILL_COLOR] = stickyFillColor
             p[KEY_INK_BEAUTIFY] = inkBeautify
             p[KEY_CONNECTOR_ROUTE_STYLE] = connectorRouteStyle
+            p[KEY_SCREEN_ANCHORED_PEN_SIZE] = screenAnchoredPenSize
+            p[KEY_FIXED_WIDTH_INK] = fixedWidthInk
         }
     }
 
@@ -130,6 +140,8 @@ class ToolPalettePrefsStore @Inject constructor(
         private val KEY_INK_BEAUTIFY = booleanPreferencesKey("ink_beautify")
         private val KEY_CONNECTOR_ROUTE_STYLE = intPreferencesKey("connector_route_style")
         private val KEY_ICON_PIXEL_GRID = booleanPreferencesKey("icon_pixel_grid")
+        private val KEY_SCREEN_ANCHORED_PEN_SIZE = booleanPreferencesKey("screen_anchored_pen_size")
+        private val KEY_FIXED_WIDTH_INK = booleanPreferencesKey("fixed_width_ink")
 
         private fun colorKey(toolId: String) = intPreferencesKey("ink_color_$toolId")
         private fun widthKey(toolId: String) = floatPreferencesKey("ink_width_$toolId")

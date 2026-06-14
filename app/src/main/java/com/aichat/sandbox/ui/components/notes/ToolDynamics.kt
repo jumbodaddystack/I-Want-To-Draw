@@ -2,6 +2,7 @@ package com.aichat.sandbox.ui.components.notes
 
 import kotlin.math.pow
 import kotlin.math.sin
+import kotlin.math.max
 
 /**
  * Per-tool pressure / tilt → width + alpha curves (sub-phase 5.1).
@@ -31,6 +32,15 @@ object ToolDynamics {
 
     /** Minimum stroke width below which anti-aliased lines disappear. */
     const val MIN_WIDTH_PX: Float = 0.5f
+
+    /**
+     * Floor on a stroke's *on-screen* width (after the viewport zoom is
+     * applied) so strokes don't shrink into an invisible sub-pixel hairline
+     * when the canvas is zoomed far out. Kept just under 1px so a fully
+     * zoomed-out overview still shows every stroke without fattening lines at
+     * normal zoom. See [StrokeRenderer.drawStrokePath].
+     */
+    const val MIN_SCREEN_WIDTH_PX: Float = 0.75f
 
     /** Sanity cap so a runaway value doesn't render a screen-filling blob. */
     const val MAX_WIDTH_PX: Float = 64f
@@ -127,4 +137,57 @@ object ToolDynamics {
     const val HIGHLIGHTER_ALPHA: Float = 0.35f
 
     private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
+
+    // ── Phase: pen-size zoom scaling (pure, JVM-testable) ─────────────────
+
+    /**
+     * The world-space width a stroke should be *stored* with at touch-down,
+     * given the chosen on-screen [baseWidthPx] and the [viewportScale] in
+     * effect when the stroke starts.
+     *
+     * - Fixed-width strokes always store the raw [baseWidthPx] (it's a screen
+     *   width; the renderer divides out zoom at draw time).
+     * - Screen-anchored strokes divide by the zoom so the committed world width
+     *   reproduces the chosen on-screen thickness (`screen = world * scale`).
+     * - Otherwise the width is already world-space, returned unchanged.
+     *
+     * [minDivScale] guards against dividing by a (near-)zero zoom.
+     */
+    fun startWorldWidthPx(
+        baseWidthPx: Float,
+        viewportScale: Float,
+        screenAnchored: Boolean,
+        fixedWidth: Boolean,
+        minDivScale: Float = 0.01f,
+    ): Float = if (!fixedWidth && screenAnchored && viewportScale > minDivScale) {
+        baseWidthPx / viewportScale
+    } else {
+        baseWidthPx
+    }
+
+    /**
+     * The `strokeWidth` to set on the Paint for one segment, accounting for the
+     * fact that the canvas is scaled by [viewportScale] before drawing (so a
+     * width `W` paints `W * viewportScale` screen px).
+     *
+     * - [dynamicsWidthPx] is the per-sample width from the tool curve.
+     * - Fixed-width strokes ignore the dynamics width and hold a constant screen
+     *   width by dividing [baseWidthPx] by the zoom.
+     * - [minScreenWidthPx] floors the *on-screen* width so strokes never vanish
+     *   into a sub-pixel hairline when zoomed far out (`0` disables).
+     */
+    fun renderStrokeWidthPx(
+        dynamicsWidthPx: Float,
+        baseWidthPx: Float,
+        viewportScale: Float,
+        fixedWidth: Boolean,
+        minScreenWidthPx: Float,
+    ): Float {
+        val scale = if (viewportScale > 0f) viewportScale else 1f
+        var width = if (fixedWidth) baseWidthPx / scale else dynamicsWidthPx
+        if (minScreenWidthPx > 0f) {
+            width = max(width, minScreenWidthPx / scale)
+        }
+        return width
+    }
 }

@@ -182,6 +182,33 @@ class ToolPaletteState {
         inkBeautify = enabled
     }
 
+    // ── Phase: pen-size zoom scaling ─────────────────────────────────────
+
+    /**
+     * When true (default) a chosen pen width is anchored to *screen* pixels at
+     * the moment a stroke starts, so the brush feels the same thickness at any
+     * zoom. When false the width is treated as a world-space value (zooming out
+     * thins every stroke — the classic vector behaviour).
+     */
+    var screenAnchoredPenSize: Boolean by mutableStateOf(true)
+        private set
+
+    fun setScreenAnchored(enabled: Boolean) {
+        screenAnchoredPenSize = enabled
+    }
+
+    /**
+     * When true newly drawn ink strokes keep a constant on-screen width at any
+     * zoom (CAD / "fixed width pen"). Stored per-stroke so committed strokes
+     * keep rendering non-scaling.
+     */
+    var fixedWidthInk: Boolean by mutableStateOf(false)
+        private set
+
+    fun setFixedWidth(enabled: Boolean) {
+        fixedWidthInk = enabled
+    }
+
     // ── Sub-phase 14.2 — connector route style ───────────────────────────
 
     /** Route for newly drawn connectors — a [ConnectorCodec] ROUTE_* value. */
@@ -251,6 +278,8 @@ class ToolPaletteState {
         stickyFillColor: Int? = null,
         inkBeautify: Boolean? = null,
         connectorRouteStyle: Int? = null,
+        screenAnchoredPenSize: Boolean? = null,
+        fixedWidthInk: Boolean? = null,
     ) {
         for ((id, color) in inkColors) {
             Tool.fromId(id)?.let { setColor(it, color) }
@@ -265,12 +294,19 @@ class ToolPaletteState {
         stickyFillColor?.let { setStickyFill(it) }
         inkBeautify?.let { setBeautify(it) }
         connectorRouteStyle?.let { setConnectorRoute(it) }
+        screenAnchoredPenSize?.let { setScreenAnchored(it) }
+        fixedWidthInk?.let { setFixedWidth(it) }
         Tool.fromId(selectedToolId)?.let { select(it) }
     }
 
     companion object {
         const val WIDTH_MIN_PX = 0.5f
-        const val WIDTH_MAX_PX = 10f
+
+        // Phase: pen-size zoom scaling — widened from 10 to match the
+        // renderer's dynamics cap ([ToolDynamics.MAX_WIDTH_PX]) so thick
+        // markers/brushes are reachable, especially now that screen-anchored
+        // sizing keeps a chosen width feeling consistent across zoom.
+        const val WIDTH_MAX_PX = 64f
         const val ERASER_RADIUS_MIN_PX = 8f
         const val ERASER_RADIUS_MAX_PX = 96f
 

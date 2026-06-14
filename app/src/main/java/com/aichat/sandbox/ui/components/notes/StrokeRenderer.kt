@@ -115,6 +115,19 @@ object StrokeRenderer {
      * else in the notes module; only the first `sampleCount` samples are
      * read. The caller controls paint color / cap / base alpha; this function
      * sets `strokeWidth` and `alpha` per segment via [ToolDynamics].
+     *
+     * Zoom-aware width (Phase: pen-size zoom scaling). Strokes are drawn under
+     * a `canvas.scale(viewportScale)` transform, so a `strokeWidth` of `W`
+     * renders as `W * viewportScale` screen px. Three knobs ride on that:
+     *  - [viewportScale] — the live viewport zoom, used by the two below. When
+     *    left at the default `1f`, the function behaves exactly as before, so
+     *    export / raster callers (which bake zoom into their own transform)
+     *    are unaffected.
+     *  - [fixedWidth] — when true the stroke ignores pressure/tilt width
+     *    dynamics and renders at a constant *screen* width of [baseWidthPx]
+     *    (CAD / "fixed width pen" behaviour) by dividing out the zoom.
+     *  - [minScreenWidthPx] — a floor on the on-screen width so strokes never
+     *    vanish into a sub-pixel hairline when zoomed far out. `0f` disables.
      */
     fun drawStrokePath(
         canvas: Canvas,
@@ -124,6 +137,9 @@ object StrokeRenderer {
         baseWidthPx: Float,
         tool: String?,
         scratchPath: Path = Path(),
+        viewportScale: Float = 1f,
+        fixedWidth: Boolean = false,
+        minScreenWidthPx: Float = 0f,
     ) {
         if (sampleCount < 1) return
         val s = StrokeCodec.FLOATS_PER_SAMPLE
@@ -132,12 +148,12 @@ object StrokeRenderer {
         val baseAlpha = paint.alpha
         try {
             if (sampleCount == 1) {
-                applyStyle(paint, baseAlpha, samples[2], samples[3], baseWidthPx, tool)
+                applyStyle(paint, baseAlpha, samples[2], samples[3], baseWidthPx, tool, viewportScale, fixedWidth, minScreenWidthPx)
                 canvas.drawPoint(samples[0], samples[1], paint)
                 return
             }
             if (sampleCount == 2) {
-                applyStyle(paint, baseAlpha, samples[s + 2], samples[s + 3], baseWidthPx, tool)
+                applyStyle(paint, baseAlpha, samples[s + 2], samples[s + 3], baseWidthPx, tool, viewportScale, fixedWidth, minScreenWidthPx)
                 canvas.drawLine(samples[0], samples[1], samples[s], samples[s + 1], paint)
                 return
             }
@@ -148,7 +164,7 @@ object StrokeRenderer {
             val mid01x = (samples[0] + samples[s]) * 0.5f
             val mid01y = (samples[1] + samples[s + 1]) * 0.5f
             scratchPath.lineTo(mid01x, mid01y)
-            applyStyle(paint, baseAlpha, samples[s + 2], samples[s + 3], baseWidthPx, tool)
+            applyStyle(paint, baseAlpha, samples[s + 2], samples[s + 3], baseWidthPx, tool, viewportScale, fixedWidth, minScreenWidthPx)
             canvas.drawPath(scratchPath, paint)
 
             // Middle segments: mid(s_{i-1}, s_i) → quadTo(s_i) → mid(s_i, s_{i+1}).
@@ -163,7 +179,7 @@ object StrokeRenderer {
                 scratchPath.reset()
                 scratchPath.moveTo(startX, startY)
                 scratchPath.quadTo(samples[ci], samples[ci + 1], endX, endY)
-                applyStyle(paint, baseAlpha, samples[ci + 2], samples[ci + 3], baseWidthPx, tool)
+                applyStyle(paint, baseAlpha, samples[ci + 2], samples[ci + 3], baseWidthPx, tool, viewportScale, fixedWidth, minScreenWidthPx)
                 canvas.drawPath(scratchPath, paint)
             }
 
@@ -176,7 +192,7 @@ object StrokeRenderer {
                 (samples[prevI + 1] + samples[lastI + 1]) * 0.5f,
             )
             scratchPath.lineTo(samples[lastI], samples[lastI + 1])
-            applyStyle(paint, baseAlpha, samples[lastI + 2], samples[lastI + 3], baseWidthPx, tool)
+            applyStyle(paint, baseAlpha, samples[lastI + 2], samples[lastI + 3], baseWidthPx, tool, viewportScale, fixedWidth, minScreenWidthPx)
             canvas.drawPath(scratchPath, paint)
         } finally {
             paint.alpha = baseAlpha
@@ -188,6 +204,11 @@ object StrokeRenderer {
      * and alpha. [baseAlpha] is the paint's pre-modulation alpha — preserved
      * so an opaque pen colour with explicit per-pixel alpha rounds-trips, and
      * so the highlighter's translucent base alpha still reads as translucent.
+     *
+     * Width handling is zoom-aware: see [drawStrokePath] for [viewportScale],
+     * [fixedWidth] and [minScreenWidthPx]. Because the canvas is scaled by
+     * [viewportScale], any "screen px" target `S` is reached by setting
+     * `strokeWidth = S / viewportScale`.
      */
     private fun applyStyle(
         paint: Paint,
@@ -196,9 +217,18 @@ object StrokeRenderer {
         tilt: Float,
         baseWidthPx: Float,
         tool: String?,
+        viewportScale: Float = 1f,
+        fixedWidth: Boolean = false,
+        minScreenWidthPx: Float = 0f,
     ) {
         val style = ToolDynamics.forTool(tool, baseWidthPx, pressure, tilt)
-        paint.strokeWidth = style.widthPx
+        paint.strokeWidth = ToolDynamics.renderStrokeWidthPx(
+            dynamicsWidthPx = style.widthPx,
+            baseWidthPx = baseWidthPx,
+            viewportScale = viewportScale,
+            fixedWidth = fixedWidth,
+            minScreenWidthPx = minScreenWidthPx,
+        )
         paint.alpha = (baseAlpha * style.alpha).toInt().coerceIn(0, 255)
     }
 }

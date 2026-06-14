@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Grid4x4
+import androidx.compose.material.icons.filled.HorizontalRule
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.automirrored.filled.ViewSidebar
 import androidx.compose.material.icons.filled.ExpandLess
@@ -504,6 +506,18 @@ fun NoteEditorScreen(
                             fingerDrawing = fingerDrawing,
                             onToggleFingerDrawing = {
                                 viewModel.setFingerDrawing(!fingerDrawing)
+                            },
+                            screenAnchoredPenSize = viewModel.palette.screenAnchoredPenSize,
+                            onToggleScreenAnchoredPenSize = {
+                                viewModel.palette.setScreenAnchored(
+                                    !viewModel.palette.screenAnchoredPenSize,
+                                )
+                            },
+                            fixedWidthInk = viewModel.palette.fixedWidthInk,
+                            onToggleFixedWidthInk = {
+                                viewModel.palette.setFixedWidth(
+                                    !viewModel.palette.fixedWidthInk,
+                                )
                             },
                             iconPixelGrid = iconPixelGrid,
                             onToggleIconPixelGrid = {
@@ -1308,6 +1322,10 @@ private fun EditorOverflowMenu(
     isIcon: Boolean,
     fingerDrawing: Boolean,
     onToggleFingerDrawing: () -> Unit,
+    screenAnchoredPenSize: Boolean,
+    onToggleScreenAnchoredPenSize: () -> Unit,
+    fixedWidthInk: Boolean,
+    onToggleFixedWidthInk: () -> Unit,
     iconPixelGrid: Boolean,
     onToggleIconPixelGrid: () -> Unit,
     onExportIconSet: () -> Unit,
@@ -1418,6 +1436,42 @@ private fun EditorOverflowMenu(
                 }
             },
             onClick = onToggleFingerDrawing,
+        )
+        // Pen-size zoom scaling — when on, a chosen pen width is anchored to
+        // screen pixels at the start of each stroke, so the brush feels the
+        // same thickness at any zoom. Off restores classic world-space sizing
+        // (zooming out thins every stroke).
+        DropdownMenuItem(
+            text = { Text("Pen size follows zoom") },
+            leadingIcon = {
+                Icon(Icons.Filled.ZoomIn, contentDescription = null)
+            },
+            trailingIcon = {
+                if (screenAnchoredPenSize) {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = "Enabled",
+                    )
+                }
+            },
+            onClick = onToggleScreenAnchoredPenSize,
+        )
+        // Fixed-width strokes — new ink keeps a constant on-screen width at any
+        // zoom (CAD / "fixed width pen"), instead of scaling like a vector.
+        DropdownMenuItem(
+            text = { Text("Fixed-width strokes") },
+            leadingIcon = {
+                Icon(Icons.Filled.HorizontalRule, contentDescription = null)
+            },
+            trailingIcon = {
+                if (fixedWidthInk) {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = "Enabled",
+                    )
+                }
+            },
+            onClick = onToggleFixedWidthInk,
         )
         HorizontalDivider()
         // V7 fix — one entry into the unified Share / Export sheet, replacing

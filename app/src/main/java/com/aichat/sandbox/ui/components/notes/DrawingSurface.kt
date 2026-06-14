@@ -164,6 +164,19 @@ class DrawingSurface(context: Context) : View(context) {
     private var baseWidthPx: Float = DEFAULT_STROKE_WIDTH_PX
     private var areaEraserRadiusPx: Float = 24f
 
+    // Phase: pen-size zoom scaling.
+    // When true (default), the chosen pen width is anchored to *screen* pixels
+    // at the moment a stroke starts: the committed world width is divided by
+    // the zoom at stroke-start so the brush feels the same thickness on screen
+    // at any zoom. When false, the width is taken as a world-space value (the
+    // pre-change behaviour, where zooming out thins every stroke).
+    private var screenAnchoredPenSize: Boolean = true
+
+    // When true, newly drawn ink strokes keep a constant on-screen width at
+    // any zoom (CAD / "fixed width pen"). Persisted per-item so committed
+    // strokes keep rendering non-scaling. Independent of pressure dynamics.
+    private var fixedWidthInk: Boolean = false
+
     // Phase 10.2 — shape fill + stroke style for newly committed shapes.
     // 0 fill means "no fill". Only consulted while a shape tool is active
     // (the frame tool reuses the rect rubber-band and must stay unfilled).
@@ -183,6 +196,16 @@ class DrawingSurface(context: Context) : View(context) {
     private var strokeTool: Tool = Tool.PEN
     private var strokeColor: Int = DEFAULT_INK_COLOR
     private var strokeWidthPx: Float = DEFAULT_STROKE_WIDTH_PX
+
+    /**
+     * Effective world-space width for the in-flight stroke. With screen-anchored
+     * sizing this is [strokeWidthPx] divided by the zoom captured at stroke
+     * start, so the live preview and the committed stroke share one value.
+     */
+    private var strokeEffectiveWidthPx: Float = DEFAULT_STROKE_WIDTH_PX
+
+    /** Whether the in-flight stroke should render at a constant on-screen width. */
+    private var strokeFixedWidth: Boolean = false
 
     /** Texture id for the in-flight stroke — comes from the current brush preset (6.5 / 6.6). */
     private var strokeTextureId: String? = null
@@ -259,6 +282,12 @@ class DrawingSurface(context: Context) : View(context) {
     private val eraserCursorPaint = Paint().apply {
         style = Paint.Style.STROKE
         color = ERASER_CURSOR_COLOR
+        strokeWidth = 1.5f
+        isAntiAlias = true
+    }
+    private val brushCursorPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        color = BRUSH_CURSOR_COLOR
         strokeWidth = 1.5f
         isAntiAlias = true
     }
@@ -411,6 +440,8 @@ class DrawingSurface(context: Context) : View(context) {
         pathCapJoin: Int = PathCodec.DEFAULT_CAP_JOIN,
         beautifyInk: Boolean = false,
         connectorRouteStyle: Byte = ConnectorCodec.ROUTE_STRAIGHT,
+        screenAnchoredPenSize: Boolean = true,
+        fixedWidthInk: Boolean = false,
     ) {
         // 12.2 — leaving the pen tool commits whatever path is in progress;
         // an abandoned two-anchor stub is more useful than silent loss.
@@ -427,6 +458,8 @@ class DrawingSurface(context: Context) : View(context) {
         this.pathCapJoin = pathCapJoin
         this.beautifyInk = beautifyInk
         this.connectorRouteStyle = connectorRouteStyle
+        this.screenAnchoredPenSize = screenAnchoredPenSize
+        this.fixedWidthInk = fixedWidthInk
         invalidate()
     }
 
@@ -559,7 +592,8 @@ class DrawingSurface(context: Context) : View(context) {
                 )
                 StrokeRenderer.drawStrokePath(
                     canvas, livePaint, liveSamples, liveSampleCount,
-                    strokeWidthPx, strokeTool.id, scratchPath,
+                    strokeEffectiveWidthPx, strokeTool.id, scratchPath,
+                    viewport.scale, strokeFixedWidth, ToolDynamics.MIN_SCREEN_WIDTH_PX,
                 )
             }
             val predicted = predictedSamples
@@ -572,7 +606,8 @@ class DrawingSurface(context: Context) : View(context) {
                     (predictedPaint.alpha * PREDICTED_ALPHA_FRACTION).toInt().coerceIn(0, 255)
                 StrokeRenderer.drawStrokePath(
                     canvas, predictedPaint, predicted, predictedSampleCount,
-                    strokeWidthPx, strokeTool.id, scratchPath,
+                    strokeEffectiveWidthPx, strokeTool.id, scratchPath,
+                    viewport.scale, strokeFixedWidth, ToolDynamics.MIN_SCREEN_WIDTH_PX,
                 )
             }
             canvas.restore()
@@ -590,9 +625,33 @@ class DrawingSurface(context: Context) : View(context) {
                 else ToolPaletteState.STROKE_ERASER_RADIUS_PX
                 canvas.drawCircle(hoverX, hoverY, r, eraserCursorPaint)
             } else {
+                if (paletteTool.isInk) {
+                    // Brush-size ring: radius = the actual on-screen brush
+                    // radius for the current sizing mode, so the user sees how
+                    // thick the stroke will land before touching down.
+                    val ringRadius = brushCursorScreenRadius()
+                    if (ringRadius >= BRUSH_CURSOR_MIN_RADIUS_PX) {
+                        canvas.drawCircle(hoverX, hoverY, ringRadius, brushCursorPaint)
+                    }
+                }
                 canvas.drawCircle(hoverX, hoverY, HOVER_RADIUS_PX, hoverPaint)
             }
         }
+    }
+
+    /**
+     * On-screen radius (px) of the brush-size hover ring for the active ink
+     * tool, mirroring how a stroke would actually land:
+     *  - screen-anchored or fixed-width sizing → the base width is already in
+     *    screen px, so the ring is `baseWidthPx / 2`;
+     *  - world-space sizing → the width scales with zoom, so the ring is
+     *    `baseWidthPx * viewport.scale / 2`.
+     */
+    private fun brushCursorScreenRadius(): Float {
+        val screenWidth =
+            if (screenAnchoredPenSize || fixedWidthInk) baseWidthPx
+            else baseWidthPx * viewport.scale
+        return screenWidth * 0.5f
     }
 
     /**
@@ -839,6 +898,19 @@ class DrawingSurface(context: Context) : View(context) {
                 strokeTool = resolveStrokeTool(event)
                 strokeColor = inkColor
                 strokeWidthPx = baseWidthPx
+                // Phase: pen-size zoom scaling — freeze the width model for this
+                // stroke at touch-down. Fixed-width strokes always render at a
+                // constant screen width; otherwise screen-anchored sizing stores
+                // the chosen on-screen width as a world width by dividing out the
+                // current zoom (so it lands the same thickness at any zoom).
+                strokeFixedWidth = fixedWidthInk
+                strokeEffectiveWidthPx = ToolDynamics.startWorldWidthPx(
+                    baseWidthPx = baseWidthPx,
+                    viewportScale = viewport.scale,
+                    screenAnchored = screenAnchoredPenSize,
+                    fixedWidth = strokeFixedWidth,
+                    minDivScale = MIN_DIV_SCALE,
+                )
                 strokeTextureForStroke = strokeTextureId
                 liveSampleCount = 0
                 lassoCount = 0
@@ -1186,8 +1258,12 @@ class DrawingSurface(context: Context) : View(context) {
             kind = STROKE_KIND,
             tool = strokeTool.id,
             colorArgb = strokeColor,
-            baseWidthPx = strokeWidthPx,
+            // Phase: pen-size zoom scaling — store the zoom-resolved world
+            // width so the stroke keeps the on-screen thickness it had while
+            // being drawn. Equals strokeWidthPx when screen-anchoring is off.
+            baseWidthPx = strokeEffectiveWidthPx,
             payload = payload,
+            fixedWidth = strokeFixedWidth,
         )
         committedItems = committedItems + item
         sceneDirty = true
@@ -1356,6 +1432,7 @@ class DrawingSurface(context: Context) : View(context) {
                 StrokeRenderer.drawStrokePath(
                     canvas, replayPaint, decoded.samples, decoded.count,
                     item.baseWidthPx, item.tool, scratchPath,
+                    viewport.scale, item.fixedWidth, ToolDynamics.MIN_SCREEN_WIDTH_PX,
                 )
             }
             TextItemCodec.KIND -> TextItemRenderer.draw(canvas, item, textScratchMatrix)
@@ -2366,6 +2443,12 @@ class DrawingSurface(context: Context) : View(context) {
         private const val HOVER_COLOR = 0x66000000
         // Outlined-circle preview for the eraser; matches the hit radius.
         private const val ERASER_CURSOR_COLOR = 0x88FF3030.toInt()
+        // Outlined-circle preview for ink tools — shows the actual on-screen
+        // brush size before the user touches down (Phase: pen-size zoom scaling).
+        private const val BRUSH_CURSOR_COLOR = 0x66000000
+        // The ring is suppressed below this on-screen radius; the small nib dot
+        // already conveys position for hairline brushes.
+        private const val BRUSH_CURSOR_MIN_RADIUS_PX = 3f
         private const val MIN_DIV_SCALE = 0.01f
         // A lasso under three vertices can't enclose anything — drop the gesture silently.
         private const val MIN_LASSO_VERTICES = 3
@@ -2524,6 +2607,8 @@ fun DrawingSurfaceView(
                 pathCapJoin = paletteState.activePathCapJoin(),
                 beautifyInk = paletteState.inkBeautify,
                 connectorRouteStyle = paletteState.connectorRouteStyle.toByte(),
+                screenAnchoredPenSize = paletteState.screenAnchoredPenSize,
+                fixedWidthInk = paletteState.fixedWidthInk,
             )
             view.setSelection(selectedIds, selectionMatrix)
             view.setEditingTextId(editingTextId)

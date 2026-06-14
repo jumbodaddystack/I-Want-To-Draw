@@ -36,6 +36,10 @@ data class NoteItem(
     // together (expansion happens at lasso-commit time). No nesting; a group
     // may span layers.
     val groupId: String? = null,
+    // Phase: pen-size zoom scaling — when true the stroke renders at a constant
+    // on-screen width at any zoom (CAD / "fixed width pen"). Default false keeps
+    // strokes as zoom-scaling vectors, so existing notes are unchanged.
+    val fixedWidth: Boolean = false,
 ) {
     // Hand-written equals/hashCode because ByteArray uses reference equality by default.
     override fun equals(other: Any?): Boolean {
@@ -51,6 +55,7 @@ data class NoteItem(
         if (!payload.contentEquals(other.payload)) return false
         if (layerId != other.layerId) return false
         if (groupId != other.groupId) return false
+        if (fixedWidth != other.fixedWidth) return false
         return true
     }
 
@@ -65,6 +70,7 @@ data class NoteItem(
         result = 31 * result + payload.contentHashCode()
         result = 31 * result + (layerId?.hashCode() ?: 0)
         result = 31 * result + (groupId?.hashCode() ?: 0)
+        result = 31 * result + fixedWidth.hashCode()
         return result
     }
 
