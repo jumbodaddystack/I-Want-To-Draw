@@ -26,22 +26,20 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileCopy
-import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.FormatPaint
 import androidx.compose.material.icons.filled.GroupWork
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.MergeType
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Polyline
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Timeline
-import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -566,15 +564,36 @@ private fun FloatingSelectionMenu(
     onPickColor: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    // V8 fix — the strip used to lay 20+ equal-weight buttons in one
+    // horizontally-scrolled row, so the everyday actions (delete, copy, …)
+    // sat shoulder-to-shoulder with rare ones (boolean combine, distribute,
+    // outline ink) and you had to swipe to find anything. Now a small set of
+    // primary actions stays inline and everything situational folds behind a
+    // single "More" overflow, giving the menu a clear hierarchy.
+    val hasSecondary = onCannedEdit != null ||
+        onSaveAsStamp != null ||
+        (canEditNodes && onEditNodes != null) ||
+        (canConvertToPath && onConvertToPath != null) ||
+        (canOutlineStroke && onOutlineStroke != null) ||
+        (canCombine && onCombine != null) ||
+        (canMergePaths && onMergePaths != null) ||
+        (canTidy && onTidy != null) ||
+        (selectionHasShapes && onSetFill != null && onSetStrokeStyle != null) ||
+        (canPickColor && onPickColor != null) ||
+        (canCopyStyle && onCopyStyle != null) ||
+        onPasteStyle != null ||
+        (canGroup && onGroup != null) ||
+        (canUngroup && onUngroup != null) ||
+        (onAlign != null && onDistribute != null && onReorder != null)
+
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
         tonalElevation = 4.dp,
         shadowElevation = 6.dp,
     ) {
-        // Scrollable so the roster never exceeds the width it's given —
-        // buttons keep their intrinsic size and the overflow is swiped to,
-        // instead of being crushed against the constraint.
+        // Scrollable as a safety valve, but with the overflow pulled out the
+        // primary row fits without swiping in the common case.
         Row(
             modifier = Modifier
                 .horizontalScroll(rememberScrollState())
@@ -582,132 +601,13 @@ private fun FloatingSelectionMenu(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Primary actions — the everyday verbs, always inline.
             MenuButton(icon = Icons.Filled.QuestionAnswer, label = "Ask", onClick = onAsk)
             MenuButton(
                 icon = Icons.Filled.TextFields,
                 label = "To text",
                 onClick = onConvertToText,
             )
-            // Sub-phase 7.5 — canned AI / local edit actions.
-            if (onCannedEdit != null) {
-                MenuButton(
-                    icon = Icons.Filled.AutoFixHigh,
-                    label = "Clean up",
-                    onClick = { onCannedEdit(com.aichat.sandbox.data.notes.CannedEditAction.CLEAN_UP) },
-                )
-                MenuButton(
-                    icon = Icons.Filled.RotateRight,
-                    label = "Straighten",
-                    onClick = { onCannedEdit(com.aichat.sandbox.data.notes.CannedEditAction.STRAIGHTEN) },
-                )
-                MenuButton(
-                    icon = Icons.Filled.Category,
-                    label = "Auto-shape",
-                    onClick = { onCannedEdit(com.aichat.sandbox.data.notes.CannedEditAction.AUTO_SHAPE) },
-                )
-            }
-            if (onSaveAsStamp != null) {
-                MenuButton(
-                    icon = Icons.Filled.Bookmark,
-                    label = "Save stamp",
-                    onClick = onSaveAsStamp,
-                )
-            }
-            // Phase 12.3 — node-edit mode for a single selected path.
-            if (canEditNodes && onEditNodes != null) {
-                MenuButton(
-                    icon = Icons.Filled.Polyline,
-                    label = "Edit nodes",
-                    onClick = onEditNodes,
-                )
-            }
-            // Phase 12.4 — shape→path / stroke→path conversion.
-            if (canConvertToPath && onConvertToPath != null) {
-                MenuButton(
-                    icon = Icons.Filled.Timeline,
-                    label = "To path",
-                    onClick = onConvertToPath,
-                )
-            }
-            // Phase 15.2 — stroke → filled outline (pressure baked into
-            // geometry, ready for boolean ops + lossless export).
-            if (canOutlineStroke && onOutlineStroke != null) {
-                MenuButton(
-                    icon = Icons.Filled.Gesture,
-                    label = "Outline ink",
-                    onClick = onOutlineStroke,
-                )
-            }
-            // Phase 13.1 — boolean ops on ≥ 2 selected shapes / paths.
-            if (canCombine && onCombine != null) {
-                CombineMenuButton(onCombine = onCombine)
-            }
-            // Phase 17.5 — merge style-compatible paths into one (no clipping;
-            // holes preserved as subpaths).
-            if (canMergePaths && onMergePaths != null) {
-                MenuButton(
-                    icon = Icons.Filled.MergeType,
-                    label = "Merge",
-                    onClick = onMergePaths,
-                )
-            }
-            // Phase 17.5 follow-on — one-tap tidy (simplify + snap-to-grid +
-            // merge), bundled so an icon cleans up in a single undo step.
-            if (canTidy && onTidy != null) {
-                MenuButton(
-                    icon = Icons.Filled.AutoFixHigh,
-                    label = "Tidy",
-                    onClick = onTidy,
-                )
-            }
-            // Phase 10.2/10.3 — restyle existing shapes (fill + line style);
-            // 13.2 adds gradient presets.
-            if (selectionHasShapes && onSetFill != null && onSetStrokeStyle != null) {
-                StyleMenuButton(
-                    onSetFill = onSetFill,
-                    onSetStrokeStyle = onSetStrokeStyle,
-                    onSetGradient = onSetGradient,
-                )
-            }
-            // Phase 13.3 — eyedropper + style copy/paste.
-            if (canPickColor && onPickColor != null) {
-                MenuButton(
-                    icon = Icons.Filled.Colorize,
-                    label = "Pick colour",
-                    onClick = onPickColor,
-                )
-            }
-            if (canCopyStyle && onCopyStyle != null) {
-                MenuButton(
-                    icon = Icons.Filled.Brush,
-                    label = "Copy style",
-                    onClick = onCopyStyle,
-                )
-            }
-            if (onPasteStyle != null) {
-                MenuButton(
-                    icon = Icons.Filled.FormatPaint,
-                    label = "Paste style",
-                    enabled = canPasteStyle,
-                    onClick = onPasteStyle,
-                )
-            }
-            // Phase 10.4 — group / ungroup.
-            if (canGroup && onGroup != null) {
-                MenuButton(icon = Icons.Filled.GroupWork, label = "Group", onClick = onGroup)
-            }
-            if (canUngroup && onUngroup != null) {
-                MenuButton(icon = Icons.Filled.LinkOff, label = "Ungroup", onClick = onUngroup)
-            }
-            // Phase 10.5 — align / distribute / z-order.
-            if (onAlign != null && onDistribute != null && onReorder != null) {
-                ArrangeMenuButton(
-                    canDistribute = canDistribute,
-                    onAlign = onAlign,
-                    onDistribute = onDistribute,
-                    onReorder = onReorder,
-                )
-            }
             MenuButton(icon = Icons.Filled.FileCopy, label = "Duplicate", onClick = onDuplicate)
             MenuButton(icon = Icons.Filled.Delete, label = "Delete", onClick = onDelete)
             MenuButton(icon = Icons.Filled.ContentCut, label = "Cut", onClick = onCut)
@@ -718,8 +618,336 @@ private fun FloatingSelectionMenu(
                 enabled = canPaste,
                 onClick = onPaste,
             )
+            // Everything situational lives behind one overflow.
+            if (hasSecondary) {
+                SelectionMoreMenu(
+                    onCannedEdit = onCannedEdit,
+                    onSaveAsStamp = onSaveAsStamp,
+                    selectionHasShapes = selectionHasShapes,
+                    canGroup = canGroup,
+                    canUngroup = canUngroup,
+                    canDistribute = canDistribute,
+                    onSetFill = onSetFill,
+                    onSetStrokeStyle = onSetStrokeStyle,
+                    onGroup = onGroup,
+                    onUngroup = onUngroup,
+                    onAlign = onAlign,
+                    onDistribute = onDistribute,
+                    onReorder = onReorder,
+                    canEditNodes = canEditNodes,
+                    onEditNodes = onEditNodes,
+                    canConvertToPath = canConvertToPath,
+                    onConvertToPath = onConvertToPath,
+                    canOutlineStroke = canOutlineStroke,
+                    onOutlineStroke = onOutlineStroke,
+                    canCombine = canCombine,
+                    onCombine = onCombine,
+                    canMergePaths = canMergePaths,
+                    onMergePaths = onMergePaths,
+                    canTidy = canTidy,
+                    onTidy = onTidy,
+                    onSetGradient = onSetGradient,
+                    canPickColor = canPickColor,
+                    onPickColor = onPickColor,
+                    canCopyStyle = canCopyStyle,
+                    onCopyStyle = onCopyStyle,
+                    canPasteStyle = canPasteStyle,
+                    onPasteStyle = onPasteStyle,
+                )
+            }
         }
     }
+}
+
+/**
+ * V8 — the selection menu's overflow. Folds every situational action
+ * (canned AI edits, path/style tooling, boolean combine, grouping, arrange)
+ * into one dropdown so the inline strip stays short. Grouped actions that
+ * used to be their own popovers (Combine / Style / Arrange) are flattened
+ * inline here under subheaders — a single scrollable menu instead of nested
+ * popovers.
+ */
+@Composable
+private fun SelectionMoreMenu(
+    onCannedEdit: ((com.aichat.sandbox.data.notes.CannedEditAction) -> Unit)?,
+    onSaveAsStamp: (() -> Unit)?,
+    selectionHasShapes: Boolean,
+    canGroup: Boolean,
+    canUngroup: Boolean,
+    canDistribute: Boolean,
+    onSetFill: ((Int?) -> Unit)?,
+    onSetStrokeStyle: ((Int) -> Unit)?,
+    onGroup: (() -> Unit)?,
+    onUngroup: (() -> Unit)?,
+    onAlign: ((AlignmentMath.AlignEdge) -> Unit)?,
+    onDistribute: ((AlignmentMath.Axis) -> Unit)?,
+    onReorder: ((ZOrderMath.Op) -> Unit)?,
+    canEditNodes: Boolean,
+    onEditNodes: (() -> Unit)?,
+    canConvertToPath: Boolean,
+    onConvertToPath: (() -> Unit)?,
+    canOutlineStroke: Boolean,
+    onOutlineStroke: (() -> Unit)?,
+    canCombine: Boolean,
+    onCombine: ((PathBoolean.Op) -> Unit)?,
+    canMergePaths: Boolean,
+    onMergePaths: (() -> Unit)?,
+    canTidy: Boolean,
+    onTidy: (() -> Unit)?,
+    onSetGradient: ((FillStyle.Gradient) -> Unit)?,
+    canPickColor: Boolean,
+    onPickColor: (() -> Unit)?,
+    canCopyStyle: Boolean,
+    onCopyStyle: (() -> Unit)?,
+    canPasteStyle: Boolean,
+    onPasteStyle: (() -> Unit)?,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    fun <T> fire(action: (T) -> Unit, arg: T) { action(arg); expanded = false }
+    fun fire(action: () -> Unit) { action(); expanded = false }
+    Box {
+        MenuButton(icon = Icons.Filled.MoreHoriz, label = "More", onClick = { expanded = true })
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            // Canned AI / local edits.
+            if (onCannedEdit != null) {
+                MenuSectionLabel("Edit")
+                DropdownMenuItem(
+                    text = { Text("Clean up") },
+                    leadingIcon = { Icon(Icons.Filled.AutoFixHigh, contentDescription = null) },
+                    onClick = { fire({ onCannedEdit(com.aichat.sandbox.data.notes.CannedEditAction.CLEAN_UP) }) },
+                )
+                DropdownMenuItem(
+                    text = { Text("Straighten") },
+                    leadingIcon = { Icon(Icons.Filled.RotateRight, contentDescription = null) },
+                    onClick = { fire({ onCannedEdit(com.aichat.sandbox.data.notes.CannedEditAction.STRAIGHTEN) }) },
+                )
+                DropdownMenuItem(
+                    text = { Text("Auto-shape") },
+                    leadingIcon = { Icon(Icons.Filled.Category, contentDescription = null) },
+                    onClick = { fire({ onCannedEdit(com.aichat.sandbox.data.notes.CannedEditAction.AUTO_SHAPE) }) },
+                )
+            }
+
+            // Path / geometry tooling.
+            val hasPathTools = (canEditNodes && onEditNodes != null) ||
+                (canConvertToPath && onConvertToPath != null) ||
+                (canOutlineStroke && onOutlineStroke != null) ||
+                (canCombine && onCombine != null) ||
+                (canMergePaths && onMergePaths != null) ||
+                (canTidy && onTidy != null)
+            if (hasPathTools) {
+                MenuSectionLabel("Shape")
+                if (canEditNodes && onEditNodes != null) {
+                    DropdownMenuItem(
+                        text = { Text("Edit nodes") },
+                        leadingIcon = { Icon(Icons.Filled.Polyline, contentDescription = null) },
+                        onClick = { fire(onEditNodes) },
+                    )
+                }
+                if (canConvertToPath && onConvertToPath != null) {
+                    DropdownMenuItem(
+                        text = { Text("To path") },
+                        leadingIcon = { Icon(Icons.Filled.Timeline, contentDescription = null) },
+                        onClick = { fire(onConvertToPath) },
+                    )
+                }
+                if (canOutlineStroke && onOutlineStroke != null) {
+                    DropdownMenuItem(
+                        text = { Text("Outline ink") },
+                        leadingIcon = { Icon(Icons.Filled.Gesture, contentDescription = null) },
+                        onClick = { fire(onOutlineStroke) },
+                    )
+                }
+                if (canMergePaths && onMergePaths != null) {
+                    DropdownMenuItem(
+                        text = { Text("Merge") },
+                        leadingIcon = { Icon(Icons.Filled.MergeType, contentDescription = null) },
+                        onClick = { fire(onMergePaths) },
+                    )
+                }
+                if (canTidy && onTidy != null) {
+                    DropdownMenuItem(
+                        text = { Text("Tidy") },
+                        leadingIcon = { Icon(Icons.Filled.AutoFixHigh, contentDescription = null) },
+                        onClick = { fire(onTidy) },
+                    )
+                }
+                if (canCombine && onCombine != null) {
+                    MenuSectionLabel("Combine")
+                    DropdownMenuItem(text = { Text("Union") }, onClick = { fire(onCombine, PathBoolean.Op.UNION) })
+                    DropdownMenuItem(text = { Text("Subtract") }, onClick = { fire(onCombine, PathBoolean.Op.SUBTRACT) })
+                    DropdownMenuItem(text = { Text("Intersect") }, onClick = { fire(onCombine, PathBoolean.Op.INTERSECT) })
+                    DropdownMenuItem(text = { Text("Exclude") }, onClick = { fire(onCombine, PathBoolean.Op.EXCLUDE) })
+                }
+            }
+
+            // Style — fill swatches + gradients + line style.
+            if (selectionHasShapes && onSetFill != null && onSetStrokeStyle != null) {
+                MenuSectionLabel("Style")
+                DropdownMenuItem(
+                    text = { Text("No fill") },
+                    onClick = { fire({ onSetFill(null) }) },
+                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    for (swatch in FILL_SWATCHES) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color(swatch))
+                                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                .clickable { fire({ onSetFill(swatch) }) },
+                        )
+                    }
+                }
+                if (onSetGradient != null) {
+                    for (radial in listOf(false, true)) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = if (radial) "Radial" else "Linear",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                            for ((start, end) in GRADIENT_PRESETS) {
+                                val brush = if (radial) {
+                                    ComposeBrush.radialGradient(listOf(Color(start), Color(end)))
+                                } else {
+                                    ComposeBrush.linearGradient(listOf(Color(start), Color(end)))
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(brush)
+                                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                        .clickable {
+                                            fire({
+                                                onSetGradient(
+                                                    if (radial) FillStyle.radial(start, end)
+                                                    else FillStyle.linear(start, end),
+                                                )
+                                            })
+                                        },
+                                )
+                            }
+                        }
+                    }
+                }
+                DropdownMenuItem(
+                    text = { Text("Solid line") },
+                    onClick = { fire({ onSetStrokeStyle(STROKE_STYLE_SOLID) }) },
+                )
+                DropdownMenuItem(
+                    text = { Text("Dashed line") },
+                    onClick = { fire({ onSetStrokeStyle(STROKE_STYLE_DASHED) }) },
+                )
+                DropdownMenuItem(
+                    text = { Text("Dotted line") },
+                    onClick = { fire({ onSetStrokeStyle(STROKE_STYLE_DOTTED) }) },
+                )
+            }
+
+            // Eyedropper + style copy/paste + save-as-stamp.
+            val hasStyleClipboard = (canPickColor && onPickColor != null) ||
+                (canCopyStyle && onCopyStyle != null) ||
+                onPasteStyle != null ||
+                onSaveAsStamp != null
+            if (hasStyleClipboard) {
+                MenuSectionLabel("Tools")
+                if (canPickColor && onPickColor != null) {
+                    DropdownMenuItem(
+                        text = { Text("Pick colour") },
+                        leadingIcon = { Icon(Icons.Filled.Colorize, contentDescription = null) },
+                        onClick = { fire(onPickColor) },
+                    )
+                }
+                if (canCopyStyle && onCopyStyle != null) {
+                    DropdownMenuItem(
+                        text = { Text("Copy style") },
+                        leadingIcon = { Icon(Icons.Filled.Brush, contentDescription = null) },
+                        onClick = { fire(onCopyStyle) },
+                    )
+                }
+                if (onPasteStyle != null) {
+                    DropdownMenuItem(
+                        text = { Text("Paste style") },
+                        leadingIcon = { Icon(Icons.Filled.FormatPaint, contentDescription = null) },
+                        enabled = canPasteStyle,
+                        onClick = { fire(onPasteStyle) },
+                    )
+                }
+                if (onSaveAsStamp != null) {
+                    DropdownMenuItem(
+                        text = { Text("Save stamp") },
+                        leadingIcon = { Icon(Icons.Filled.Bookmark, contentDescription = null) },
+                        onClick = { fire(onSaveAsStamp) },
+                    )
+                }
+            }
+
+            // Group / arrange.
+            val hasArrange = (canGroup && onGroup != null) ||
+                (canUngroup && onUngroup != null) ||
+                (onAlign != null && onDistribute != null && onReorder != null)
+            if (hasArrange) {
+                MenuSectionLabel("Arrange")
+                if (canGroup && onGroup != null) {
+                    DropdownMenuItem(
+                        text = { Text("Group") },
+                        leadingIcon = { Icon(Icons.Filled.GroupWork, contentDescription = null) },
+                        onClick = { fire(onGroup) },
+                    )
+                }
+                if (canUngroup && onUngroup != null) {
+                    DropdownMenuItem(
+                        text = { Text("Ungroup") },
+                        leadingIcon = { Icon(Icons.Filled.LinkOff, contentDescription = null) },
+                        onClick = { fire(onUngroup) },
+                    )
+                }
+                if (onAlign != null && onDistribute != null && onReorder != null) {
+                    DropdownMenuItem(text = { Text("Align left") }, onClick = { fire(onAlign, AlignmentMath.AlignEdge.LEFT) })
+                    DropdownMenuItem(text = { Text("Align centre") }, onClick = { fire(onAlign, AlignmentMath.AlignEdge.CENTER_H) })
+                    DropdownMenuItem(text = { Text("Align right") }, onClick = { fire(onAlign, AlignmentMath.AlignEdge.RIGHT) })
+                    DropdownMenuItem(text = { Text("Align top") }, onClick = { fire(onAlign, AlignmentMath.AlignEdge.TOP) })
+                    DropdownMenuItem(text = { Text("Align middle") }, onClick = { fire(onAlign, AlignmentMath.AlignEdge.CENTER_V) })
+                    DropdownMenuItem(text = { Text("Align bottom") }, onClick = { fire(onAlign, AlignmentMath.AlignEdge.BOTTOM) })
+                    DropdownMenuItem(
+                        text = { Text("Distribute horizontally") },
+                        enabled = canDistribute,
+                        onClick = { fire(onDistribute, AlignmentMath.Axis.HORIZONTAL) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Distribute vertically") },
+                        enabled = canDistribute,
+                        onClick = { fire(onDistribute, AlignmentMath.Axis.VERTICAL) },
+                    )
+                    DropdownMenuItem(text = { Text("Bring to front") }, onClick = { fire(onReorder, ZOrderMath.Op.BRING_TO_FRONT) })
+                    DropdownMenuItem(text = { Text("Bring forward") }, onClick = { fire(onReorder, ZOrderMath.Op.BRING_FORWARD) })
+                    DropdownMenuItem(text = { Text("Send backward") }, onClick = { fire(onReorder, ZOrderMath.Op.SEND_BACKWARD) })
+                    DropdownMenuItem(text = { Text("Send to back") }, onClick = { fire(onReorder, ZOrderMath.Op.SEND_TO_BACK) })
+                }
+            }
+        }
+    }
+}
+
+/** Small uppercase subheader separating sections in the overflow menu. */
+@Composable
+private fun MenuSectionLabel(text: String) {
+    Text(
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 2.dp),
+    )
 }
 
 @Composable
@@ -751,167 +979,6 @@ private fun MenuButton(
                 style = MaterialTheme.typography.labelMedium,
                 color = tint,
             )
-        }
-    }
-}
-
-/**
- * Phase 10.2/10.3 — "Style" button with a popover that restyles the selected
- * shapes: no-fill / fill swatches, then outline style. Every tap is one
- * CompositeEdit on the VM side, so each is its own undo entry.
- */
-@Composable
-private fun StyleMenuButton(
-    onSetFill: (Int?) -> Unit,
-    onSetStrokeStyle: (Int) -> Unit,
-    onSetGradient: ((FillStyle.Gradient) -> Unit)? = null,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        MenuButton(
-            icon = Icons.Filled.FormatColorFill,
-            label = "Style",
-            onClick = { expanded = true },
-        )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("No fill") },
-                onClick = { onSetFill(null); expanded = false },
-            )
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                for (swatch in FILL_SWATCHES) {
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(Color(swatch))
-                            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                            .clickable { onSetFill(swatch); expanded = false },
-                    )
-                }
-            }
-            // Phase 13.2 — gradient preset rows (diagonal linear + centred
-            // radial); each tap is one CompositeEdit on the VM side.
-            if (onSetGradient != null) {
-                HorizontalDivider()
-                for (radial in listOf(false, true)) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = if (radial) "Radial" else "Linear",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        for ((start, end) in GRADIENT_PRESETS) {
-                            val brush = if (radial) {
-                                ComposeBrush.radialGradient(listOf(Color(start), Color(end)))
-                            } else {
-                                ComposeBrush.linearGradient(listOf(Color(start), Color(end)))
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(brush)
-                                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                                    .clickable {
-                                        onSetGradient(
-                                            if (radial) {
-                                                FillStyle.radial(start, end)
-                                            } else {
-                                                FillStyle.linear(start, end)
-                                            },
-                                        )
-                                        expanded = false
-                                    },
-                            )
-                        }
-                    }
-                }
-            }
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text("Solid line") },
-                onClick = { onSetStrokeStyle(STROKE_STYLE_SOLID); expanded = false },
-            )
-            DropdownMenuItem(
-                text = { Text("Dashed line") },
-                onClick = { onSetStrokeStyle(STROKE_STYLE_DASHED); expanded = false },
-            )
-            DropdownMenuItem(
-                text = { Text("Dotted line") },
-                onClick = { onSetStrokeStyle(STROKE_STYLE_DOTTED); expanded = false },
-            )
-        }
-    }
-}
-
-/** Phase 13.1 — "Combine" button: union / subtract / intersect / exclude. */
-@Composable
-private fun CombineMenuButton(onCombine: (PathBoolean.Op) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    fun combine(op: PathBoolean.Op) { onCombine(op); expanded = false }
-    Box {
-        MenuButton(
-            icon = Icons.Filled.MergeType,
-            label = "Combine",
-            onClick = { expanded = true },
-        )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text("Union") }, onClick = { combine(PathBoolean.Op.UNION) })
-            DropdownMenuItem(text = { Text("Subtract") }, onClick = { combine(PathBoolean.Op.SUBTRACT) })
-            DropdownMenuItem(text = { Text("Intersect") }, onClick = { combine(PathBoolean.Op.INTERSECT) })
-            DropdownMenuItem(text = { Text("Exclude") }, onClick = { combine(PathBoolean.Op.EXCLUDE) })
-        }
-    }
-}
-
-/** Phase 10.5 — "Arrange" button: align / distribute / restack submenu. */
-@Composable
-private fun ArrangeMenuButton(
-    canDistribute: Boolean,
-    onAlign: (AlignmentMath.AlignEdge) -> Unit,
-    onDistribute: (AlignmentMath.Axis) -> Unit,
-    onReorder: (ZOrderMath.Op) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    fun align(edge: AlignmentMath.AlignEdge) { onAlign(edge); expanded = false }
-    fun reorder(op: ZOrderMath.Op) { onReorder(op); expanded = false }
-    Box {
-        MenuButton(
-            icon = Icons.Filled.SwapVert,
-            label = "Arrange",
-            onClick = { expanded = true },
-        )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text("Align left") }, onClick = { align(AlignmentMath.AlignEdge.LEFT) })
-            DropdownMenuItem(text = { Text("Align centre") }, onClick = { align(AlignmentMath.AlignEdge.CENTER_H) })
-            DropdownMenuItem(text = { Text("Align right") }, onClick = { align(AlignmentMath.AlignEdge.RIGHT) })
-            DropdownMenuItem(text = { Text("Align top") }, onClick = { align(AlignmentMath.AlignEdge.TOP) })
-            DropdownMenuItem(text = { Text("Align middle") }, onClick = { align(AlignmentMath.AlignEdge.CENTER_V) })
-            DropdownMenuItem(text = { Text("Align bottom") }, onClick = { align(AlignmentMath.AlignEdge.BOTTOM) })
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text("Distribute horizontally") },
-                enabled = canDistribute,
-                onClick = { onDistribute(AlignmentMath.Axis.HORIZONTAL); expanded = false },
-            )
-            DropdownMenuItem(
-                text = { Text("Distribute vertically") },
-                enabled = canDistribute,
-                onClick = { onDistribute(AlignmentMath.Axis.VERTICAL); expanded = false },
-            )
-            HorizontalDivider()
-            DropdownMenuItem(text = { Text("Bring to front") }, onClick = { reorder(ZOrderMath.Op.BRING_TO_FRONT) })
-            DropdownMenuItem(text = { Text("Bring forward") }, onClick = { reorder(ZOrderMath.Op.BRING_FORWARD) })
-            DropdownMenuItem(text = { Text("Send backward") }, onClick = { reorder(ZOrderMath.Op.SEND_BACKWARD) })
-            DropdownMenuItem(text = { Text("Send to back") }, onClick = { reorder(ZOrderMath.Op.SEND_TO_BACK) })
         }
     }
 }

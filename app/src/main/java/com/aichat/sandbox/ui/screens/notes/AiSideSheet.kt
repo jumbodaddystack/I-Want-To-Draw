@@ -28,8 +28,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.AssistChip
@@ -87,6 +89,8 @@ fun AiSideSheet(
     onIconQuickAction: (IconQuickAction) -> Unit,
     onFooterModeChanged: (AiFooterMode) -> Unit,
     onClearScope: () -> Unit,
+    onReScopeToSelection: () -> Unit,
+    canReScope: Boolean,
     onInsertConvertResult: (turnId: String) -> Unit,
     onInsertReply: (turnId: String) -> Unit,
     onSendReplyToChat: (turnId: String) -> Unit,
@@ -147,6 +151,8 @@ fun AiSideSheet(
                     onIconQuickAction = onIconQuickAction,
                     onFooterModeChanged = onFooterModeChanged,
                     onClearScope = onClearScope,
+                    onReScopeToSelection = onReScopeToSelection,
+                    canReScope = canReScope,
                     onInsertConvertResult = onInsertConvertResult,
                     onInsertReply = onInsertReply,
                     onSendReplyToChat = onSendReplyToChat,
@@ -170,6 +176,8 @@ private fun SheetContent(
     onIconQuickAction: (IconQuickAction) -> Unit,
     onFooterModeChanged: (AiFooterMode) -> Unit,
     onClearScope: () -> Unit,
+    onReScopeToSelection: () -> Unit,
+    canReScope: Boolean,
     onInsertConvertResult: (turnId: String) -> Unit,
     onInsertReply: (turnId: String) -> Unit,
     onSendReplyToChat: (turnId: String) -> Unit,
@@ -204,9 +212,11 @@ private fun SheetContent(
             isIcon = state.isIcon,
             convertEnabled = state.pendingSelection != null && !state.isStreaming,
             isStreaming = state.isStreaming,
+            canReScope = canReScope,
             onCannedPrompt = onCannedPrompt,
             onIconQuickAction = onIconQuickAction,
             onClearScope = onClearScope,
+            onReScopeToSelection = onReScopeToSelection,
         )
         SheetFooter(
             inputText = state.inputText,
@@ -383,10 +393,29 @@ private fun TurnBubble(
         // promises.
         if (turn.state is TurnState.Done && turn.replyBuffer.isNotEmpty()) {
             if (turn.isConvertResult) {
+                // A8 fix — OCR text is auto-placed on the canvas the instant it
+                // resolves, so the bubble confirms the placement and offers a
+                // re-insert instead of demanding a second tap to insert at all.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Start,
                 ) {
+                    if (turn.convertInserted) {
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Added as a text box",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
                     TextButton(onClick = { onInsertConvertResult(turn.id) }) {
                         Icon(
                             imageVector = Icons.Filled.TextFields,
@@ -394,7 +423,7 @@ private fun TurnBubble(
                             modifier = Modifier.size(16.dp),
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Insert as text box")
+                        Text(if (turn.convertInserted) "Insert again" else "Insert as text box")
                     }
                 }
             } else {
@@ -565,6 +594,12 @@ private fun TypingIndicator() {
  * the frozen selection so the user can pivot mid-conversation. Canned
  * prompts fire on a single tap; Convert-to-text is only enabled when there
  * is a selection in scope.
+ *
+ * A6 fix — the frozen scope is captured once at open time, so a user who
+ * lassoes something new mid-conversation was silently still asking about the
+ * old selection. The row now spells out that the scope is fixed and offers a
+ * "Use selection" chip ([canReScope]) to re-point it at the current canvas
+ * selection, alongside the existing tap-to-clear.
  */
 @Composable
 private fun ScopeAndCannedPromptRow(
@@ -573,21 +608,64 @@ private fun ScopeAndCannedPromptRow(
     isIcon: Boolean,
     convertEnabled: Boolean,
     isStreaming: Boolean,
+    canReScope: Boolean,
     onCannedPrompt: (CannedPrompt) -> Unit,
     onIconQuickAction: (IconQuickAction) -> Unit,
     onClearScope: () -> Unit,
+    onReScopeToSelection: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
-        FilterChip(
-            selected = hasSelection,
-            onClick = { if (hasSelection) onClearScope() },
-            label = { Text(scopeLabel, style = MaterialTheme.typography.labelMedium) },
-            enabled = hasSelection,
-            colors = FilterChipDefaults.filterChipColors(),
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            FilterChip(
+                selected = hasSelection,
+                onClick = { if (hasSelection) onClearScope() },
+                label = { Text(scopeLabel, style = MaterialTheme.typography.labelMedium) },
+                leadingIcon = if (hasSelection) {
+                    {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                } else null,
+                enabled = hasSelection,
+                colors = FilterChipDefaults.filterChipColors(),
+            )
+            // Re-point the frozen scope at the live canvas selection. Hidden
+            // unless there's something selected to re-scope to.
+            if (canReScope) {
+                AssistChip(
+                    onClick = onReScopeToSelection,
+                    enabled = !isStreaming,
+                    label = { Text("Use selection") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    },
+                    colors = AssistChipDefaults.assistChipColors(),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = if (hasSelection) {
+                "Scope is fixed to this selection. Tap it to clear, or re-scope to a new one."
+            } else {
+                "Answering about the whole ${if (isIcon) "icon" else "note"}."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(6.dp))
         LazyRow(

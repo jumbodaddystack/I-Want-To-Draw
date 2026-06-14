@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.BorderColor
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.Deblur
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Gesture
@@ -55,6 +56,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -160,9 +162,13 @@ private fun ToolRow(state: ToolPaletteState) {
             state = state,
             groupTools = listOf(Tool.ERASER_STROKE, Tool.ERASER_AREA),
             lastUsed = state.lastEraserTool,
-            // One fixed glyph for the group: the variant distinction lives in
-            // the picker, where the two get their proper names.
-            groupIcon = { Icons.Outlined.Backspace },
+            // V2 fix — the two eraser variants now carry distinct glyphs
+            // (Backspace for stroke-erase, Deblur for area-erase), and the
+            // group button wears the last-used variant's glyph so the next
+            // tap's outcome is visible before tapping — matching how the
+            // Shapes / Board groups already behave. The old fixed Backspace
+            // glyph made the two erasers indistinguishable on the button.
+            groupIcon = { state.lastEraserTool.icon() },
             groupDescription = "Eraser",
             modifier = Modifier.weight(1f),
         )
@@ -181,15 +187,13 @@ private fun ToolRow(state: ToolPaletteState) {
             groupDescription = "Shapes",
             modifier = Modifier.weight(1f),
         )
-        // Sub-phase 11.1/11.2 — whiteboard group: sticky notes + connectors.
-        GroupedToolButton(
-            state = state,
-            groupTools = listOf(Tool.STICKY, Tool.CONNECTOR),
-            lastUsed = state.lastBoardTool,
-            groupIcon = { state.lastBoardTool.icon() },
-            groupDescription = "Board",
-            modifier = Modifier.weight(1f),
-        )
+        // V3 fix — the whiteboard "Board" group bundled two conceptually
+        // unrelated tools (a sticky-note *content object* and a *connector*
+        // relationship line) behind one hidden-variant gesture. They're now
+        // two standalone buttons so each is a single, self-evident tap with
+        // its own glyph — no shared picker to reach the other.
+        ToolIconButton(state, Tool.STICKY, Modifier.weight(1f))
+        ToolIconButton(state, Tool.CONNECTOR, Modifier.weight(1f))
         ToolIconButton(state, Tool.FRAME, Modifier.weight(1f))
     }
 }
@@ -335,8 +339,10 @@ private fun Tool.icon(): ImageVector = when (this) {
     Tool.PEN -> Icons.Filled.Draw
     Tool.HIGHLIGHTER -> Icons.Filled.BorderColor
     Tool.PENCIL -> Icons.Filled.Edit
+    // Distinct eraser glyphs (V2): Backspace reads "delete the stroke you
+    // touch"; Deblur's soft dotted disc reads "scrub out a region."
     Tool.ERASER_STROKE -> Icons.Outlined.Backspace
-    Tool.ERASER_AREA -> Icons.Outlined.Backspace
+    Tool.ERASER_AREA -> Icons.Filled.Deblur
     Tool.LASSO -> Icons.Filled.Gesture
     Tool.TEXT -> Icons.Filled.TextFields
     Tool.LINE -> Icons.Filled.HorizontalRule
@@ -382,9 +388,11 @@ private fun InkConfigRow(
                     onLongPress = onPickCustomColor,
                 )
             }
-            // Phase 5.3 — "+" tile opens the full HSL picker. Long-pressing
+            // Phase 5.3 — "+" tile opens the full colour picker. Long-pressing
             // any existing swatch does the same thing, so two affordances
-            // converge on one sheet.
+            // converge on one sheet. V5 fix — the tile now wears a rainbow
+            // ring when idle so it reads as "any colour" rather than a generic
+            // add button (the long-press route stays as a power-user shortcut).
             CustomColorTile(
                 showingCustom = isCustomColor,
                 customColorArgb = if (isCustomColor) activeColor else null,
@@ -764,7 +772,12 @@ private fun CustomColorTile(
     onClick: () -> Unit,
 ) {
     val ring = MaterialTheme.colorScheme.primary
-    val idleOutline = MaterialTheme.colorScheme.outline
+    // Idle: a rainbow sweep so the tile reads as "open the full colour
+    // picker" at a glance, which is the only always-visible route to custom
+    // hues (long-pressing a swatch is the hidden shortcut V5 flagged).
+    val idleFill = remember {
+        Brush.sweepGradient(RAINBOW_RING_COLORS.map { Color(it) })
+    }
     Box(
         modifier = Modifier
             .size(44.dp)
@@ -775,13 +788,16 @@ private fun CustomColorTile(
             modifier = Modifier
                 .size(28.dp)
                 .clip(CircleShape)
-                .background(
-                    if (showingCustom && customColorArgb != null) Color(customColorArgb)
-                    else MaterialTheme.colorScheme.surfaceVariant
+                .then(
+                    if (showingCustom && customColorArgb != null) {
+                        Modifier.background(Color(customColorArgb))
+                    } else {
+                        Modifier.background(idleFill)
+                    }
                 )
                 .border(
-                    width = if (showingCustom) 2.dp else 1.dp,
-                    color = if (showingCustom) ring else idleOutline,
+                    width = 2.dp,
+                    color = if (showingCustom) ring else Color.White.copy(alpha = 0.9f),
                     shape = CircleShape,
                 ),
             contentAlignment = Alignment.Center,
@@ -789,10 +805,23 @@ private fun CustomColorTile(
             Icon(
                 imageVector = Icons.Filled.Add,
                 contentDescription = "Custom colour",
-                tint = if (showingCustom) Color.White
-                else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = Color.White,
                 modifier = Modifier.size(16.dp),
             )
         }
     }
 }
+
+/**
+ * Sweep-gradient stops for the idle custom-colour tile (V5). Starts and ends
+ * on red so the sweep closes seamlessly into a continuous wheel.
+ */
+private val RAINBOW_RING_COLORS: List<Int> = listOf(
+    0xFFFF0000.toInt(), // red
+    0xFFFFA500.toInt(), // orange
+    0xFFFFFF00.toInt(), // yellow
+    0xFF00C853.toInt(), // green
+    0xFF2196F3.toInt(), // blue
+    0xFF9C27B0.toInt(), // purple
+    0xFFFF0000.toInt(), // back to red
+)

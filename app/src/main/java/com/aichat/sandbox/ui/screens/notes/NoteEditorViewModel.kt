@@ -2889,6 +2889,23 @@ class NoteEditorViewModel @Inject constructor(
     }
 
     /**
+     * A6 fix — re-point the frozen scope at whatever is lasso-selected on the
+     * canvas right now. The scope is captured once at open time and held for
+     * the sheet's life, so a user who selects something new mid-conversation
+     * was silently still asking about the old selection; this gives them an
+     * explicit "ask about *this* instead" without reopening the sheet. No-ops
+     * when nothing is selected (the chip that calls this is hidden in that
+     * case).
+     */
+    fun reScopeAiSheetToSelection() {
+        val ids = _selection.value
+        if (ids.isEmpty()) return
+        val snapshot = items.filter { it.id in ids }
+        if (snapshot.isEmpty()) return
+        _aiSheetState.update { it.copy(pendingSelection = snapshot) }
+    }
+
+    /**
      * Hide the sheet without losing the conversation. Reopening restores the
      * turn list so the user can resume reading. Streaming jobs keep running
      * — closing the sheet is not the same as cancelling.
@@ -3001,6 +3018,12 @@ class NoteEditorViewModel @Inject constructor(
                     mutateTurn(turnId) { t -> t.copy(state = TurnState.Error(NO_HANDWRITING_MESSAGE)) }
                 } else {
                     mutateTurn(turnId) { t -> t.copy(replyBuffer = text, state = TurnState.Done) }
+                    // A8 fix — make convert-to-text a single tap: the moment OCR
+                    // succeeds, drop the recognized text onto the canvas (one
+                    // undoable AddItems) instead of waiting for a second
+                    // "Insert as text box" tap. The bubble then offers an
+                    // "Insert again" re-placement rather than a first insert.
+                    placeConvertTextBox(turnId)
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
@@ -3041,6 +3064,21 @@ class NoteEditorViewModel @Inject constructor(
      * arrives there.
      */
     fun insertConvertResultAsTextBox(turnId: String) {
+        // A8 — the bubble's "Insert again" affordance routes here. Insertion
+        // now happens automatically on OCR success (see [placeConvertTextBox]);
+        // this re-places another copy without dismissing the sheet so the user
+        // can drop a second box or recover after an undo.
+        placeConvertTextBox(turnId)
+    }
+
+    /**
+     * Drop the recognized text of a Done convert-to-text [turnId] onto the
+     * canvas as a new text item (undoable via [EditorAction.AddItems]). Anchors
+     * at the centre of the frozen selection bounds, or `(0, 0)` world for
+     * whole-note scope. Marks the turn [AskTurn.convertInserted] so the UI can
+     * reflect that the placement happened. Leaves the sheet open.
+     */
+    private fun placeConvertTextBox(turnId: String) {
         val state = _aiSheetState.value
         val turn = state.turns.firstOrNull { it.id == turnId } ?: return
         if (turn.state !is TurnState.Done || !turn.isConvertResult) return
@@ -3064,7 +3102,7 @@ class NoteEditorViewModel @Inject constructor(
             payload = TextItemCodec.encode(payload),
         )
         apply(EditorAction.AddItems(listOf(item)))
-        closeAiSheet()
+        mutateTurn(turnId) { t -> t.copy(convertInserted = true) }
     }
 
     /**

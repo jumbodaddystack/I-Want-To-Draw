@@ -86,6 +86,14 @@ data class AskTurn(
      * preview of the general reply-action row that lands in sub-phase 2.8.
      */
     val isConvertResult: Boolean = false,
+    /**
+     * A8 fix — convert-to-text now drops the recognized text onto the canvas
+     * automatically the moment OCR succeeds (one tap instead of two). This
+     * flag records that the auto-placement happened so the bubble shows a
+     * "Added as a text box" confirmation plus an "Insert again" affordance
+     * rather than the old single "Insert as text box" call to action.
+     */
+    val convertInserted: Boolean = false,
 )
 
 sealed interface TurnState {
