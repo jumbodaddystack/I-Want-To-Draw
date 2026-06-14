@@ -37,6 +37,11 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // AndroidX Ink 1.0.0 publishes Kotlin 2.0 metadata (mv=2.0.0); the
+        // project's Kotlin 1.9.22 compiler reads it under this opt-in. The ink
+        // APIs the InkInterop seam uses are stable 1.0.0. Drop this once the
+        // I0.5 toolchain bump moves Kotlin past 2.0.
+        freeCompilerArgs += "-Xskip-metadata-version-check"
     }
     buildFeatures {
         compose = true
@@ -80,6 +85,22 @@ dependencies {
 
     // Stylus input: one-frame look-ahead for ink (sub-phase 1.4).
     implementation("androidx.input:input-motionprediction:1.0.0-beta05")
+
+    // AndroidX Ink (phase I0 — the InkInterop seam). The ink engine is not yet
+    // wired into any on-device code path, so it is `compileOnly` here: the seam
+    // compiles, but no ink classes or native `.so` are packaged into the APK.
+    // The `-jvm` artifacts (which bundle `linux-x86_64/libink.so`) are added to
+    // the unit-test classpath so the round-trip tests run headless, without an
+    // emulator. Phase I1 flips these to `implementation` of the android
+    // variants when authoring moves on-device.
+    val inkVersion = "1.0.0"
+    compileOnly("androidx.ink:ink-strokes-jvm:$inkVersion")
+    compileOnly("androidx.ink:ink-brush-jvm:$inkVersion")
+    compileOnly("androidx.ink:ink-geometry-jvm:$inkVersion")
+    testImplementation("androidx.ink:ink-strokes-jvm:$inkVersion")
+    testImplementation("androidx.ink:ink-brush-jvm:$inkVersion")
+    testImplementation("androidx.ink:ink-geometry-jvm:$inkVersion")
+    testImplementation("androidx.ink:ink-nativeloader-jvm:$inkVersion")
 
     // On-device handwriting OCR for the notes AI pipeline (sub-phase 2.1+).
     // The model itself is fetched at runtime via RemoteModelManager, so no
