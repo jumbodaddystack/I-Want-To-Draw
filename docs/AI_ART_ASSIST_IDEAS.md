@@ -81,13 +81,30 @@ respect these as the incumbents:
 
 # AndroidX Ink (`androidx.ink`) evaluation
 
-> **Bottom line:** ink reached **stable 1.0.0 (Dec 2025)** and supports
-> **minSdk 21** — well below our minSdk 26, so there is **no API-level barrier**
-> (an earlier worry that ink needed API 29 was wrong; API 29 only unlocks
-> *optional* low-latency front-buffering, API 34 *optional* richer rendering).
-> Our custom engine is mature, so the right move is **targeted / incremental
-> adoption** of the modules where ink clearly out-classes hand-rolled code,
-> behind a feature flag, **with the v1/v2 `StrokeCodec` staying canonical**.
+> **Bottom line:** ink reached **stable 1.0.0 (Dec 2025)**. This is a
+> **personal, single-device project** — the only target is a **Samsung Galaxy
+> S25 Ultra on Android 16 (API 36)** — so there is no compatibility surface to
+> protect and **every "optional" ink enhancement is baseline**: front-buffered
+> low-latency rendering (API 29+) and improved rendering effects/perf (API 34+)
+> are both *below* our target. Given that, the plan is **ink-first**: let ink's
+> low-latency authoring own the live drawing path, keep the v1/v2 `StrokeCodec`
+> only as a **safety net** for existing personal notes (no forced migration),
+> and pull in the brush, geometry, and serialization modules as the engine
+> matures.
+
+## Target environment (the only one we support)
+
+- **Device:** Samsung Galaxy S25 Ultra. **OS:** Android 16 (**API 36**).
+- **S-Pen:** **4,096 pressure levels**, improved tilt recognition, 0.7mm tip —
+  high-fidelity pressure/tilt signal for ink's input smoothing and brush
+  dynamics. **No Bluetooth** on the S25 Ultra S-Pen, so **no BLE air-action /
+  remote-button gestures** (the side button still works via the digitizer, so
+  the existing button-as-eraser override is unaffected). Don't design features
+  around remote pen gestures.
+- **Display:** high-refresh LTPO panel — the front-buffer latency win is
+  directly *felt* on this hardware, which is why the authoring path leads.
+- **Consequence:** no API 26–28 degradation paths, no multi-device input
+  quirks. Code can assume modern APIs throughout.
 
 ## Module map (what ships, and our interest level)
 
@@ -111,19 +128,45 @@ Key properties worth noting for our pipelines:
   `PartitionedMesh` (geometry) — clean separation that maps onto our
   payload / `BrushPreset` / derived-bounds split.
 
-## Adoption principles (decided)
+## Adoption principles (decided — ink-first)
 
-1. **Targeted / incremental, flag-gated.** Add ink modules where they win;
-   keep `DrawingSurface` + `StrokeRenderer` as the default path. Each ink
-   integration sits behind a build/runtime flag so it can be A/B'd and reverted.
-2. **`StrokeCodec` v1/v2 stays the source of truth.** No data migration. We
-   convert our samples → `StrokeInputBatch` *at runtime* only where an ink
-   module is invoked (geometry queries, authoring, ink rendering). This keeps
-   existing notes byte-identical and the change fully reversible.
-3. **`BrushPreset` stays user-facing; map it onto `BrushFamily` on demand.**
+1. **Ink-first engine.** ink's `InProgressStrokesView` becomes the **default**
+   live-drawing path; the custom `DrawingSurface` quad-Bézier path is retained
+   only as a fallback/reference until ink reaches visual + behavioral parity.
+   This inverts the usual "experiment behind a flag" stance — ink is the
+   intended primary, and the flag exists to fall *back*, not to opt *in*.
+2. **`StrokeCodec` v1/v2 is a safety net, not a forced format.** No migration of
+   existing personal notes. Newly committed strokes can be stored in whichever
+   form is cleanest (see phasing); we always keep the ability to decode legacy
+   v1/v2 payloads so nothing already drawn is lost. Because there are no other
+   users, the constraint is only "don't lose my own drawings," not "never
+   change the on-disk format."
+3. **`BrushPreset` stays user-facing; map it onto `BrushFamily`.**
    A `BrushPreset → Brush/BrushFamily` adapter preserves color / width /
    opacity / taper / jitter / pressure-curve / texture semantics. ink's brush
-   model becomes a *rendering/encoding target*, not a replacement for presets.
+   model becomes the rendering/encoding target while presets remain the thing
+   the UI edits.
+4. **Capture the orientation lane.** The S-Pen reports stylus orientation, which
+   our codec drops. Since the target device reliably provides it, a future
+   **v3 sample lane** `[x,y,pressure,tilt,orientation,(t)]` can feed ink brush
+   behaviors that key off orientation. Optional, but now unambiguously feasible.
+
+## Toolchain prerequisite (decided: bump minSdk to 35/36)
+
+Raising `minSdk` to match the Android-16-only target is approved, but it is
+**not a one-line change**: `minSdk` cannot exceed `compileSdk`, which is
+currently **34** (AGP **8.2.2**, Gradle **8.5**, Kotlin **1.9.22**). Reaching
+`minSdk 36` requires:
+
+- `compileSdk` / `targetSdk` → **36**,
+- **AGP** → 8.9+ (8.11+ recommended for SDK 36) and a matching **Gradle**
+  wrapper bump,
+- a re-verify of the build + the known-good Android SDK install steps in
+  `CLAUDE.md`.
+
+Treat this as its own small, verified task (toolchain upgrade) **before** the
+ink-authoring phase, since `InProgressStrokesView` is where assuming modern
+APIs pays off. Until then, ink itself still works (it supports API 21+).
 
 ### Sample ↔ ink conversion seam (the one new primitive everything shares)
 
@@ -161,15 +204,18 @@ Build this first (call it `InkInterop`), unit-test the round-trip on JVM
 - Mesh coverage/intersection is the enabler for the **constraint/snap engine**
   (idea #8): detect near-alignment, shared edges, near-symmetry → propose snaps.
 
-### C. Low-latency authoring + smoothing  (`ink-authoring`)
+### C. Low-latency authoring + smoothing  (`ink-authoring`)  — the headline win
 - `InProgressStrokesView` gives a true **front-buffered** low-latency stroke
-  layer (API 29+) plus **built-in input smoothing/prediction**, an alternative
-  to our `motionprediction` + manual history iteration.
-- Cleanest as a **parallel authoring path** behind a flag: ink owns the live
-  layer, and on `InProgressStrokesFinishedListener` we convert the finished
-  `Stroke` back to `StrokeCodec` bytes via `InkInterop` and commit through the
-  existing pipeline. Renderer/storage/undo stay untouched.
+  layer (baseline on API 36) plus **built-in input smoothing/prediction**,
+  replacing our `motionprediction` + manual history iteration. On the S25
+  Ultra's high-refresh panel + 4,096-level S-Pen this is the most *felt*
+  upgrade ink offers — which is why it leads the ink-first plan.
+- ink owns the live layer; on `InProgressStrokesFinishedListener` we convert the
+  finished `Stroke` to a `StrokeCodec` payload via `InkInterop` and commit
+  through the existing layer/undo/storage pipeline (those stay intact at first).
 - ink's smoothing also feeds the **live beautify** flow (idea #1) for free.
+- `DrawingSurface`'s quad-Bézier path stays as a fallback until ink reaches
+  rendering parity (see Risks).
 
 ### D. Standard stroke serialization  (`ink-strokes` / `ink-storage`)
 - `StrokeInputBatch` is a compact, portable, **cross-platform** stroke format.
@@ -236,33 +282,40 @@ modules it leans on and how it threads through the existing AI pipeline.
 
 | Phase | Scope | Ink modules | Risk |
 |---|---|---|---|
-| **I0 — `InkInterop` seam** | Bidirectional `StrokeCodec ↔ StrokeInputBatch/Stroke`; `BrushPreset → Brush` adapter; JVM round-trip tests | strokes, brush, geometry | Low — no UI, no migration |
-| **I1 — Geometry adoption** | Back `HitTest`/`LassoController` with `PartitionedMesh` behind a flag; A/B accuracy & perf | geometry | Low/Med |
-| **I2 — Brush richness + N1** | `BrushPreset → BrushFamily` rendering path; AI brush designer (`DESIGN_BRUSH`) | brush, rendering | Med |
-| **I3 — Live beautify (N3)** | ink smoothing into the pen-lift beautify flow | authoring, rendering | Med |
-| **I4 — Authoring path** | Optional `InProgressStrokesView` live layer behind a flag; finish→convert→commit | authoring | Med/High |
-| **I5 — Select-similar + snapping (N2, idea #8)** | mesh-based similarity + constraint engine + AI ranking | geometry | Med |
-| **I6 — Replay / draw-with-me (N4, idea #7)** | timestamp-driven replay, tutor guide layer, timelapse export | strokes, rendering | Med |
+| **I0 — `InkInterop` seam** | Bidirectional `StrokeCodec ↔ StrokeInputBatch/Stroke`; `BrushPreset → Brush` adapter; JVM round-trip tests | strokes, brush, geometry | Low — no UI |
+| **I0.5 — Toolchain bump** | `compileSdk`/`targetSdk` 36, AGP 8.9+/8.11+, Gradle wrapper, re-verify build | — | Low/Med |
+| **I1 — Authoring path (ink-first)** | `InProgressStrokesView` becomes the default live layer; finish→convert→commit; `DrawingSurface` kept as fallback | authoring, rendering | Med |
+| **I2 — Rendering parity** | Match ink mesh rendering to `StrokeRenderer` (taper/jitter/texture) so the fallback can be retired | rendering, brush | Med |
+| **I3 — Brush richness + N1** | `BrushPreset → BrushFamily` path; AI brush designer (`DESIGN_BRUSH`); optional orientation lane | brush, rendering | Med |
+| **I4 — Live beautify (N3)** | ink input smoothing into the pen-lift beautify flow | authoring, rendering | Low/Med |
+| **I5 — Geometry adoption** | Back `HitTest`/`LassoController` with `PartitionedMesh` | geometry | Low/Med |
+| **I6 — Select-similar + snapping (N2, idea #8)** | mesh-based similarity + constraint engine + AI ranking | geometry | Med |
+| **I7 — Replay / draw-with-me (N4, idea #7)** | timestamp-driven replay, tutor guide layer, timelapse export | strokes, rendering | Med |
 
-Sequencing logic: **I0 is a hard prerequisite** for everything else. I1/I2 are
-the lowest-risk, highest-confidence wins (no live-input or migration changes).
-I4 (authoring swap) is deliberately late — it touches the most sensitive,
-well-tuned path (`DrawingSurface`) and should only land once the seam and
-rendering parity are proven.
+Sequencing logic: **I0 (the seam) is a hard prerequisite** for everything. The
+ink-first stance pulls the **authoring path forward to I1** — it's the headline
+win on this hardware and the rest composes around it. I2 chases rendering
+parity so the legacy `DrawingSurface` fallback can eventually be deleted.
+Brushes (I3) and beautify (I4) build directly on the new authoring path;
+geometry/snapping/replay (I5–I7) layer on once the engine is the default.
 
 # Risks & open questions
 
-- **APK size / native libs.** ink bundles a native core (`ink-nativeloader`);
-  measure the size delta and per-ABI impact before committing.
-- **Rendering parity.** ink's mesh rendering must visually match
-  `StrokeRenderer`'s variable-width Bézier output (taper/jitter/texture) before
-  it can become default — keep both paths until parity is demonstrated.
-- **Orientation lane.** ink captures stylus *orientation*; our codec doesn't.
-  Decide whether N1/brush behaviors need it (would imply a future v3 lane —
-  out of scope under the "codec stays canonical" decision).
-- **API 29 / 34 gating.** Front-buffered low-latency (29) and richer rendering
-  (34) are optional; the authoring path must degrade gracefully on 26–28.
-- **Two geometry engines.** Until I1 fully replaces `HitTest`, we maintain both;
-  guard against behavioral drift with shared test fixtures.
+- **Rendering parity (the gating risk).** Because ink leads the live path, its
+  mesh rendering must visually match `StrokeRenderer`'s variable-width Bézier
+  output (taper/jitter/texture). Keep `DrawingSurface` as a fallback until I2
+  demonstrates parity; only then retire it.
+- **Toolchain upgrade.** The minSdk 36 bump drags AGP/Gradle/Kotlin forward
+  (I0.5). Self-contained, but verify the build + the `CLAUDE.md` SDK-install
+  steps still hold afterward.
+- **APK size / native libs.** ink bundles a native core (`ink-nativeloader`).
+  Less of a concern for a personal single-ABI (arm64) install, but worth a
+  glance.
 - **Alpha vs stable.** Programmable brushes (N1) rely on **1.1.0-alpha**; pin a
-  version and isolate behind the brush flag until 1.1 stabilizes.
+  version and isolate behind the brush path until 1.1 stabilizes. Core
+  authoring/geometry/rendering are on **stable 1.0.0**.
+- **No BLE S-Pen.** The S25 Ultra pen has no Bluetooth — don't plan air-action /
+  remote-button features. Digitizer-side button (eraser override) still works.
+- **Orientation lane (opportunity, not risk).** Capturing orientation as a v3
+  lane is now feasible on the target device; sequence it with I3 if a brush
+  behavior actually wants it.
