@@ -237,8 +237,32 @@ as migration consumers so the engine work preserves their requirements.
   (invalidation on transform/restyle/delete), the uniform-grid
   [`SpatialIndex`](../app/src/main/java/com/aichat/sandbox/data/ink/SpatialIndex.kt)
   prefilter, and `MeshHitTest.strokesInRegion` returning a deterministic,
-  registration-ordered id list for mesh-hit → item-id/layer mapping. N2's
-  remaining work is the *similarity ranking + constraint engine + AI* on top.
+  registration-ordered id list for mesh-hit → item-id/layer mapping.
+- **Status (I7): ✅ done — headless slice; AI-ranking quality + on-device feel
+  device-only; gated behind ink-on, default-off.** The *similarity ranking +
+  constraint engine + optional AI* now sits on top of that prerequisite:
+  - (a) **Select similar** — [`StrokeSimilarity`](../app/src/main/java/com/aichat/sandbox/data/ink/StrokeSimilarity.kt)
+    reduces a stroke to a **scale/translation-invariant** shape descriptor
+    (aspect, straightness, turning) plus its style features (tool/width/colour);
+    [`SelectSimilar`](../app/src/main/java/com/aichat/sandbox/data/ink/SelectSimilar.kt)
+    ranks every candidate against the tapped stroke and returns the selection set
+    (`NoteEditorViewModel.selectSimilarTo`, plugged into the existing selection
+    model with the lasso's group-expansion + locked-layer rules). Local, offline,
+    deterministic. A cheap **descriptor proxy** is used in production (true
+    per-pair mesh IoU is too costly on a tap) and held honest against ink's real
+    mesh overlap in the parity test.
+  - (b) **Constraint/snap engine** — [`ConstraintSnap`](../app/src/main/java/com/aichat/sandbox/data/ink/ConstraintSnap.kt)
+    detects near-alignment (6 edge/centre keys), even spacing, and near-symmetry
+    across the selection, then **resolves** the proposals into one conflict-free
+    per-axis nudge set. Each nudge is an ordinary `EditOp.Transform` translation
+    on a canonical payload, staged through `EditPreviewController` →
+    `PendingEdit` so it surfaces as the **same accept/decline chips** as AI edits
+    (`NoteEditorViewModel.proposeSnaps`).
+  - (c) **AI ranking is optional / local-first** — geometry proposes locally; the
+    AI is consulted only to confirm "which of these belong together" via the
+    unchanged `submitAiEdit` EDIT pipeline (`NoteEditorViewModel.aiRankSelection`),
+    emitting group/recolor/transform edit-ops the user accepts. `StrokeCodec`
+    stays canonical and the AI never sees ink (Adoption principle 2).
 
 ### N3. Live beautify via ink smoothing  (upgrade of idea #1)
 - **What:** on pen-lift, offer a one-tap clean snap. ink's input smoothing +
@@ -299,7 +323,7 @@ as migration consumers so the engine work preserves their requirements.
 | **I4 — Brush richness + N1 foundation** ✅ **done (stable adapter + N1 scaffold; texture/jitter still deferred)** | Stable custom-brush adapter ([`InkBrushFamilies`](INK_I2_PARITY_GATE.md)) closes the I2 gate's brush-geometry gaps — pressure taper (pen), tilt-width (pencil), highlighter width — all at parity headless (corr > 0.999; every tool now GO). The 1.1-alpha programmable/jitter path is isolated and **not** depended on (`data.ink.experimental.InkProgrammableBrush`). The `DESIGN_BRUSH` (N1) AI mode is scaffolded end-to-end (text→validated brush-spec JSON→user-scope `BrushPreset`, no canvas mutation). Procedural **texture** + **jitter** stay deferred (device-pixel / alpha-only). | brush, rendering | Med |
 | **I5 — Live beautify (N3)** ✅ **done (headless slice; ghost appearance device-only; ink stays default-off)** | ink input smoothing into the pen-lift beautify flow. A pure-JVM input-smoothing low-pass ([`StrokeSmoothing`](../app/src/main/java/com/aichat/sandbox/ui/components/notes/StrokeSmoothing.kt)) — the headless stand-in for `ink-authoring`'s Android-only device-side input modeler — now feeds [`InkBeautifier`]'s RDP+Chaikin clean, on **both** the legacy and the ink-authoring commit paths. The clean is a **candidate**, not an in-place mutation: the pen-lift commits the raw stroke and a ghost is offered (tap to accept → raw→beautified as one undoable `CompositeEdit`, decline = keep raw), reusing the hold-recognize swap model. The geometric clean stays **purely local**; the AI is consulted only for the ambiguous shape cases via the unchanged `AUTO_SHAPE`/`replace_with_shape` hold-recognize path. Verified headless against the **real ink engine**: ink renders the beautified stroke with a ~6× smoother native mesh outline (`InkSmoothParityTest`). | authoring, rendering | Low/Med |
 | **I6 — Mesh-backed geometry adoption** ✅ **done (headless slice; mesh path gated behind ink-on, default-off; on-device feel deferred)** | A derived, **signature-keyed** per-stroke [`StrokeMeshCache`](../app/src/main/java/com/aichat/sandbox/data/ink/StrokeMeshCache.kt) (invalidates on transform/restyle/delete — closing the "Geometry cache correctness" open question), a uniform-grid [`SpatialIndex`](../app/src/main/java/com/aichat/sandbox/data/ink/SpatialIndex.kt) prefilter, ear-clip [`LassoTriangulation`](../app/src/main/java/com/aichat/sandbox/data/ink/LassoTriangulation.kt) (stable `ink-geometry` ships no public polygon→mesh builder), and [`InkGeometry`](../app/src/main/java/com/aichat/sandbox/data/ink/InkGeometry.kt)/[`MeshHitTest`](../app/src/main/java/com/aichat/sandbox/data/ink/MeshHitTest.kt) backing the eraser (tip-box vs rendered width) and lasso (mesh∩triangle — catches *crossing* strokes the sample loop misses) with the point-to-segment loops as the **fallback**. Wired into `DrawingSurface`/`NoteEditorViewModel` gated behind ink-on, so default-off behaviour is byte-identical. All proven headless against the real ink engine (`data.ink.*` + `data.ink.parity.MeshGeometryParityTest`). | geometry | Low/Med |
-| **I7 — Select-similar + snapping (N2, idea #8)** | mesh-based similarity + constraint engine + AI ranking | geometry | Med |
+| **I7 — Select-similar + snapping (N2, idea #8)** ✅ **done (headless; gated behind ink-on, default-off; on-device feel + AI-ranking quality deferred)** | Local-first similarity + constraint engine + optional AI ranking. Pure-JVM [`StrokeSimilarity`](../app/src/main/java/com/aichat/sandbox/data/ink/StrokeSimilarity.kt) (scale/translation-invariant shape descriptors + tool/width/colour) feeds [`SelectSimilar`](../app/src/main/java/com/aichat/sandbox/data/ink/SelectSimilar.kt) (the magic-wand ranker, builds on the I6 cache/prefilter) and a pure [`ConstraintSnap`](../app/src/main/java/com/aichat/sandbox/data/ink/ConstraintSnap.kt) engine (near-alignment / even-spacing / near-symmetry → translations). Snaps are expressed as ordinary `EditOp.Transform`s on canonical payloads and ride the **same** `EditPreviewController` → `PendingEdit` accept/decline chips as AI edits; the AI ranking is optional and routes through the unchanged `submitAiEdit` EDIT pipeline. Proven headless against the **real ink engine** (`data.ink.parity.SelectSimilarSnapParityTest`): the descriptor proxy ranks candidates the same way ink's mesh IoU does, and a snap translation aligns real ink geometry. | geometry | Med |
 | **I8 — Replay / draw-with-me (N4, idea #7)** | timestamp-driven replay, tutor guide layer, timelapse export | strokes, rendering | Med |
 
 Sequencing logic: **I0 (the seam) is a hard prerequisite** for everything. The
@@ -497,6 +521,50 @@ flip the I2 default-on switch.
   a UX decision to confirm before the mesh path rides along with the default-on
   flip. See [`INK_I2_PARITY_GATE.md`](INK_I2_PARITY_GATE.md), section F.
 
+### I7 — what shipped (headless) vs. device-only
+
+Select-similar + the constraint/snap engine (N2, idea #8), built on the I6
+mesh/cache/index layer and kept **default-off** — both features are gated behind
+the ink switch, so I7 is **not** a trigger to flip the I2 default-on switch.
+
+- **The local geometry core (`data.ink`, pure JVM).** All new code is on the
+  stable strokes/brush/geometry classpath split (no `ink-rendering`/`ink-authoring`),
+  fully pure-JVM testable, and never persisted (`StrokeCodec` stays canonical):
+  - [`StrokeSimilarity`](../app/src/main/java/com/aichat/sandbox/data/ink/StrokeSimilarity.kt)
+    — a stroke → scale/translation-invariant shape descriptor (aspect,
+    straightness, turning) + style features (tool/width/colour) → a `[0,1]`
+    similarity. The cheap, offline candidate metric.
+  - [`SelectSimilar`](../app/src/main/java/com/aichat/sandbox/data/ink/SelectSimilar.kt)
+    — deterministic ranking of candidates vs the tapped stroke (target first,
+    then descending score, stable on ties), with a threshold gate.
+  - [`ConstraintSnap`](../app/src/main/java/com/aichat/sandbox/data/ink/ConstraintSnap.kt)
+    — near-alignment / even-spacing / near-symmetry detection over item AABBs,
+    conservative (only tidies near-regular layouts, only above a `minMove`), with
+    a conflict-free per-axis `resolve`.
+- **Live wiring (gated, edit-ops-shaped).** `NoteEditorViewModel.selectSimilarTo`
+  lands its result in the existing `selection` model (reusing the lasso's
+  group-expansion + locked-layer rules); `proposeSnaps` converts the resolved
+  nudges to `EditOp.Transform`s and stages them as a `PendingEdit` (the same
+  accept/decline chips as AI edits, via a `stageLocalEdit` that uses identity
+  short-id↔uuid maps); `aiRankSelection` optionally routes the group through the
+  unchanged `submitAiEdit` EDIT pipeline. With ink off all three are inert.
+- **Verified headless (permanent JVM tests):**
+  - `StrokeSimilarityTest`, `SelectSimilarTest`, `ConstraintSnapTest` — the pure
+    similarity metric (identity, translation/scale invariance, shape/style
+    separation, determinism), the ranker (selects similar, excludes dissimilar,
+    threshold gate, stable order), and each snap detection in isolation plus the
+    conflict-resolution and conservatism guards.
+  - `data.ink.parity.SelectSimilarSnapParityTest` — against the **real ink
+    engine**: the descriptor proxy ranks candidates the *same way* ink's mesh
+    overlap (IoU, computed from `PartitionedMesh` in a normalised frame) does, the
+    local top-match agrees with ink geometry, and a snap translation applied to
+    the canonical payload makes the **real ink mesh** left-extents coincide — the
+    engine snaps geometry, not just a bounding box.
+- **Deferred to device (documented checklist, not claimed to pass):** the *felt*
+  tap-to-select-similar gesture, the snap-chip preview appearance/feel, and the
+  **AI ranking quality** ("which of these belong together") on large, busy notes —
+  see [`INK_I2_PARITY_GATE.md`](INK_I2_PARITY_GATE.md), section G.
+
 ## Risks & open questions
 
 - **Rendering parity (the gating risk).** Because ink leads the live path, its
@@ -538,9 +606,21 @@ flip the I2 default-on switch.
   rebuilds; deletes drop via `retain(keep)`. The [`SpatialIndex`](../app/src/main/java/com/aichat/sandbox/data/ink/SpatialIndex.kt)
   gives the large-note prefilter and `MeshHitTest.strokesInRegion` the
   deterministic id mapping. All pinned by `data.ink.*` JVM tests.
+- **Select-similar / snap quality (the I7 risk) — partially addressed.** The
+  risk for I7 is *ranking + UX quality*, not correctness: whether the local
+  similarity threshold picks the marks a human would call "the same", whether the
+  snap engine's tolerances tidy a layout without fighting the user's intent, and
+  whether the optional AI "which belong together" ranking helps more than it
+  confuses. The geometry is pinned headless (the descriptor proxy is held honest
+  against ink's real mesh IoU; each snap detection is unit-tested; conservatism
+  guards stop irregular layouts being reflowed), but the felt thresholds, the
+  snap-chip UX, and AI-ranking usefulness on large notes are **device-only** (see
+  the gate doc, section G) — and the whole feature is gated behind the default-off
+  ink switch, so it can't regress today's selection/erase.
 - **Tutor content quality.** Replay is technically straightforward once
   timestamps exist; the risk is whether generated construction strokes are
-  simple, ordered, non-cluttered, and actually useful to trace.
+  simple, ordered, non-cluttered, and actually useful to trace. (This is N4/I8,
+  not I7.)
 - **No BLE S-Pen.** The S25 Ultra pen has no Bluetooth — don't plan air-action /
   remote-button features. Digitizer-side button (eraser override) still works.
 - **Orientation lane (opportunity, not risk).** Capturing orientation as a v3

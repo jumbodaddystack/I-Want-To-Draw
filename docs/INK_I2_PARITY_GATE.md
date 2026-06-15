@@ -1,8 +1,8 @@
 # Ink I2 — Rendering + Behaviour Parity Gate
 
-Status: **in progress — headless slice landed; I4 brush gaps closed; I5 beautify
-and I6 mesh-backed geometry added (both headless, default-off); device-only items
-open. Ink stays default-OFF.** This is the default-on gate the
+Status: **in progress — headless slice landed; I4 brush gaps closed; I5 beautify,
+I6 mesh-backed geometry, and I7 select-similar + snapping added (all headless,
+default-off); device-only items open. Ink stays default-OFF.** This is the default-on gate the
 migration plan
 ([`ANDROIDX_INK_MIGRATION_PLAN.md`](ANDROIDX_INK_MIGRATION_PLAN.md), phase **I2**)
 requires before the "Ink engine (experimental)" switch
@@ -80,6 +80,9 @@ Reports written by the run:
 | 17 | **Live beautify ghost appearance + tap-to-accept feel** | ⬜ device-only | The translucent candidate overlay and the confirm-tap target; logic/state wired (`pendingBeautify` → `onStrokeBeautifyAccepted` → one `CompositeEdit`), appearance needs the panel — see "On-device harness" E |
 | 18 | **Mesh-backed geometry (I6) — cache + prefilter + hit-test accuracy** | ✅ headless | `SpatialIndexTest`, `LassoTriangulationTest`, `data.ink.parity.MeshGeometryParityTest`: signature invalidation (transform/restyle/delete), spatial prefilter, deterministic id mapping, and — against the real ink engine — the eraser hitting a wide stroke's body the centerline misses + the lasso selecting a *crossing* stroke the sample loop misses, each falling back exactly to the loop when no mesh |
 | 19 | **Mesh-backed eraser/lasso on-device feel + lasso contract change** | ⬜ device-only | The ink-on mesh path is gated behind the ink switch (default-off = byte-identical fallback); the *felt* accuracy and the UX decision on the wider lasso contract need the S25 Ultra — see "On-device harness" F |
+| 20 | **Select-similar (I7) — local similarity + ranking, and agreement with ink geometry** | ✅ headless | `StrokeSimilarityTest`, `SelectSimilarTest`, and `data.ink.parity.SelectSimilarSnapParityTest`: the scale/translation-invariant descriptor metric, the deterministic ranker, and — against the **real ink engine** — that the cheap descriptor proxy ranks candidates the same way ink's mesh IoU does (and picks the same top match) |
+| 21 | **Constraint/snap engine (I7) — detection + edit-ops snap of real geometry** | ✅ headless | `ConstraintSnapTest` (alignment / even-spacing / symmetry detection, conflict-free `resolve`, conservatism guards) + `SelectSimilarSnapParityTest.snapTranslationAlignsRealInkGeometry`: a snap, applied as an `EditOp.Transform` translation on the canonical payload, makes the **real ink mesh** left-extents coincide |
+| 22 | **Select-similar / snap on-device feel + AI-ranking quality** | ⬜ device-only | The felt tap-to-select-similar gesture, the snap-chip preview appearance, and the optional AI "which belong together" ranking quality on large notes need the S25 Ultra — see "On-device harness" G. Gated behind ink-on (default-off), so today's selection/erase is unaffected |
 
 Legend: ✅ verified headless · ◑ logic verified headless, on-device confirmation still owed · ⬜ device-only / deferred.
 
@@ -162,6 +165,22 @@ forced on:
 17. Erase / restyle / transform / undo a stroke and immediately re-query; confirm
     the derived mesh tracks the edit (signature invalidation) with no stale hits.
 
+### G. Select-similar + snapping (items 20, 21, 22 — phase I7)
+The similarity metric, the ranker, and the constraint/snap detection are verified
+headless (items 20, 21), including against the real ink engine. What needs the
+device is the **felt UX** and the **ranking quality**, with the ink switch forced
+on:
+18. Tap a stroke among a cluster of similar marks (e.g. several tick marks /
+    leaves / arrowheads) and confirm "select similar" grabs the matching ones and
+    leaves unrelated strokes out; sweep the threshold for over-/under-selection.
+19. With a near-aligned / near-evenly-spaced / near-symmetric selection, invoke
+    snapping and confirm the proposed nudges read as "tidy this up", that the
+    accept/decline chips behave exactly like an AI edit (one undo reverts the
+    whole snap), and that a deliberately irregular layout is left alone.
+20. Optionally run the AI "group similar" ranking on a large, busy note and judge
+    whether its grouping/recolor suggestions help more than they confuse — the
+    open *quality* question for I7.
+
 ## Decision
 
 **Ink remains default-OFF.** Phase **I6** adds the mesh-backed geometry layer
@@ -170,6 +189,15 @@ decision: with ink off, the eraser and lasso run the unchanged point-to-segment
 fallback. The headless half (item 18) is locked in by permanent JVM tests; the
 on-device feel and the lasso-contract UX call (item 19) join the device column
 (section F).
+
+Phase **I7** adds select-similar + the constraint/snap engine (items 20, 21, 22),
+again **entirely behind the ink switch**, so it likewise does **not** change this
+decision. The geometry — the local similarity/ranking and the snap detection — is
+locked in by permanent JVM tests (including agreement with the real ink mesh
+overlap), and snaps surface as ordinary `EditOp.Transform`s through the existing
+accept/decline chips, so `StrokeCodec` stays canonical and the AI pipeline is
+untouched. The felt tap-to-select / snap-chip UX and the optional AI-ranking
+quality (item 22) join the device column (section G).
 
 The headless half of the gate (items 1–8, plus the
 shared-pipeline reasoning for 9–10 and 14) is complete and locked in by permanent
