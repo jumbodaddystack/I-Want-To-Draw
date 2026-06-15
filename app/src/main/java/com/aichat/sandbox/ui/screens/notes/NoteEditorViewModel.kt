@@ -8,9 +8,12 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aichat.sandbox.data.local.PreferencesManager
+import com.aichat.sandbox.data.ink.ConstraintSnap
 import com.aichat.sandbox.data.ink.LassoTriangulation
 import com.aichat.sandbox.data.ink.MeshHitTest
+import com.aichat.sandbox.data.ink.SelectSimilar
 import com.aichat.sandbox.data.ink.StrokeMeshCache
+import com.aichat.sandbox.data.ink.StrokeSimilarity
 import com.aichat.sandbox.data.model.ApiProvider
 import com.aichat.sandbox.data.model.BrushPreset
 import com.aichat.sandbox.data.model.Chat
@@ -26,6 +29,7 @@ import com.aichat.sandbox.data.notes.AskMode
 import com.aichat.sandbox.data.notes.AskRequest
 import com.aichat.sandbox.data.notes.BrushSpec
 import com.aichat.sandbox.data.notes.CannedEditAction
+import com.aichat.sandbox.data.notes.EditOp
 import com.aichat.sandbox.data.notes.EditOpsDoc
 import com.aichat.sandbox.data.notes.HandwritingOcr
 import com.aichat.sandbox.data.notes.aiRecolorPrompt
@@ -1904,6 +1908,162 @@ class NoteEditorViewModel @Inject constructor(
         _selection.value = emptySet()
         _selectionWorldBounds.value = null
         _selectionMatrix.value = StrokeTransform.IDENTITY
+    }
+
+    // ── Select-similar + snapping (phase I7 / N2, idea #8) ───────────────
+    //
+    // Two local-first geometry features that plug into the *existing* surfaces:
+    // select-similar lands its result in the [selection] model (like a lasso);
+    // snapping emits ordinary `EditOp.Transform`s onto canonical payloads and
+    // stages them as a [pendingEdit] the user accepts/declines with the same
+    // chips as AI edits. Both are gated behind the ink engine ([inkAuthoring],
+    // default-off) — they build on the I6 mesh/cache layer — so with ink off
+    // they are inert and I7 does not flip the I2 default-on switch. The geometry
+    // runs locally; the AI is consulted only optionally ([aiRankSelection]),
+    // and always through the inviolable edit-ops pipeline (Adoption principle 2).
+
+    /** True when select-similar / snap are available (ink engine on + something to act on). */
+    fun inkSelectionToolsEnabled(): Boolean = inkAuthoring.value
+
+    /**
+     * Phase I7(a) — magic-wand "select similar". Tap a stroke ([itemId]); find
+     * the strokes that are geometrically + stylistically similar (shape via
+     * scale-invariant descriptors, plus tool / width / colour) and make them the
+     * active selection for a batch recolor / restyle / delete. Builds on the I6
+     * [meshCache] registration; the similarity itself is the pure-JVM
+     * [StrokeSimilarity] / [SelectSimilar] core. No-op (just selects the tapped
+     * stroke) when ink is off or the item isn't a stroke.
+     */
+    fun selectSimilarTo(itemId: String, threshold: Float = SelectSimilar.DEFAULT_THRESHOLD) {
+        val target = items.firstOrNull { it.id == itemId } ?: return
+        if (target.kind != STROKE_KIND) return
+        if (!inkAuthoring.value) {
+            // Ink off: behave like a plain single tap-select so the gesture is
+            // never lost, but don't run the mesh-backed similarity path.
+            selectExactly(setOf(itemId))
+            return
+        }
+        // Build features for every stroke on a selectable (unlocked) layer.
+        val candidates = ArrayList<SelectSimilar.Candidate>()
+        for (item in items) {
+            if (item.kind != STROKE_KIND) continue
+            val layer = _layers.value.firstOrNull { it.id == item.layerId }
+            if (layer != null && layer.locked) continue
+            val features = StrokeSimilarity.featuresOf(
+                item.payload, item.tool ?: "", item.colorArgb, item.baseWidthPx,
+            ) ?: continue
+            candidates.add(SelectSimilar.Candidate(item.id, features))
+        }
+        val matched = SelectSimilar.selectSimilar(itemId, candidates, threshold).toHashSet()
+        // Reuse the lasso's group expansion + locked-layer rule.
+        val expanded = expandSelectionToGroups(matched, items) { item ->
+            val layer = _layers.value.firstOrNull { it.id == item.layerId }
+            layer == null || !layer.locked
+        }
+        selectExactly(expanded)
+        palette.select(palette.lastInkTool)
+    }
+
+    /** Replace the active selection with [ids], recomputing the overlay bounds. */
+    private fun selectExactly(ids: Set<String>) {
+        if (ids.isEmpty()) {
+            clearSelection()
+            return
+        }
+        _nodeEditTarget.value = null
+        _selection.value = ids
+        _selectionWorldBounds.value = recomputeSelectionBounds()
+        _selectionMatrix.value = StrokeTransform.IDENTITY
+    }
+
+    /**
+     * Phase I7(b) — constraint / snap engine. Detect near-alignment, even
+     * spacing, and near-symmetry across the current selection (or [selection]
+     * when supplied) and stage the nudges that would make them exact as a single
+     * accept/decline [pendingEdit]. The nudges are ordinary `EditOp.Transform`
+     * translations on canonical payloads — the snap rides the same edit-ops
+     * pipeline as AI suggestions. No-op when ink is off, fewer than two items are
+     * in scope, or nothing is misaligned enough to be worth fixing.
+     */
+    fun proposeSnaps(selection: Set<String>? = null) {
+        if (!inkAuthoring.value) return
+        val ids = selection ?: _selection.value
+        if (ids.size < 2) return
+        val scope = items.filter { it.id in ids }
+        // One AABB per item (kind-aware), preserving item order for determinism.
+        val snapItems = ArrayList<ConstraintSnap.Item>(scope.size)
+        for (item in scope) {
+            val b = itemBounds(item) ?: continue
+            snapItems.add(ConstraintSnap.Item(item.id, b))
+        }
+        if (snapItems.size < 2) return
+        val constraints = ConstraintSnap.detect(snapItems)
+        if (constraints.isEmpty()) return
+        val adjustments = ConstraintSnap.resolve(constraints, snapItems.map { it.id })
+        if (adjustments.isEmpty()) return
+
+        val ops = adjustments.map { adj ->
+            EditOp.Transform(
+                ids = listOf(adj.id),
+                matrix = StrokeTransform.translation(adj.dx, adj.dy),
+            )
+        }
+        // Description names the constraints that actually contributed a nudge.
+        val movedIds = adjustments.mapTo(HashSet()) { it.id }
+        val labels = constraints
+            .filter { c -> c.adjustments.any { it.id in movedIds } }
+            .map { it.description }
+            .distinct()
+        val description = "Snap: " + labels.joinToString(", ").ifBlank { "tidy layout" }
+        stageLocalEdit(EditOpsDoc(EditOpsDoc.SCHEMA, description, ops), description)
+    }
+
+    /**
+     * Phase I7(c) — optional AI ranking. The local geometry above already
+     * proposed the group/snap; this hands the *current selection* to the model
+     * to confirm "which of these belong together" and emit group / recolor /
+     * transform edit-ops. It is strictly optional (local-first) and routes
+     * through the unchanged [submitAiEdit] EDIT pipeline, so the AI never sees
+     * ink and every change stays a reviewable edit-op.
+     */
+    fun aiRankSelection(extraInstruction: String = "") {
+        val scope = items.filter { it.id in _selection.value }
+        if (scope.size < 2) return
+        val brief = buildString {
+            append("These ${scope.size} items were selected as visually similar. ")
+            append("Decide which truly belong to the same group and, if helpful, ")
+            append("align or recolor them consistently. Leave out any that don't fit.")
+            if (extraInstruction.isNotBlank()) {
+                append(" ")
+                append(extraInstruction.trim())
+            }
+        }
+        submitAiEdit(description = "AI Group similar", userPrompt = brief, selection = scope)
+    }
+
+    /**
+     * Stage a locally-authored [doc] (snap / tidy) as a [pendingEdit] using the
+     * very same simulator and accept/decline surface as an AI edit. The ops
+     * reference live item ids directly, so the short-id ↔ uuid maps are identity.
+     */
+    private fun stageLocalEdit(doc: EditOpsDoc, description: String) {
+        val current = items.toList()
+        val idMap = current.associate { it.id to it.id }
+        val layerMap = _layers.value.associate { it.id to it.id }
+        val simulation = EditPreviewController.simulate(
+            currentItems = current,
+            doc = doc,
+            idMap = idMap,
+            layerMap = layerMap,
+            layers = _layers.value,
+            newItemNoteId = _note.value.id,
+        )
+        if (simulation.isEmpty) return
+        _pendingEdit.value = PendingEdit(
+            description = description,
+            doc = doc,
+            simulation = simulation,
+        )
     }
 
     // ── Path node editing (sub-phase 12.3) ───────────────────────────────
