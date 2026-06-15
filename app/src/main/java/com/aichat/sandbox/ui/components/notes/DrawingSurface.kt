@@ -24,6 +24,8 @@ import androidx.ink.authoring.InProgressStrokesView
 import androidx.ink.strokes.Stroke
 import androidx.input.motionprediction.MotionEventPredictor
 import com.aichat.sandbox.data.ink.InkInterop
+import com.aichat.sandbox.data.ink.MeshHitTest
+import com.aichat.sandbox.data.ink.StrokeMeshCache
 import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.ui.screens.notes.LassoController
@@ -327,6 +329,18 @@ class DrawingSurface(context: Context) : View(context) {
     /** Decoded sample cache keyed by item id — re-decoding every sample during an erase is wasteful. */
     private val decodedCache: HashMap<String, DecodedStroke> = HashMap()
 
+    /**
+     * Phase **I6** — derived, cached per-stroke ink `PartitionedMesh` layer
+     * backing the eraser with robust geometry (the tip box vs the stroke's
+     * *rendered width*, not just its centerline). Used **only** while
+     * [inkAuthoringEnabled]; with ink off the eraser keeps the exact
+     * [EraserHitTest] / [HitTest] path, so I6 doesn't change default behaviour.
+     * Registered in lockstep with [decodedCache] in [replayItems] (so transform /
+     * restyle / delete invalidate the mesh too — it keys on a content signature)
+     * and queried in [eraseAtLastSample].
+     */
+    private val meshCache = StrokeMeshCache()
+
     private val livePaint = Paint().apply {
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
@@ -516,6 +530,18 @@ class DrawingSurface(context: Context) : View(context) {
         val keep = sorted.mapTo(HashSet(sorted.size)) { it.id }
         if (decodedCache.isNotEmpty()) {
             decodedCache.keys.retainAll(keep)
+        }
+        // Phase I6 — keep the derived mesh cache in step with the canonical item
+        // set. Deletes drop here; the content signature handles same-id edits.
+        // Registering the cheap AABBs (no native mesh build) only when ink is on
+        // primes the eraser's spatial prefilter without any cost when ink is off.
+        meshCache.retain(keep)
+        if (inkAuthoringEnabled) {
+            for (item in sorted) {
+                if (item.kind == NoteItem.KIND_STROKE) {
+                    meshCache.register(item.id, item.payload, item.tool ?: "", item.baseWidthPx)
+                }
+            }
         }
         TextItemRenderer.evictUnused(keep)
         StickyRenderer.evictUnused(keep)
@@ -1696,7 +1722,7 @@ class DrawingSurface(context: Context) : View(context) {
         // we don't want a flash of un-erased ink in the meantime.
         val matchedSet = matched.toHashSet()
         committedItems = committedItems.filterNot { it.id in matchedSet }
-        matched.forEach { decodedCache.remove(it) }
+        matched.forEach { decodedCache.remove(it); meshCache.invalidate(it) }
         pendingErase.clear()
         sceneDirty = true
         eraseListener?.invoke(matched)
@@ -1726,15 +1752,32 @@ class DrawingSurface(context: Context) : View(context) {
             // keeps erasing through [HitTest] — ink's stroke-only mesh never
             // displaces it. The decoded-stroke cache and connector routing are
             // injected because they depend on this view's live state.
-            val hit = EraserHitTest.hits(
-                item, px, py, radius,
-                decodeStroke = { stroke ->
-                    decode(stroke)?.let { EraserHitTest.StrokeGeom(it.samples, it.count, it.bounds) }
-                },
-                connectorPolyline = { connector ->
-                    ConnectorRouter.flatten(routeConnector(ConnectorCodec.decode(connector.payload)))
-                },
-            )
+            //
+            // Phase I6 — only the *stroke* kind, and only while ink is on, defers
+            // to ink's robust mesh hit-test (the eraser tip box vs the stroke's
+            // rendered width), with the [HitTest] point-to-segment loop as the
+            // fallback. Non-stroke kinds always stay on [EraserHitTest], so ink's
+            // stroke-only mesh can never displace shapes / stickies / connectors /
+            // paths (the I2 eraser-parity guarantee).
+            val hit = if (inkAuthoringEnabled && item.kind == NoteItem.KIND_STROKE) {
+                val decoded = decode(item)
+                decoded != null && MeshHitTest.eraserHitsStroke(
+                    meshCache.meshFor(item.id), px, py, radius,
+                ) {
+                    HitTest.bboxContainsPoint(decoded.bounds, px, py, radius) &&
+                        HitTest.pointWithinStroke(decoded.samples, decoded.count, px, py, radius)
+                }
+            } else {
+                EraserHitTest.hits(
+                    item, px, py, radius,
+                    decodeStroke = { stroke ->
+                        decode(stroke)?.let { EraserHitTest.StrokeGeom(it.samples, it.count, it.bounds) }
+                    },
+                    connectorPolyline = { connector ->
+                        ConnectorRouter.flatten(routeConnector(ConnectorCodec.decode(connector.payload)))
+                    },
+                )
+            }
             if (hit) {
                 pendingErase.add(item.id)
                 changed = true

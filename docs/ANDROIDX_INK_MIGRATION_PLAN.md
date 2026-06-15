@@ -232,9 +232,13 @@ as migration consumers so the engine work preserves their requirements.
   "which of these belong together" and emits `group` / `transform` / `recolor`
   edit-ops the user accepts. Snapping surfaces as accept/decline chips, same UX
   as existing AI edit suggestions.
-- **Prerequisite:** add a mesh/cache/index layer before product UX: per-stroke
-  mesh cache, invalidation on transform/restyle/delete, bounding-box or spatial
-  prefilter, and a reliable mapping from mesh hits back to note item IDs/layers.
+- **Prerequisite (✅ landed in I6):** the mesh/cache/index layer is in place —
+  the signature-keyed per-stroke [`StrokeMeshCache`](../app/src/main/java/com/aichat/sandbox/data/ink/StrokeMeshCache.kt)
+  (invalidation on transform/restyle/delete), the uniform-grid
+  [`SpatialIndex`](../app/src/main/java/com/aichat/sandbox/data/ink/SpatialIndex.kt)
+  prefilter, and `MeshHitTest.strokesInRegion` returning a deterministic,
+  registration-ordered id list for mesh-hit → item-id/layer mapping. N2's
+  remaining work is the *similarity ranking + constraint engine + AI* on top.
 
 ### N3. Live beautify via ink smoothing  (upgrade of idea #1)
 - **What:** on pen-lift, offer a one-tap clean snap. ink's input smoothing +
@@ -294,7 +298,7 @@ as migration consumers so the engine work preserves their requirements.
 | **I3 — Optional additive storage + v3 lane** | `StrokeCodec` stays canonical (decided). *Only* if a concrete need appears (e.g. an AI-designed `BrushFamily` per stroke, or a cross-device interchange blob), add **additive dual-write** data that existing code never reads; define the exact v3 orientation/timestamp layout if a brush needs it. Ink-native canonical is ruled out. | strokes, storage | Low/Med |
 | **I4 — Brush richness + N1 foundation** ✅ **done (stable adapter + N1 scaffold; texture/jitter still deferred)** | Stable custom-brush adapter ([`InkBrushFamilies`](INK_I2_PARITY_GATE.md)) closes the I2 gate's brush-geometry gaps — pressure taper (pen), tilt-width (pencil), highlighter width — all at parity headless (corr > 0.999; every tool now GO). The 1.1-alpha programmable/jitter path is isolated and **not** depended on (`data.ink.experimental.InkProgrammableBrush`). The `DESIGN_BRUSH` (N1) AI mode is scaffolded end-to-end (text→validated brush-spec JSON→user-scope `BrushPreset`, no canvas mutation). Procedural **texture** + **jitter** stay deferred (device-pixel / alpha-only). | brush, rendering | Med |
 | **I5 — Live beautify (N3)** ✅ **done (headless slice; ghost appearance device-only; ink stays default-off)** | ink input smoothing into the pen-lift beautify flow. A pure-JVM input-smoothing low-pass ([`StrokeSmoothing`](../app/src/main/java/com/aichat/sandbox/ui/components/notes/StrokeSmoothing.kt)) — the headless stand-in for `ink-authoring`'s Android-only device-side input modeler — now feeds [`InkBeautifier`]'s RDP+Chaikin clean, on **both** the legacy and the ink-authoring commit paths. The clean is a **candidate**, not an in-place mutation: the pen-lift commits the raw stroke and a ghost is offered (tap to accept → raw→beautified as one undoable `CompositeEdit`, decline = keep raw), reusing the hold-recognize swap model. The geometric clean stays **purely local**; the AI is consulted only for the ambiguous shape cases via the unchanged `AUTO_SHAPE`/`replace_with_shape` hold-recognize path. Verified headless against the **real ink engine**: ink renders the beautified stroke with a ~6× smoother native mesh outline (`InkSmoothParityTest`). | authoring, rendering | Low/Med |
-| **I6 — Mesh-backed geometry adoption** | Back `HitTest`/`LassoController` with `PartitionedMesh`; add per-stroke mesh cache, invalidation, spatial prefilter, and item/layer mapping | geometry | Low/Med |
+| **I6 — Mesh-backed geometry adoption** ✅ **done (headless slice; mesh path gated behind ink-on, default-off; on-device feel deferred)** | A derived, **signature-keyed** per-stroke [`StrokeMeshCache`](../app/src/main/java/com/aichat/sandbox/data/ink/StrokeMeshCache.kt) (invalidates on transform/restyle/delete — closing the "Geometry cache correctness" open question), a uniform-grid [`SpatialIndex`](../app/src/main/java/com/aichat/sandbox/data/ink/SpatialIndex.kt) prefilter, ear-clip [`LassoTriangulation`](../app/src/main/java/com/aichat/sandbox/data/ink/LassoTriangulation.kt) (stable `ink-geometry` ships no public polygon→mesh builder), and [`InkGeometry`](../app/src/main/java/com/aichat/sandbox/data/ink/InkGeometry.kt)/[`MeshHitTest`](../app/src/main/java/com/aichat/sandbox/data/ink/MeshHitTest.kt) backing the eraser (tip-box vs rendered width) and lasso (mesh∩triangle — catches *crossing* strokes the sample loop misses) with the point-to-segment loops as the **fallback**. Wired into `DrawingSurface`/`NoteEditorViewModel` gated behind ink-on, so default-off behaviour is byte-identical. All proven headless against the real ink engine (`data.ink.*` + `data.ink.parity.MeshGeometryParityTest`). | geometry | Low/Med |
 | **I7 — Select-similar + snapping (N2, idea #8)** | mesh-based similarity + constraint engine + AI ranking | geometry | Med |
 | **I8 — Replay / draw-with-me (N4, idea #7)** | timestamp-driven replay, tutor guide layer, timelapse export | strokes, rendering | Med |
 
@@ -437,6 +441,62 @@ The live-beautify (N3) clean-snap, built on the I1 authoring path and kept
   wet-layer smoothing is visibly cleaner on the S25 Ultra. See
   [`INK_I2_PARITY_GATE.md`](INK_I2_PARITY_GATE.md), section E.
 
+### I6 — what shipped (headless) vs. device-only
+
+Mesh-backed geometry adoption, built on the `ink-geometry` core that runs on the
+headless JVM (`ink-geometry-jvm` + `libink.so`) and kept **default-off** — the
+mesh path is gated behind the existing ink switch, so I6 is **not** a trigger to
+flip the I2 default-on switch.
+
+- **The derived layer (`data.ink`).** All new code is on the stable
+  strokes/brush/geometry classpath split (no `ink-rendering`/`ink-authoring`), so
+  it is fully pure-JVM testable:
+  - [`StrokeMeshCache`](../app/src/main/java/com/aichat/sandbox/data/ink/StrokeMeshCache.kt)
+    — derived per-stroke `PartitionedMesh`, **never on-disk truth**, rebuilt from
+    canonical `StrokeCodec` payloads via [`InkInterop`]. Lazy: `register` records
+    only a cheap padded centerline AABB (no native build) so a large note can be
+    pre-filtered before any mesh is materialised. **Signature-keyed** (payload +
+    tool + width) invalidation handles transform/restyle/delete correctly,
+    including the same-id `item.copy(payload=…)` edit a pure id cache serves
+    stale — this closes the "Geometry cache correctness" open question.
+  - [`SpatialIndex`](../app/src/main/java/com/aichat/sandbox/data/ink/SpatialIndex.kt)
+    — uniform-grid AABB prefilter (the large-note bounding-box prefilter),
+    deterministic insertion-ordered queries.
+  - [`LassoTriangulation`](../app/src/main/java/com/aichat/sandbox/data/ink/LassoTriangulation.kt)
+    — ear-clips the lasso loop into triangles, because the stable `ink-geometry`
+    artifact exposes no public polygon→`PartitionedMesh` builder, only primitive
+    intersection. A stroke is selected when its mesh hits *any* loop triangle.
+  - [`InkGeometry`](../app/src/main/java/com/aichat/sandbox/data/ink/InkGeometry.kt)
+    / [`MeshHitTest`](../app/src/main/java/com/aichat/sandbox/data/ink/MeshHitTest.kt)
+    — robust point/box/triangle intersection + coverage (identity transform,
+    world coords), and the **fallback-aware** façade: every entry point takes a
+    `fallback` lambda wrapping the existing point-to-segment loop, so a null mesh
+    (unregistered / build failure / ink-off) degrades to today's behaviour.
+- **Live wiring (gated, fallback-capable).** `NoteEditorViewModel.onLassoCompleted`
+  and `DrawingSurface.eraseAtLastSample` route the **stroke** kind through
+  `MeshHitTest` only when ink is on; the cache is invalidated in lockstep with
+  `decodedCache` (`replayItems` retain/register, erase removal). **Non-stroke
+  kinds** (shapes, stickies, connectors, paths) always stay on `EraserHitTest` /
+  `HitTest`, so ink's stroke-only mesh can never displace them (the I2 eraser
+  guarantee holds).
+- **Verified headless (permanent JVM tests):**
+  - `SpatialIndexTest`, `LassoTriangulationTest` — the pure prefilter + ear-clip
+    (overlap correctness, transform re-index, determinism; exact area-tiling for
+    convex *and* concave loops).
+  - `data.ink.parity.MeshGeometryParityTest` — against the **real ink engine**:
+    the eraser mesh hits a wide stroke's body where the centerline fallback misses
+    (partial-erase accuracy); the lasso mesh selects a stroke the loop *crosses*
+    with no sample inside it (overlapping-stroke accuracy); a null/empty-triangle
+    mesh defers to the exact fallback (so ink-off is unchanged); and the cache
+    infrastructure — signature reuse-vs-rebuild on restyle/transform, `retain`
+    delete, the spatial prefilter culling a far stroke, and the deterministic
+    region-query id list feeding an id→layer map.
+- **Deferred to device (documented checklist, not claimed to pass):** the *felt*
+  accuracy of the ink-on mesh eraser/lasso on the S25 Ultra, and the **lasso
+  contract change** (the mesh path catches strokes the old sample loop missed) as
+  a UX decision to confirm before the mesh path rides along with the default-on
+  flip. See [`INK_I2_PARITY_GATE.md`](INK_I2_PARITY_GATE.md), section F.
+
 ## Risks & open questions
 
 - **Rendering parity (the gating risk).** Because ink leads the live path, its
@@ -468,10 +528,16 @@ The live-beautify (N3) clean-snap, built on the I1 authoring path and kept
   version and isolate behind the brush path until 1.1 stabilizes. Do not let the
   alpha API block the stable `BrushPreset → Brush` adapter or authoring
   migration. Core authoring/geometry/rendering are on **stable 1.0.0**.
-- **Geometry cache correctness.** Mesh-backed hit testing and selection need
-  cache invalidation for transforms/restyles/deletes, spatial prefiltering for
-  large notes, and deterministic mapping from geometry hits back to note
-  items/layers.
+- **Geometry cache correctness — addressed in I6.** Mesh-backed hit testing and
+  selection need cache invalidation for transforms/restyles/deletes, spatial
+  prefiltering for large notes, and deterministic mapping from geometry hits back
+  to note items/layers. [`StrokeMeshCache`](../app/src/main/java/com/aichat/sandbox/data/ink/StrokeMeshCache.kt)
+  keys each slot on a **content signature** (payload bytes + tool + width), so an
+  in-place edit (`item.copy(payload = …)` keeps the id but changes geometry —
+  which the id-only `decodedCache` would serve stale) bumps the signature and
+  rebuilds; deletes drop via `retain(keep)`. The [`SpatialIndex`](../app/src/main/java/com/aichat/sandbox/data/ink/SpatialIndex.kt)
+  gives the large-note prefilter and `MeshHitTest.strokesInRegion` the
+  deterministic id mapping. All pinned by `data.ink.*` JVM tests.
 - **Tutor content quality.** Replay is technically straightforward once
   timestamps exist; the risk is whether generated construction strokes are
   simple, ordered, non-cluttered, and actually useful to trace.

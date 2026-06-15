@@ -1,7 +1,8 @@
 # Ink I2 — Rendering + Behaviour Parity Gate
 
-Status: **in progress — headless slice landed; I4 brush gaps now closed;
-device-only items open. Ink stays default-OFF.** This is the default-on gate the
+Status: **in progress — headless slice landed; I4 brush gaps closed; I5 beautify
+and I6 mesh-backed geometry added (both headless, default-off); device-only items
+open. Ink stays default-OFF.** This is the default-on gate the
 migration plan
 ([`ANDROIDX_INK_MIGRATION_PLAN.md`](ANDROIDX_INK_MIGRATION_PLAN.md), phase **I2**)
 requires before the "Ink engine (experimental)" switch
@@ -77,6 +78,8 @@ Reports written by the run:
 
 | 16 | **Live beautify (I5/N3) geometry** — input-smoothing low-pass + RDP + Chaikin clean, and the ink-rendered result is smoother | ✅ headless | `StrokeSmoothingTest`, `InkBeautifierTest` (candidate/offer), `InkSmoothParityTest` — ink's native mesh outline turning sum drops ~6× (60.1→9.7) after beautify, faithful to within ~3.3% of the bbox diagonal |
 | 17 | **Live beautify ghost appearance + tap-to-accept feel** | ⬜ device-only | The translucent candidate overlay and the confirm-tap target; logic/state wired (`pendingBeautify` → `onStrokeBeautifyAccepted` → one `CompositeEdit`), appearance needs the panel — see "On-device harness" E |
+| 18 | **Mesh-backed geometry (I6) — cache + prefilter + hit-test accuracy** | ✅ headless | `SpatialIndexTest`, `LassoTriangulationTest`, `data.ink.parity.MeshGeometryParityTest`: signature invalidation (transform/restyle/delete), spatial prefilter, deterministic id mapping, and — against the real ink engine — the eraser hitting a wide stroke's body the centerline misses + the lasso selecting a *crossing* stroke the sample loop misses, each falling back exactly to the loop when no mesh |
+| 19 | **Mesh-backed eraser/lasso on-device feel + lasso contract change** | ⬜ device-only | The ink-on mesh path is gated behind the ink switch (default-off = byte-identical fallback); the *felt* accuracy and the UX decision on the wider lasso contract need the S25 Ultra — see "On-device harness" F |
 
 Legend: ✅ verified headless · ◑ logic verified headless, on-device confirmation still owed · ⬜ device-only / deferred.
 
@@ -141,9 +144,34 @@ is the **preview surface**, with the ink switch forced on and beautify enabled:
 
 ---
 
+### F. Mesh-backed eraser / lasso (items 18, 19 — phase I6)
+The mesh geometry, cache, prefilter, and hit-test accuracy are verified headless
+(item 18). What needs the device is the **felt** behaviour, with the ink switch
+forced on:
+14. Erase across a **thick** stroke (e.g. a wide marker/highlighter); confirm the
+    eraser bites where the visible body is, not only along the centerline, and
+    that thin strokes erase as before.
+15. Lasso a cluster of **overlapping** strokes, including one whose body crosses
+    the loop but whose endpoints sit outside it; confirm the crossing stroke is
+    selected (the mesh contract) and decide whether that wider contract is the
+    desired UX before it rides along with the default-on flip. Compare against the
+    switch-off lasso.
+16. On a **large** note (many strokes), confirm eraser/lasso stay responsive —
+    the `SpatialIndex` prefilter should keep mesh queries off the strokes far from
+    the gesture.
+17. Erase / restyle / transform / undo a stroke and immediately re-query; confirm
+    the derived mesh tracks the edit (signature invalidation) with no stale hits.
+
 ## Decision
 
-**Ink remains default-OFF.** The headless half of the gate (items 1–8, plus the
+**Ink remains default-OFF.** Phase **I6** adds the mesh-backed geometry layer
+(items 18, 19) entirely behind the ink switch, so it does **not** change this
+decision: with ink off, the eraser and lasso run the unchanged point-to-segment
+fallback. The headless half (item 18) is locked in by permanent JVM tests; the
+on-device feel and the lasso-contract UX call (item 19) join the device column
+(section F).
+
+The headless half of the gate (items 1–8, plus the
 shared-pipeline reasoning for 9–10 and 14) is complete and locked in by permanent
 JVM tests, and **phase I4 has now closed the brush-geometry gaps** (items 6 + 7,
 and the geometry half of 15): pressure taper, pencil tilt-width, and highlighter

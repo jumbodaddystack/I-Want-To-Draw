@@ -8,6 +8,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aichat.sandbox.data.local.PreferencesManager
+import com.aichat.sandbox.data.ink.LassoTriangulation
+import com.aichat.sandbox.data.ink.MeshHitTest
+import com.aichat.sandbox.data.ink.StrokeMeshCache
 import com.aichat.sandbox.data.model.ApiProvider
 import com.aichat.sandbox.data.model.BrushPreset
 import com.aichat.sandbox.data.model.Chat
@@ -1517,6 +1520,16 @@ class NoteEditorViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Phase **I6** — derived, cached per-stroke ink [androidx.ink.geometry.PartitionedMesh]
+     * layer backing lasso selection (and, on the surface, erasing) with robust
+     * geometry. Used **only** while the ink engine is enabled ([inkAuthoring]);
+     * with ink off, the point-to-segment fallback runs and selection is identical
+     * to before, so I6 does not flip the I2 default-on switch. Derived/cached
+     * only — never persisted; `StrokeCodec` stays canonical (Adoption principle 2).
+     */
+    private val meshCache = StrokeMeshCache()
+
     // ── Icon pixel grid (phase 15.3) ─────────────────────────────────────
 
     /** Snap-to-pixel + keyline overlay on icon artboards. On by default. */
@@ -1759,6 +1772,18 @@ class NoteEditorViewModel @Inject constructor(
         }
         val matched = ArrayList<String>()
         val bounds = ArrayList<FloatArray>()
+        // Phase I6 — when the ink engine is on, back stroke selection with ink's
+        // robust mesh/triangle intersection (catches strokes the loop *crosses*,
+        // not just those whose samples land inside it). The lasso loop is
+        // ear-clipped once; per stroke we register its canonical geometry and
+        // test the cached mesh, falling back to the point-in-polygon loop when no
+        // mesh is available. With ink off this whole path is skipped.
+        val meshSelection = inkAuthoring.value
+        val lassoTriangles: FloatArray =
+            if (meshSelection) LassoTriangulation.triangulate(polygon, vertexCount) else FloatArray(0)
+        if (meshSelection) {
+            meshCache.retain(items.mapTo(HashSet(items.size)) { it.id })
+        }
         for (item in items) {
             val hit: Boolean
             val itemBounds: FloatArray
@@ -1768,9 +1793,19 @@ class NoteEditorViewModel @Inject constructor(
                     val sampleCount = samples.size / StrokeCodec.FLOATS_PER_SAMPLE
                     val b = HitTest.boundsOf(samples, sampleCount) ?: continue
                     itemBounds = b
-                    hit = LassoController.strokeIntersectsPolygon(
-                        samples, sampleCount, b, polygon, vertexCount, polyBounds,
-                    )
+                    val loopHit = {
+                        LassoController.strokeIntersectsPolygon(
+                            samples, sampleCount, b, polygon, vertexCount, polyBounds,
+                        )
+                    }
+                    hit = if (meshSelection &&
+                        LassoController.boundsOverlap(b, polyBounds) &&
+                        meshCache.register(item.id, item.payload, item.tool ?: "", item.baseWidthPx)
+                    ) {
+                        MeshHitTest.lassoSelectsStroke(meshCache.meshFor(item.id), lassoTriangles, loopHit)
+                    } else {
+                        loopHit()
+                    }
                 }
                 TextItemCodec.KIND -> {
                     val b = TextItemRenderer.boundsOf(item) ?: continue
