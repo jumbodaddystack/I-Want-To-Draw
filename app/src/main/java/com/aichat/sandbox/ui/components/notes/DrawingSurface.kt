@@ -282,6 +282,14 @@ class DrawingSurface(context: Context) : View(context) {
     private var selectedIds: Set<String> = emptySet()
 
     /**
+     * Phase I8 — tutor "draw with me": ids of guide-layer construction items the
+     * tutor hasn't revealed yet. They are committed, canonical [NoteItem]s, but
+     * suppressed from the scene so the guide reveals one teaching step at a time.
+     * Empty (the default, and whenever the tutor / ink switch is off) → no effect.
+     */
+    private var tutorHiddenIds: Set<String> = emptySet()
+
+    /**
      * Currently in-edit text item id (sub-phase 1.9). Skipped everywhere so the
      * Compose-side `TextItemEditor` overlay doesn't double-render on top of
      * the rasterized copy. Null when no text is being edited.
@@ -620,6 +628,18 @@ class DrawingSurface(context: Context) : View(context) {
         selectedIds = ids
         selectionMatrix = matrix.copyOf()
         if (changedIds) sceneDirty = true
+        invalidate()
+    }
+
+    /**
+     * Phase I8 — suppress unrevealed tutor guide items from the scene. Additive
+     * and default-empty, so the live canvas is byte-identical when no tutor
+     * session is active.
+     */
+    fun setTutorHidden(ids: Set<String>) {
+        if (tutorHiddenIds == ids) return
+        tutorHiddenIds = ids
+        sceneDirty = true
         invalidate()
     }
 
@@ -1817,6 +1837,8 @@ class DrawingSurface(context: Context) : View(context) {
         canvas.scale(viewport.scale, viewport.scale)
         for (item in layerLookup.renderOrder(committedItems)) {
             if (item.id in pendingErase) continue
+            // Phase I8 — unrevealed tutor guide steps stay hidden until stepped to.
+            if (item.id in tutorHiddenIds) continue
             // Selected items are drawn live in onDraw so a Compose-side
             // transform gesture renders without re-rasterizing every frame.
             if (item.id in selectedIds) continue
@@ -2972,6 +2994,9 @@ fun DrawingSurfaceView(
     // current parity-gated behaviour) the custom quad-Bézier path is used and
     // no ink view exists. See `docs/ANDROIDX_INK_MIGRATION_PLAN.md` (I1/I2).
     inkAuthoringEnabled: Boolean = false,
+    // Phase I8 — tutor "draw with me": guide-layer items not yet revealed by the
+    // current teaching step. Default-empty, so non-tutor sessions are unaffected.
+    tutorHiddenIds: Set<String> = emptySet(),
 ) {
     val currentOnCommit by rememberUpdatedState(onStrokeCommitted)
     val currentOnErase by rememberUpdatedState(onItemsErased)
@@ -3078,6 +3103,7 @@ fun DrawingSurfaceView(
                 fixedWidthInk = paletteState.fixedWidthInk,
             )
             view.setSelection(selectedIds, selectionMatrix)
+            view.setTutorHidden(tutorHiddenIds)
             view.setEditingTextId(editingTextId)
             view.setEditingStickyId(editingStickyId)
             view.setLayers(layers)

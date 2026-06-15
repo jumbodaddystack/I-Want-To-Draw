@@ -307,6 +307,36 @@ as migration consumers so the engine work preserves their requirements.
   rendering. The tutor needs simple construction primitives, sensible stroke
   order, guide-layer editability, low clutter, and controls to step / skip /
   redo instructions.
+- **Status (I8): ✅ done — headless slice; tutor + replay gated behind ink,
+  default-off; felt UX + encoding device-only.** Replay (a) is the pure-JVM
+  [`ReplayTimeline`](../app/src/main/java/com/aichat/sandbox/data/notes/ReplayTimeline.kt):
+  a deterministic draw-order timeline whose per-stroke durations come from the
+  v2 `t` span (clamped to a teaching-friendly window) and whose partial-stroke
+  reveal samples the same v2 `t` lane that drives audio sync (so a paused mark
+  animates its pause); v1 / non-stroke kinds fall back to a uniform reveal.
+  Timelapse export (c) is [`TimelapseFramePlan`](../app/src/main/java/com/aichat/sandbox/data/notes/TimelapseFramePlan.kt)
+  — the ordered per-frame clipped item sets + the single shared viewport every
+  frame renders into; the per-frame [`NoteRasterizer`] bitmap + the video/GIF
+  codec are device-only. The tutor (b) is
+  [`TutorGuide`](../app/src/main/java/com/aichat/sandbox/data/notes/TutorGuide.kt)
+  + `TutorSession`: a **ghosted, editable** guide [`NoteLayer`] (low opacity,
+  unlocked, on top), canonical-item reparenting onto it, a **low-clutter**
+  step planner (≤ `MAX_STEPS`, one mark per step until then), and an immutable
+  step / skip / back / redo / reset state machine. The construction strokes are
+  authored by the **unchanged** GENERATE `add_path` / `add_shape` edit-ops
+  pipeline and accepted through the same `pendingEdit` surface as any AI edit —
+  `StrokeCodec` stays canonical and the AI never sees ink (Adoption principle 2).
+  Verified headless against the **real ink engine** (`ReplayTutorParityTest`):
+  the replay draw-order agrees with ink's reconstructed recording-relative
+  times, the partial prefix matches ink's `elapsedTimeMillis` prefix, and a
+  tutor payload builds a real ink `Stroke` with every sample intact.
+  **Device-only (documented checklist, not claimed to pass):** the felt replay /
+  tutor animation smoothness on the S25 Ultra, the ghost guide appearance + the
+  tracing feel, the actual video/GIF encoding, and the **AI tutor content
+  quality** (whether the generated construction strokes are genuinely simple,
+  ordered, and useful to trace) — see [`INK_I2_PARITY_GATE.md`](INK_I2_PARITY_GATE.md),
+  section H. I8 is **not** a trigger to flip the I2 default-on switch: ink stays
+  **default-off**.
 
 ---
 
@@ -324,7 +354,7 @@ as migration consumers so the engine work preserves their requirements.
 | **I5 — Live beautify (N3)** ✅ **done (headless slice; ghost appearance device-only; ink stays default-off)** | ink input smoothing into the pen-lift beautify flow. A pure-JVM input-smoothing low-pass ([`StrokeSmoothing`](../app/src/main/java/com/aichat/sandbox/ui/components/notes/StrokeSmoothing.kt)) — the headless stand-in for `ink-authoring`'s Android-only device-side input modeler — now feeds [`InkBeautifier`]'s RDP+Chaikin clean, on **both** the legacy and the ink-authoring commit paths. The clean is a **candidate**, not an in-place mutation: the pen-lift commits the raw stroke and a ghost is offered (tap to accept → raw→beautified as one undoable `CompositeEdit`, decline = keep raw), reusing the hold-recognize swap model. The geometric clean stays **purely local**; the AI is consulted only for the ambiguous shape cases via the unchanged `AUTO_SHAPE`/`replace_with_shape` hold-recognize path. Verified headless against the **real ink engine**: ink renders the beautified stroke with a ~6× smoother native mesh outline (`InkSmoothParityTest`). | authoring, rendering | Low/Med |
 | **I6 — Mesh-backed geometry adoption** ✅ **done (headless slice; mesh path gated behind ink-on, default-off; on-device feel deferred)** | A derived, **signature-keyed** per-stroke [`StrokeMeshCache`](../app/src/main/java/com/aichat/sandbox/data/ink/StrokeMeshCache.kt) (invalidates on transform/restyle/delete — closing the "Geometry cache correctness" open question), a uniform-grid [`SpatialIndex`](../app/src/main/java/com/aichat/sandbox/data/ink/SpatialIndex.kt) prefilter, ear-clip [`LassoTriangulation`](../app/src/main/java/com/aichat/sandbox/data/ink/LassoTriangulation.kt) (stable `ink-geometry` ships no public polygon→mesh builder), and [`InkGeometry`](../app/src/main/java/com/aichat/sandbox/data/ink/InkGeometry.kt)/[`MeshHitTest`](../app/src/main/java/com/aichat/sandbox/data/ink/MeshHitTest.kt) backing the eraser (tip-box vs rendered width) and lasso (mesh∩triangle — catches *crossing* strokes the sample loop misses) with the point-to-segment loops as the **fallback**. Wired into `DrawingSurface`/`NoteEditorViewModel` gated behind ink-on, so default-off behaviour is byte-identical. All proven headless against the real ink engine (`data.ink.*` + `data.ink.parity.MeshGeometryParityTest`). | geometry | Low/Med |
 | **I7 — Select-similar + snapping (N2, idea #8)** ✅ **done (headless; gated behind ink-on, default-off; on-device feel + AI-ranking quality deferred)** | Local-first similarity + constraint engine + optional AI ranking. Pure-JVM [`StrokeSimilarity`](../app/src/main/java/com/aichat/sandbox/data/ink/StrokeSimilarity.kt) (scale/translation-invariant shape descriptors + tool/width/colour) feeds [`SelectSimilar`](../app/src/main/java/com/aichat/sandbox/data/ink/SelectSimilar.kt) (the magic-wand ranker, builds on the I6 cache/prefilter) and a pure [`ConstraintSnap`](../app/src/main/java/com/aichat/sandbox/data/ink/ConstraintSnap.kt) engine (near-alignment / even-spacing / near-symmetry → translations). Snaps are expressed as ordinary `EditOp.Transform`s on canonical payloads and ride the **same** `EditPreviewController` → `PendingEdit` accept/decline chips as AI edits; the AI ranking is optional and routes through the unchanged `submitAiEdit` EDIT pipeline. Proven headless against the **real ink engine** (`data.ink.parity.SelectSimilarSnapParityTest`): the descriptor proxy ranks candidates the same way ink's mesh IoU does, and a snap translation aligns real ink geometry. | geometry | Med |
-| **I8 — Replay / draw-with-me (N4, idea #7)** | timestamp-driven replay, tutor guide layer, timelapse export | strokes, rendering | Med |
+| **I8 — Replay / draw-with-me (N4, idea #7)** ✅ **done (headless slice; tutor + replay gated behind ink, default-off; felt UX + video/GIF encoding device-only)** | Pure-JVM [`ReplayTimeline`](../app/src/main/java/com/aichat/sandbox/data/notes/ReplayTimeline.kt) (draw-order timeline + teaching-pace durations + v2-`t`-paced partial-stroke reveal + frame sampling), [`TimelapseFramePlan`](../app/src/main/java/com/aichat/sandbox/data/notes/TimelapseFramePlan.kt) (per-frame clipped item sets + shared viewport for export), and [`TutorGuide`](../app/src/main/java/com/aichat/sandbox/data/notes/TutorGuide.kt)/`TutorSession` (ghosted editable guide layer, canonical-item reparenting, low-clutter step planning, step/skip/back/redo state machine). Tutor construction strokes ride the **unchanged** GENERATE `add_path`/`add_shape` edit-ops pipeline → canonical `StrokeCodec` payloads accepted through the same `pendingEdit` surface. Proven headless against the **real ink engine** (`data.ink.parity.ReplayTutorParityTest`). | strokes, rendering | Med |
 
 Sequencing logic: **I0 (the seam) is a hard prerequisite** for everything. The
 ink-first stance pulls the **authoring path forward to I1** — it's the headline
@@ -565,6 +595,78 @@ the ink switch, so I7 is **not** a trigger to flip the I2 default-on switch.
   **AI ranking quality** ("which of these belong together") on large, busy notes —
   see [`INK_I2_PARITY_GATE.md`](INK_I2_PARITY_GATE.md), section G.
 
+### I8 — what shipped (headless) vs. device-only
+
+Replay / "draw with me" (N4, idea #7), built on the canonical v2 `t` lane and
+the **unchanged** AI generation pipeline, and kept **default-off** — the tutor +
+replay entry points are gated behind the ink switch, so I8 is **not** a trigger
+to flip the I2 default-on switch.
+
+- **The pure-JVM cores (`data.notes`).** All new code is plain JVM
+  (`StrokeCodec` / `NoteItem` / `NoteLayer` — no `ink-rendering`/`ink-authoring`),
+  fully unit-testable, and never persisted beyond ordinary items/layers:
+  - [`ReplayTimeline`](../app/src/main/java/com/aichat/sandbox/data/notes/ReplayTimeline.kt)
+    (a) — a deterministic **draw-order** timeline (by `zIndex`, the canvas's
+    paint/creation order). Per-stroke duration is the stroke's *real* v2 span
+    (`lastT − firstT`) clamped to a teaching window; the in-progress stroke's
+    **partial reveal samples the v2 `t` lane** (samples with stroke-relative
+    time ≤ the local fraction of the span — so a paused mark animates its pause),
+    with v1 / non-stroke kinds falling back to a uniform index reveal. Answers
+    "what is visible at playhead `t`?" with render-ready clipped items, and emits
+    `framePositions(fps)`.
+  - [`TimelapseFramePlan`](../app/src/main/java/com/aichat/sandbox/data/notes/TimelapseFramePlan.kt)
+    (c) — the ordered per-frame *clipped* item sets + the single shared world
+    viewport (`NoteRasterizer.computeBounds`, pure) every frame renders into, so
+    the camera never jumps; an optional `holdFrames` tail lingers on the finished
+    drawing. The per-frame `NoteRasterizer.render` bitmap and the video/GIF codec
+    are the device-only half.
+  - [`TutorGuide`](../app/src/main/java/com/aichat/sandbox/data/notes/TutorGuide.kt)
+    + `TutorSession` (b) — a **ghosted, editable** guide `NoteLayer`
+    (`GUIDE_OPACITY_PERCENT`, unlocked, visible, on top), `assignToGuide`
+    (canonical-payload reparenting), a **low-clutter** `planSteps` (≤ `MAX_STEPS`;
+    one construction mark per step until then, else evenly chunked), and an
+    immutable `next` / `skip` / `back` / `redo` / `reset` state machine exposing
+    `revealedItems()` / `hiddenItemIds()` / `progress`.
+- **Live wiring (gated, edit-ops-shaped, fallback-safe).**
+  `NoteEditorViewModel.startDrawWithMe` routes through the **unchanged**
+  `submitAiEdit(generate = true)` GENERATE pipeline; on accept,
+  `acceptPendingEdit` reparents the authored `add_path` / `add_shape` items onto
+  the guide layer and opens the `TutorSession` (`tutorNext` / `tutorSkip` /
+  `tutorBack` / `tutorRedo` / `endTutor`). `buildReplayTimeline` exposes the
+  timelapse. `DrawingSurface.setTutorHidden` (additive, default-empty) suppresses
+  unrevealed steps. With ink off every entry point is inert and the canvas is
+  byte-identical.
+- **Verified headless (permanent JVM tests):**
+  - `ReplayTimelineTest`, `TimelapseFramePlanTest`, `TutorGuideTest` — ordering,
+    teaching-pace durations, monotone + `t`-paced partial reveal, frame sampling;
+    per-frame clipped sets + shared viewport + hold tail; the ghosted/editable
+    guide layer, canonical reparenting, the low-clutter cap, and every state-machine
+    transition.
+  - `data.ink.parity.ReplayTutorParityTest` — against the **real ink engine**:
+    the replay draw-order agrees with ink's reconstructed recording-relative
+    first-sample times, the timeline's partial prefix equals ink's
+    `elapsedTimeMillis` prefix at every sampled playhead, and a tutor payload
+    builds a real ink `Stroke` (every sample intact) that round-trips back to a
+    canonical v2 payload — so generated guide geometry rides the inviolable
+    edit-ops / commit path, never a separate ink format.
+- **Deferred to device (documented checklist, not claimed to pass):** the *felt*
+  replay / tutor animation smoothness on the S25 Ultra, the ghost guide appearance
+  + tracing feel, the actual **video/GIF encoding**, and the **AI tutor content
+  quality** — see [`INK_I2_PARITY_GATE.md`](INK_I2_PARITY_GATE.md), section H.
+
+### Does I8 complete the migration plan?
+
+I8 closes the **last planned phase (I0–I8)**: the seam, toolchain, fidelity
+spike, authoring prototype, parity gate (headless slice), brush richness,
+beautify, mesh geometry, select-similar/snap, and now replay/draw-with-me have
+all landed headless. What remains is **not a new phase** but the two standing
+items the plan always carried: the **I2 device-only default-on gate** (latency /
+front-buffer / pixel-diff / overlay touch pass-through on the S25 Ultra) that
+keeps ink **default-off**, and **I3** (additive dual-write storage + the v3
+orientation lane), which is explicitly *only-if-a-concrete-need-appears* and has
+not been triggered. So the build-out is complete; the migration "finishes" when a
+maintainer runs the device harness and flips the switch.
+
 ## Risks & open questions
 
 - **Rendering parity (the gating risk).** Because ink leads the live path, its
@@ -617,10 +719,18 @@ the ink switch, so I7 is **not** a trigger to flip the I2 default-on switch.
   snap-chip UX, and AI-ranking usefulness on large notes are **device-only** (see
   the gate doc, section G) — and the whole feature is gated behind the default-off
   ink switch, so it can't regress today's selection/erase.
-- **Tutor content quality.** Replay is technically straightforward once
-  timestamps exist; the risk is whether generated construction strokes are
-  simple, ordered, non-cluttered, and actually useful to trace. (This is N4/I8,
-  not I7.)
+- **Tutor content quality (the I8 risk) — plumbing addressed, quality still
+  device-only.** Replay was technically straightforward once timestamps existed
+  (`ReplayTimeline` is pinned headless against the real ink engine), so I8's
+  build-out closed the *plumbing*: the guide layer is ghosted + editable, the
+  step planner caps clutter (`planSteps` ≤ `MAX_STEPS`), the step / skip / back /
+  redo controls exist, and the construction strokes are ordinary canonical
+  payloads from the unchanged GENERATE pipeline. The standing risk is exactly the
+  one the plan named — whether the *generated* construction strokes are simple,
+  ordered, non-cluttered, and useful to trace — which is an AI-output-quality
+  judgement that needs the device + real prompts (gate doc, section H). The
+  feature is gated behind the default-off ink switch, so it can't regress today's
+  replay/export.
 - **No BLE S-Pen.** The S25 Ultra pen has no Bluetooth — don't plan air-action /
   remote-button features. Digitizer-side button (eraser override) still works.
 - **Orientation lane (opportunity, not risk).** Capturing orientation as a v3

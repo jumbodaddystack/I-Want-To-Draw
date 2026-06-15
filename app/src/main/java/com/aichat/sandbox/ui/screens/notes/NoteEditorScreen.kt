@@ -117,6 +117,8 @@ fun NoteEditorScreen(
     val snapMask by viewModel.snapMask.collectAsState()
     val layers by viewModel.layers.collectAsState()
     val activeLayerId by viewModel.activeLayerId.collectAsState()
+    // Phase I8 — tutor "draw with me": guide-layer items not yet revealed.
+    val tutorHiddenIds by viewModel.tutorHiddenIds.collectAsState()
     val layersPanelOpen by viewModel.layersPanelOpen.collectAsState()
     val brushPresets by viewModel.brushPresetList.collectAsState()
     val activeBrushPreset by viewModel.activeBrushPreset.collectAsState()
@@ -629,6 +631,7 @@ fun NoteEditorScreen(
                     recordingStartedAt = recordingStartedAt,
                     fingerInkEnabled = fingerDrawing,
                     inkAuthoringEnabled = inkAuthoring,
+                    tutorHiddenIds = tutorHiddenIds,
                     // Icons are a bounded canvas: clip ink to the artboard.
                     artboardClipBounds = if (note.isIcon) {
                         viewModel.currentFrameBounds()

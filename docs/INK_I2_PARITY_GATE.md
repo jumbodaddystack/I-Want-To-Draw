@@ -1,8 +1,8 @@
 # Ink I2 — Rendering + Behaviour Parity Gate
 
 Status: **in progress — headless slice landed; I4 brush gaps closed; I5 beautify,
-I6 mesh-backed geometry, and I7 select-similar + snapping added (all headless,
-default-off); device-only items open. Ink stays default-OFF.** This is the default-on gate the
+I6 mesh-backed geometry, I7 select-similar + snapping, and I8 replay / draw-with-me
+added (all headless, default-off); device-only items open. Ink stays default-OFF.** This is the default-on gate the
 migration plan
 ([`ANDROIDX_INK_MIGRATION_PLAN.md`](ANDROIDX_INK_MIGRATION_PLAN.md), phase **I2**)
 requires before the "Ink engine (experimental)" switch
@@ -83,6 +83,9 @@ Reports written by the run:
 | 20 | **Select-similar (I7) — local similarity + ranking, and agreement with ink geometry** | ✅ headless | `StrokeSimilarityTest`, `SelectSimilarTest`, and `data.ink.parity.SelectSimilarSnapParityTest`: the scale/translation-invariant descriptor metric, the deterministic ranker, and — against the **real ink engine** — that the cheap descriptor proxy ranks candidates the same way ink's mesh IoU does (and picks the same top match) |
 | 21 | **Constraint/snap engine (I7) — detection + edit-ops snap of real geometry** | ✅ headless | `ConstraintSnapTest` (alignment / even-spacing / symmetry detection, conflict-free `resolve`, conservatism guards) + `SelectSimilarSnapParityTest.snapTranslationAlignsRealInkGeometry`: a snap, applied as an `EditOp.Transform` translation on the canonical payload, makes the **real ink mesh** left-extents coincide |
 | 22 | **Select-similar / snap on-device feel + AI-ranking quality** | ⬜ device-only | The felt tap-to-select-similar gesture, the snap-chip preview appearance, and the optional AI "which belong together" ranking quality on large notes need the S25 Ultra — see "On-device harness" G. Gated behind ink-on (default-off), so today's selection/erase is unaffected |
+| 23 | **Replay timeline (I8) — draw-order, v2-`t`-paced partial reveal, frame sampling** | ✅ headless | `ReplayTimelineTest`, `TimelapseFramePlanTest`, and `data.ink.parity.ReplayTutorParityTest`: ordering + teaching-pace durations + monotone partial reveal + per-frame clipped sets/shared viewport, and — against the **real ink engine** — the draw-order agrees with ink's reconstructed recording-relative times and the partial prefix equals ink's `elapsedTimeMillis` prefix |
+| 24 | **Tutor (I8) — guide-layer construction + step state machine + canonical acceptance** | ✅ headless | `TutorGuideTest` (ghosted/editable guide layer, canonical reparenting, low-clutter `planSteps` cap, every `next`/`skip`/`back`/`redo`/`reset` transition) + `ReplayTutorParityTest.tutorStrokeIsCanonicalForInk`: a reparented tutor payload builds a real ink `Stroke` (every sample intact) and round-trips back to a canonical v2 payload — generated guide geometry rides the inviolable edit-ops/commit path |
+| 25 | **Replay/tutor on-device feel, video/GIF encoding, AI tutor content quality** | ⬜ device-only | The felt replay/tutor animation smoothness, the ghost guide appearance + tracing feel, the actual `MediaCodec`/GIF encoding of `TimelapseFramePlan` frames, and the **AI content quality** (are the generated construction strokes simple, ordered, useful to trace?) need the S25 Ultra — see "On-device harness" H. Gated behind ink-on (default-off), so today's replay/export is unaffected |
 
 Legend: ✅ verified headless · ◑ logic verified headless, on-device confirmation still owed · ⬜ device-only / deferred.
 
@@ -181,6 +184,29 @@ on:
     whether its grouping/recolor suggestions help more than they confuse — the
     open *quality* question for I7.
 
+### H. Replay / draw-with-me (items 23, 24, 25 — phase I8)
+The replay timeline, frame plan, tutor guide-layer logic, and canonical
+acceptance are verified headless (items 23, 24), including against the real ink
+engine. What needs the device is the **felt** animation, the **encoding**, and
+the **AI content quality**, with the ink switch forced on:
+21. Replay a note drawn during a recording as a timelapse; confirm strokes appear
+    in draw order, each animates from start to finish (partial-stroke reveal), and
+    a stroke that paused mid-draw shows that pause (the v2 `t` lane pacing). Sweep
+    the speed multiplier.
+22. Export the timelapse to video/GIF (the device-only encoder over
+    `TimelapseFramePlan` frames + `NoteRasterizer.render`); confirm the clip plays
+    back smoothly, every frame shares one viewport (no camera jump), and the final
+    frame lingers (`holdFrames`).
+23. Start "draw with me" on a fresh artboard; confirm the model's construction
+    strokes land on a **ghosted, editable** guide layer, and that **step / skip /
+    back / redo** reveal them one teaching beat at a time (unrevealed steps stay
+    hidden via `setTutorHidden`). Trace a step, erase part of the guide, and
+    confirm the guide layer behaves like any editable layer.
+24. Judge the **content quality** — are the generated construction strokes simple,
+    sensibly ordered, low-clutter, and actually useful to trace? This is the open
+    quality question for I8 (the plumbing is closed headless; the AI output is not
+    headless-judgeable).
+
 ## Decision
 
 **Ink remains default-OFF.** Phase **I6** adds the mesh-backed geometry layer
@@ -220,6 +246,18 @@ only on:
 smaller mesh-outline turning sum) — while the ghost **appearance** and
 tap-to-accept feel join the device-only column (section E). I5 builds on the
 authoring path but does **not** change this decision.
+
+**Phase I8 (replay / draw-with-me / N4)** adds three rows (23, 24, 25), again
+**entirely behind the ink switch**, so it likewise does **not** change this
+decision. The replay timeline (draw-order + v2-`t`-paced partial reveal + frame
+sampling), the timelapse frame plan, and the tutor guide-layer + step state
+machine are locked in by permanent JVM tests — including, against the real ink
+engine, that the replay order/partial-prefix tracks ink's `elapsedTimeMillis`
+and that a tutor stroke is a canonical payload ink renders. The tutor's
+construction strokes ride the **unchanged** GENERATE edit-ops pipeline and are
+accepted through the same `pendingEdit` surface, so `StrokeCodec` stays canonical
+and the AI pipeline is untouched. The felt animation, the video/GIF encoding, and
+the **AI tutor content quality** (item 25) join the device column (section H).
 
 Per Adoption principle 1 ("ink is the intended primary, the flag exists to fall
 *back*, not to opt *in* — but it still needs a checklist before default-on"), the

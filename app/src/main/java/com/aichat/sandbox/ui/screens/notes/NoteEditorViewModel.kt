@@ -41,8 +41,12 @@ import com.aichat.sandbox.data.notes.NoteSvgExporter
 import com.aichat.sandbox.data.notes.PdfLayout
 import com.aichat.sandbox.data.notes.PendingDraftStore
 import com.aichat.sandbox.data.notes.RecentColorsStore
+import com.aichat.sandbox.data.notes.ReplayTimeline
 import com.aichat.sandbox.data.notes.StampSearch
 import com.aichat.sandbox.data.notes.ToolPalettePrefsStore
+import com.aichat.sandbox.data.notes.TutorGuide
+import com.aichat.sandbox.data.notes.TutorSession
+import com.aichat.sandbox.data.notes.TutorStep
 import com.aichat.sandbox.data.repository.BrushPresetRepository
 import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
@@ -2066,6 +2070,115 @@ class NoteEditorViewModel @Inject constructor(
         )
     }
 
+    // ── Replay / draw-with-me (phase I8 / N4, idea #7) ───────────────────
+    //
+    // Two consumers of the canonical v2 `t` lane and the AI generation pipeline,
+    // both gated behind the ink engine ([inkAuthoring], default-off) so I8 does
+    // not flip the I2 default-on switch:
+    //   (a) timestamp-driven replay — [buildReplayTimeline] turns the live items
+    //       into a teaching-paced timelapse ([ReplayTimeline]); the felt
+    //       animation + video/GIF encoding are device-only.
+    //   (b) tutor "draw with me" — [startDrawWithMe] routes through the unchanged
+    //       GENERATE edit-ops pipeline; on accept the authored construction
+    //       strokes are reparented onto a ghosted, editable guide layer and the
+    //       [TutorSession] steps the reveal. The strokes stay canonical
+    //       `StrokeCodec` payloads accepted through the same surface as any AI
+    //       edit (Adoption principle 2).
+
+    private val _tutorSession = MutableStateFlow<TutorSession?>(null)
+    val tutorSession: StateFlow<TutorSession?> = _tutorSession.asStateFlow()
+
+    /** Ids of guide items the current tutor step hasn't revealed (canvas suppresses these). */
+    val tutorHiddenIds: StateFlow<Set<String>> = _tutorSession
+        .map { it?.hiddenItemIds() ?: emptySet() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    /** True when replay/tutor tools are available (ink engine on). */
+    fun replayToolsEnabled(): Boolean = inkAuthoring.value
+
+    /** When set, the next accepted [pendingEdit] is routed onto the guide layer as a tutor. */
+    private var pendingTutorGenerate: Boolean = false
+
+    /**
+     * Phase I8(a) — build a teaching-paced timelapse of the current note. Pure /
+     * local; the UI drives a playhead and renders [ReplayTimeline.itemsAt]. The
+     * actual frame encoding (video/GIF) is the device-only export path.
+     */
+    fun buildReplayTimeline(
+        config: ReplayTimeline.Config = ReplayTimeline.Config(),
+    ): ReplayTimeline = ReplayTimeline.build(items.toList(), config)
+
+    /**
+     * Phase I8(b) — start a "draw with me" tutor: ask the model to author simple
+     * construction strokes for [prompt] through the unchanged GENERATE pipeline.
+     * The staged preview accepts exactly like any AI edit; [acceptPendingEdit]
+     * then reparents the authored geometry onto the guide layer and opens the
+     * [TutorSession]. No-op when the ink engine is off.
+     */
+    fun startDrawWithMe(prompt: String) {
+        if (!inkAuthoring.value || prompt.isBlank()) return
+        pendingTutorGenerate = true
+        submitAiEdit(
+            description = "AI Draw with me",
+            userPrompt = prompt,
+            selection = null,
+            generate = true,
+        )
+    }
+
+    /**
+     * Accept a tutor generation: ensure a ghosted guide layer exists, reparent
+     * the authored construction strokes onto it (canonical payloads untouched),
+     * commit through the same [apply] path as any edit, and open the stepped
+     * session. Falls back to a plain accept when the model authored nothing.
+     */
+    private fun acceptTutorEdit(pending: PendingEdit) {
+        val added = pending.simulation.added
+        if (added.isEmpty()) {
+            apply(pending.simulation.toCompositeEdit(pending.description))
+            return
+        }
+        val existing = _layers.value
+        val guide = TutorGuide.findGuideLayer(existing) ?: run {
+            val fresh = TutorGuide.buildGuideLayer(resolvedNoteId, existing)
+            _layers.value = existing + fresh
+            fresh
+        }
+        val reparented = TutorGuide.assignToGuide(added, guide.id)
+        apply(
+            EditorAction.CompositeEdit(
+                description = pending.description,
+                added = reparented,
+                removed = pending.simulation.removed,
+                modified = pending.simulation.modified,
+            ),
+        )
+        _activeLayerId.value = guide.id
+        _tutorSession.value = TutorSession(TutorGuide.planSteps(reparented))
+        scheduleAutosave()
+    }
+
+    /** Reveal the next teaching step. */
+    fun tutorNext() = _tutorSession.update { it?.next() }
+
+    /** Step past the next instruction without revealing it. */
+    fun tutorSkip() = _tutorSession.update { it?.skip() }
+
+    /** Step one beat back. */
+    fun tutorBack() = _tutorSession.update { it?.back() }
+
+    /** Re-surface the current step for re-animation; returns it for the UI to replay. */
+    fun tutorRedo(): TutorStep? = _tutorSession.value?.redo()
+
+    /**
+     * End the tutor walkthrough. The guide layer and its (now canonical) strokes
+     * stay on the note — editable and erasable like any other layer — so the user
+     * keeps whatever they traced.
+     */
+    fun endTutor() {
+        _tutorSession.value = null
+    }
+
     // ── Path node editing (sub-phase 12.3) ───────────────────────────────
     //
     // A single selected path can enter node-edit mode: the editor swaps the
@@ -3638,7 +3751,18 @@ class NoteEditorViewModel @Inject constructor(
     fun acceptPendingEdit() {
         val pending = _pendingEdit.value ?: return
         _pendingEdit.value = null
-        if (pending.simulation.isEmpty) return
+        if (pending.simulation.isEmpty) {
+            pendingTutorGenerate = false
+            return
+        }
+        // Phase I8 — a "draw with me" generation lands its authored construction
+        // strokes on the guide layer and opens the stepped tutor instead of the
+        // normal in-place accept.
+        if (pendingTutorGenerate) {
+            pendingTutorGenerate = false
+            acceptTutorEdit(pending)
+            return
+        }
         apply(pending.simulation.toCompositeEdit(pending.description))
         // Auto-select model-authored geometry so the user can immediately see
         // and grab it (move / resize / tweak). This is essential on a clipped
@@ -3655,6 +3779,7 @@ class NoteEditorViewModel @Inject constructor(
     /** Sub-phase 7.4 — drop the staged AI edit without touching the canvas. */
     fun rejectPendingEdit() {
         _pendingEdit.value = null
+        pendingTutorGenerate = false
     }
 
     /**
