@@ -184,6 +184,33 @@ class DrawingSurface(context: Context) : View(context) {
     private var sceneCanvas: Canvas? = null
     private var sceneDirty = true
 
+    // ── Cheap pan/zoom: transform the cached scene bitmap, re-raster on settle ──
+    //
+    // The scene bitmap is rasterized at a specific viewport ("render viewport").
+    // While a pan/pinch gesture moves the live viewport, blitting the bitmap
+    // through [sceneBlitMatrix] is O(1) — far cheaper than re-rasterizing every
+    // committed item each frame. A single crisp re-raster is scheduled via
+    // [settleRerasterRunnable] once motion stops (or the gesture ends).
+    private var sceneRenderScale: Float = 1f
+    private var sceneRenderOffsetX: Float = 0f
+    private var sceneRenderOffsetY: Float = 0f
+    private val sceneBlitMatrix = Matrix()
+    private val sceneBlitPaint = Paint().apply { isFilterBitmap = true }
+    private val settleRerasterRunnable = Runnable {
+        sceneDirty = true
+        invalidate()
+    }
+
+    /**
+     * Signature of the committed-item set the scene bitmap currently reflects.
+     * Lets [replayItems] skip the redundant full re-raster when the ViewModel
+     * hands back a set we already composited locally (the per-stroke round-trip).
+     */
+    private var sceneSignature: Long = 0L
+
+    /** Last time an erase-driven re-raster ran; throttles [requestEraseRaster]. */
+    private var lastEraseRasterAtMs: Long = 0L
+
     /** Committed strokes, kept on the view so we can re-rasterize on viewport changes. */
     private var committedItems: List<NoteItem> = emptyList()
 
@@ -522,6 +549,7 @@ class DrawingSurface(context: Context) : View(context) {
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         motionPredictor = null
+        removeCallbacks(settleRerasterRunnable)
     }
 
     /**
@@ -532,6 +560,13 @@ class DrawingSurface(context: Context) : View(context) {
      */
     fun replayItems(items: List<NoteItem>) {
         val sorted = items.sortedBy { it.zIndex }
+        // The per-stroke round-trip (local commit → ViewModel → recomposition →
+        // replayItems) hands back a set we already composited onto the bitmap.
+        // When the render-relevant signature is unchanged, adopt the
+        // authoritative list but skip the redundant full raster — otherwise
+        // every committed stroke would cost a second O(N) rasterize.
+        val unchanged =
+            pendingErase.isEmpty() && !sceneDirty && itemsSignature(sorted) == sceneSignature
         committedItems = sorted
         // Re-decode lazily; drop entries no longer present so the cache
         // doesn't grow without bound across erase/undo cycles.
@@ -554,7 +589,7 @@ class DrawingSurface(context: Context) : View(context) {
         TextItemRenderer.evictUnused(keep)
         StickyRenderer.evictUnused(keep)
         pendingErase.clear()
-        sceneDirty = true
+        if (!unchanged) sceneDirty = true
         invalidate()
     }
 
@@ -695,14 +730,30 @@ class DrawingSurface(context: Context) : View(context) {
         // below (selection, lasso, hover) stay unclipped.
         val clip = artboardClipBounds
         sceneBitmap?.let { bmp ->
+            // When the live viewport matches the one the bitmap was rasterized
+            // at, blit 1:1. Mid-gesture they differ — transform the cached
+            // pixels instead of re-rasterizing (a [settleRerasterRunnable]
+            // re-rasters crisply once motion stops). FILTER keeps zoom smooth.
+            val viewportMatches =
+                viewport.scale == sceneRenderScale &&
+                    viewport.offsetX == sceneRenderOffsetX &&
+                    viewport.offsetY == sceneRenderOffsetY
             if (clip != null) {
                 canvas.save()
                 clipToArtboard(canvas, clip)
-                canvas.drawBitmap(bmp, 0f, 0f, null)
-                canvas.restore()
-            } else {
-                canvas.drawBitmap(bmp, 0f, 0f, null)
             }
+            if (viewportMatches) {
+                canvas.drawBitmap(bmp, 0f, 0f, null)
+            } else {
+                val p = sceneBlitParams(
+                    sceneRenderScale, sceneRenderOffsetX, sceneRenderOffsetY,
+                    viewport.scale, viewport.offsetX, viewport.offsetY,
+                )
+                sceneBlitMatrix.setScale(p[0], p[0])
+                sceneBlitMatrix.postTranslate(p[1], p[2])
+                canvas.drawBitmap(bmp, sceneBlitMatrix, sceneBlitPaint)
+            }
+            if (clip != null) canvas.restore()
         }
 
         // Phase 15.3 — icon keylines above the committed scene, below the
@@ -1320,6 +1371,10 @@ class DrawingSurface(context: Context) : View(context) {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 gestureMode = GestureMode.NONE
+                // Gesture ended — re-raster crisply now rather than waiting out
+                // the settle debounce.
+                removeCallbacks(settleRerasterRunnable)
+                post(settleRerasterRunnable)
                 true
             }
             else -> false
@@ -1330,7 +1385,11 @@ class DrawingSurface(context: Context) : View(context) {
         hypot(event.getX(a) - event.getX(b), event.getY(a) - event.getY(b))
 
     private fun onViewportChanged() {
-        sceneDirty = true
+        // Don't re-rasterize every committed item on every pan/zoom frame —
+        // onDraw blit-transforms the cached bitmap meanwhile. Re-raster once the
+        // viewport stops moving so the result snaps back to crisp.
+        removeCallbacks(settleRerasterRunnable)
+        postDelayed(settleRerasterRunnable, SETTLE_RERASTER_MS)
         invalidate()
     }
 
@@ -1449,8 +1508,7 @@ class DrawingSurface(context: Context) : View(context) {
             widthPx = strokeEffectiveWidthPx,
             fixedWidth = strokeFixedWidth,
         )
-        committedItems = committedItems + item
-        sceneDirty = true
+        appendCommitted(item)
         strokeListener?.invoke(item)
         // 11.3 — recognition runs *after* the normal commit so the raw ink
         // is already an undoable item; the receiver's replacement edit is a
@@ -1712,8 +1770,7 @@ class DrawingSurface(context: Context) : View(context) {
             val meta = inkPending.remove(id) ?: continue
             val payload = InkInterop.fromStroke(stroke, meta.recordingOriginMs)
             val item = buildStrokeItem(payload, meta.tool, meta.color, meta.widthPx, meta.fixedWidth)
-            committedItems = committedItems + item
-            sceneDirty = true
+            appendCommitted(item)
             strokeListener?.invoke(item)
             // I5 — same beautify offer as the legacy path. ink's live input
             // smoothing has already shaped the wet stroke on device; the
@@ -1803,7 +1860,27 @@ class DrawingSurface(context: Context) : View(context) {
                 changed = true
             }
         }
-        if (changed) sceneDirty = true
+        if (changed) requestEraseRaster()
+    }
+
+    /**
+     * Re-raster after newly hiding erased items, throttled so a fast sweep over
+     * many strokes doesn't trigger a full O(N) raster every frame. Leading edge:
+     * the first hit re-rasters immediately (the user sees ink vanish under the
+     * tip); rapid follow-up hits coalesce into a single trailing raster once the
+     * sweep pauses. Erased items stay hidden via [pendingErase] meanwhile.
+     */
+    private fun requestEraseRaster() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastEraseRasterAtMs >= SETTLE_RERASTER_MS) {
+            lastEraseRasterAtMs = now
+            removeCallbacks(settleRerasterRunnable)
+            sceneDirty = true
+            invalidate()
+        } else {
+            removeCallbacks(settleRerasterRunnable)
+            postDelayed(settleRerasterRunnable, SETTLE_RERASTER_MS)
+        }
     }
 
     private fun currentEraserRadiusScreenPx(): Float = when (strokeTool) {
@@ -1829,6 +1906,14 @@ class DrawingSurface(context: Context) : View(context) {
 
     /** Redraw the scene bitmap from [committedItems] under the current viewport. */
     private fun rasterizeScene() {
+        // Record the viewport this raster reflects so onDraw can blit-transform
+        // the result during a gesture, and the signature so [replayItems] can
+        // detect a no-op round-trip. Done up-front so the early empty return
+        // still updates them.
+        sceneRenderScale = viewport.scale
+        sceneRenderOffsetX = viewport.offsetX
+        sceneRenderOffsetY = viewport.offsetY
+        sceneSignature = itemsSignature(committedItems)
         val canvas = sceneCanvas ?: return
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
         if (committedItems.isEmpty()) return
@@ -1848,6 +1933,85 @@ class DrawingSurface(context: Context) : View(context) {
             drawItemWithLayerOpacity(canvas, item)
         }
         canvas.restore()
+    }
+
+    /**
+     * Append a freshly-committed [item] and, when safe, composite *only* that
+     * item onto the existing scene bitmap instead of re-rasterizing all N
+     * committed items. Falls back to a full raster ([sceneDirty]) whenever
+     * incremental compositing can't be proven correct (ordering, viewport, or a
+     * raster already pending). Shared by every commit path (ink, legacy ink,
+     * connector, path-pen, shape) so they stay in lockstep.
+     */
+    private fun appendCommitted(item: NoteItem) {
+        // Mirror the ViewModel's z-slot so the locally-appended item lands where
+        // the authoritative round-trip will place it. Keeping the order (and so
+        // [itemsSignature]) consistent lets [replayItems] skip the redundant
+        // re-raster; a mismatch only costs a full raster, never correctness. The
+        // original `item` (carrying its own zIndex) still goes to the VM via the
+        // commit site's strokeListener — the VM reassigns zIndex regardless.
+        val placed = item.copy(zIndex = provisionalZIndex(item))
+        committedItems = committedItems + placed
+        if (sortsOnTop(placed, committedItems, layerLookup) && compositeNewItem(placed)) {
+            sceneSignature = itemsSignature(committedItems)
+        } else {
+            sceneDirty = true
+        }
+        invalidate()
+    }
+
+    /**
+     * The zIndex the ViewModel will assign [item] on commit, derived from the
+     * committed set so the view's order matches without coupling to VM counters.
+     * Ink and highlighter live in separate z bands (highlighters negative so
+     * they stay under ink — see `NoteEditorViewModel.zIndexFor`); a freshly
+     * committed item tops its own band. When its band is empty we fall back to
+     * the item's own zIndex (a one-off raster if it doesn't match is harmless).
+     */
+    private fun provisionalZIndex(item: NoteItem): Int {
+        val highlighter = item.tool == StrokeRenderer.TOOL_HIGHLIGHTER
+        val bandMax = committedItems
+            .filter { (it.tool == StrokeRenderer.TOOL_HIGHLIGHTER) == highlighter }
+            .maxOfOrNull { it.zIndex }
+        return when {
+            bandMax != null -> bandMax + 1
+            // First-ever ink stroke matches the VM's nextInkZIndex (starts at 0).
+            !highlighter -> 0
+            else -> item.zIndex
+        }
+    }
+
+    /**
+     * Draw a single newly-committed [item] onto the scene bitmap under the
+     * current viewport, mirroring [rasterizeScene]'s transform and visibility
+     * filters. Returns `true` when the bitmap is now consistent with
+     * [committedItems] (item drawn, or correctly skipped because it's filtered
+     * out); `false` when a full re-raster is required instead.
+     */
+    private fun compositeNewItem(item: NoteItem): Boolean {
+        // A full raster is already pending, or the bitmap reflects a different
+        // viewport (mid-gesture) — let rasterizeScene handle it.
+        if (sceneDirty) return false
+        if (viewport.scale != sceneRenderScale ||
+            viewport.offsetX != sceneRenderOffsetX ||
+            viewport.offsetY != sceneRenderOffsetY
+        ) {
+            return false
+        }
+        val canvas = sceneCanvas ?: return false
+        // Same filters rasterizeScene applies — if the item wouldn't be drawn,
+        // the bitmap is already correct without touching it.
+        if (!layerLookup.isVisible(item)) return true
+        if (item.id in pendingErase) return true
+        if (item.id in tutorHiddenIds) return true
+        if (item.id in selectedIds) return true
+        if (item.id == editingTextId) return true
+        canvas.save()
+        canvas.translate(viewport.offsetX, viewport.offsetY)
+        canvas.scale(viewport.scale, viewport.scale)
+        drawItemWithLayerOpacity(canvas, item)
+        canvas.restore()
+        return true
     }
 
     private fun drawItemWithLayerOpacity(canvas: Canvas, item: NoteItem) {
@@ -2256,8 +2420,7 @@ class DrawingSurface(context: Context) : View(context) {
             baseWidthPx = baseWidthPx,
             payload = ConnectorCodec.encode(payload),
         )
-        committedItems = committedItems + item
-        sceneDirty = true
+        appendCommitted(item)
         strokeListener?.invoke(item)
     }
 
@@ -2501,10 +2664,8 @@ class DrawingSurface(context: Context) : View(context) {
             baseWidthPx = baseWidthPx,
             payload = PathCodec.encode(payload),
         )
-        committedItems = committedItems + item
-        sceneDirty = true
+        appendCommitted(item)
         strokeListener?.invoke(item)
-        invalidate()
     }
 
     private fun drawPathPenPreview(canvas: Canvas) {
@@ -2791,8 +2952,7 @@ class DrawingSurface(context: Context) : View(context) {
                 strokeStyle = if (paletteTool.isShape) shapeStrokeStyle else ShapeCodec.STROKE_STYLE_SOLID,
             ),
         )
-        committedItems = committedItems + item
-        sceneDirty = true
+        appendCommitted(item)
         strokeListener?.invoke(item)
         return true
     }
@@ -2866,6 +3026,14 @@ class DrawingSurface(context: Context) : View(context) {
 
     companion object {
         private const val TAG = "DrawingSurface"
+
+        /**
+         * Idle delay after the last pan/zoom move before re-rasterizing the
+         * scene crisply. The cached bitmap is blit-transformed until then, so
+         * the gesture stays smooth; ~90ms is below the perceptual threshold for
+         * the snap-to-crisp on settle.
+         */
+        private const val SETTLE_RERASTER_MS: Long = 90L
         const val DEFAULT_STROKE_WIDTH_PX = 4f
         const val DEFAULT_INK_COLOR = Color.BLACK
         const val STROKE_KIND = "stroke"
