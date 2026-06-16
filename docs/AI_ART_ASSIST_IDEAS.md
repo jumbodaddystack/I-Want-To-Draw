@@ -1,332 +1,395 @@
-# AI Art-Assist Ideas — features to help non-artists make excellent art
+# AI Art-Assist Implementation Plan
 
-Status: **partially built — see the reality check below** (updated 2026-06).
-Captured from the pen-size-zoom-scaling planning session, then split (2026-06)
-from the AndroidX Ink engine migration plan so this document can stay focused on
-user-facing AI art-assist improvements. These build on the AI integration that
-already ships, so each is incremental rather than a from-scratch system.
+Status: **reconciled with the app codebase as of 2026-06-16**.
 
-## Reality check (2026-06) — what the migration actually shipped vs. this plan
+This document supersedes the older brainstorm-style notes in this file. It keeps
+only the AI art-assist work that still makes sense for the app as it exists now,
+then breaks the roadmap into phased tasks that can be implemented over multiple
+sessions.
 
-The AndroidX Ink migration ran ahead and **inverted this document's own
-sequencing**. The plan called items 1–5 (non-ink, highest value-to-effort) the
-"next round" and N1–N4 (ink-dependent) "best after the migration." In practice
-the opposite happened: **all of N1–N4 / migration phases I0–I8 were built
-(headless)**, while the high-value *non-ink* first wave was largely skipped.
-Three facts every reader should hold:
+## 0. Codebase reality check
 
-1. **Built ≠ reachable.** Only **live beautify (N3/I5)** is wired into the editor
-   UI (`onStrokeBeautifyAccepted` in `NoteEditorScreen`). The other three
-   migration features — **select-similar/snap (N2/I7)**, **tutor/replay (N4/I8)**,
-   and the **AI brush designer (N1/I4, `designBrush`)** — exist **only as
-   `NoteEditorViewModel` methods with no Compose entry point**, and N2/N4 are also
-   gated **default-off behind the experimental ink flag**. A user cannot reach
-   them today. The remaining work for these is *UX surfacing*, not engine code.
-2. **The non-ink first wave is still unbuilt.** Idea **#2 (composition critique)**
-   and **#5 (palette / colour-harmony)** have **no AI implementation** (the
-   deterministic `VectorQualityScorer` and local `StyleTransfer` are not these).
-   **#3 (style presets)** and **#4 (text-to-vector scene)** are only *partially*
-   covered by the single-icon GENERATE path (`add_path`/`add_shape`, 17.5#1).
-   These were the cheapest, highest-payoff items and remain the best next round.
-3. **A cross-cutting trust gap blocks all of it.** The Vector Ink & AI UX Audit's
-   **Critical A1** finding — "AI edits are accepted *blind*; no on-canvas diff" —
-   applies to every edit-ops feature, *including* the new snap/tutor chips, which
-   ride the same `PendingEdit` / `AiEditPreviewBanner` surface. Shipping more
-   edit-ops features on top of a blind-accept surface compounds the risk; the
-   on-canvas visual diff (audit P0) should land before or alongside the next wave.
+### Already shipped and user-reachable
 
-Accuracy note: `NoteAiService`'s modes are `AskMode { ASK, EDIT, DESIGN_BRUSH }`.
-**GENERATE and REFINE are flags on EDIT** (`AskRequest.generate` / `.refine`),
-not separate pipelines — the "ASK / EDIT / GENERATE / REFINE" phrasing below is
-shorthand for those request shapes.
+- **Live beautify on pen lift** is wired into the editor. `DrawingSurface` exposes
+  `onStrokeBeautifyAccepted`, and `NoteEditorScreen` forwards that callback to
+  `NoteEditorViewModel.onStrokeBeautifyAccepted`.
+- **On-canvas AI edit diff preview is already built.** The previous plan treated
+  the UX audit's A1/P0 visual-diff gap as a blocker. That is now fixed: staged AI
+  edits render through `AiEditDiffOverlay` before Accept/Reject, with green added
+  items, red removed items, and amber modified items. The banner also shows the
+  same legend and partial-failure summary.
+- **Single-icon GENERATE and Make-real REFINE exist.** They are not separate
+  service modes; they are EDIT requests with `AskRequest.generate` and
+  `AskRequest.refine` flags.
+- **Auto-vectorize photo / AI trace exists.** `AiBitmapTracer` is present with an
+  AI-guided path and deterministic local fallback.
 
-## Existing stack these build on
+### Built headless but not yet productized
 
-- `NoteAiService` — ASK / EDIT / GENERATE / REFINE pipelines.
-- `edit-ops` schema via `EditOpsParser` — `transform`, `recolor`, `restyle`,
-  `replace_with_shape`, `smooth`, `simplify`, `merge_paths`, `add_path`,
-  `add_shape`, `delete`, `set_layer`, `group`.
-- `VectorCanvasJson` — compact JSON view of the canvas the model can read.
-- Vision input via `NoteRasterizer` (PNG); OCR fallback for non-vision models.
-- Multi-provider routing (`ApiClient` + OpenAI/Anthropic/Gemini adapters),
-  capability flags in `ModelCapabilities`.
-- Existing canned actions (`CannedEditPrompts`): AI clean-up, auto-shape,
-  simplify, flat-style, add-detail, recolor; plus "Make real" sketch refine.
+- **AI brush designer (N1)** has a service mode (`AskMode.DESIGN_BRUSH`), a
+  `designBrush(prompt, turnId)` ViewModel entry point, brush-spec parsing, and
+  preset persistence. It still lacks a Compose entry point, prompt sheet, preview
+  stroke, and save/apply flow.
+- **Select-similar + snap suggestions (N2 / idea #8)** exist in the ViewModel as
+  `selectSimilarTo`, `proposeSnaps`, and `aiRankSelection`. They are gated behind
+  `inkAuthoring` and have no visible magic-wand/snap UI entry point.
+- **Draw-with-me tutor + replay (N4 / idea #7)** exists as `startDrawWithMe`,
+  `buildReplayTimeline`, `TutorGuide`, and `TutorSession`. It is also gated behind
+  `inkAuthoring` and lacks a start UI, tutor controls, replay playhead UI, and
+  export UX.
 
-### Current inking engine (custom, mature — what ink would touch)
+### Still missing or only partially covered
 
-The drawing core is hand-built and production-grade. Any ink adoption has to
-respect these as the incumbents:
+- **Composition critique** is still missing. `VectorQualityScorer` is not a
+  substitute: it scores vector XML readiness, not a user's hand-drawn note via
+  vision with beginner-friendly guidance.
+- **Palette / color-harmony assistant** is still missing. The `recolor` edit-op
+  and user-chosen `aiRecolorPrompt()` exist, but no feature proposes harmonious
+  palettes.
+- **Named style preset restyling** is partial. Local `StyleTransfer` copies style
+  from one item to another, and GENERATE can use style-reference icons when
+  authoring new icons. There is no user-facing “restyle this selection as flat /
+  line-art / isometric” flow.
+- **Prompt-to-vector scene generation** is partial. The app can generate a single
+  icon/vector from a prompt, but not a small multi-object scene with grouped,
+  relatively placed elements and a layout plan.
+- **Conversational editing context** remains limited. The AI sheet presents a
+  conversation and lets the user re-scope subsequent turns, but edit requests are
+  still effectively one-shot unless explicit history packing is added.
 
-- **Input capture** — `DrawingSurface` (plain `View`): `MotionEvent` history
-  iteration for S-Pen oversampling, screen↔world transform via
-  `ViewportController`, one-frame look-ahead from
-  `androidx.input:motionprediction`.
-- **Rendering** — `StrokeRenderer.drawStrokePath` (quadratic-Bézier spline
-  between sample midpoints, per-segment variable width/alpha); off-screen
-  baking via `NoteRasterizer`.
-- **Tool dynamics** — `ToolDynamics` maps pressure/tilt → width/alpha per tool
-  (pen / pencil / highlighter / marker).
-- **Brushes** — `BrushPreset` (color, width, opacity, taper, jitter,
-  pressure-curve, texture) + procedural `TextureRegistry`
-  (smooth/charcoal/watercolor/marker ALPHA_8 tiles).
-- **Geometry** — `HitTest` (point-to-segment, AABB), `LassoController`
-  (polygon containment), area/stroke eraser, `ShapeRecognizer` (line / rect /
-  ellipse / polygon fit on hold-to-snap), `InkBeautifier` (RDP + Chaikin),
-  `StrokeOutliner` (variable-width outline for SVG export).
-- **Storage** — `StrokeCodec` v1 `[x,y,pressure,tilt]` / v2
-  `[x,y,pressure,tilt,timestamp]` little-endian binary in `NoteItem.payload`
-  (Room). Timestamps (v2) sync strokes to audio recordings.
+## 1. Implementation principles
 
-## Ideas (roughly easiest → most ambitious)
+1. **Prefer surfacing existing headless work before building new engines.** N1,
+   N2, and N4 already paid most of their data-path cost.
+2. **Every canvas mutation must stage as `PendingEdit`.** New feature work should
+   use the existing `EditPreviewController` + `AiEditDiffOverlay` +
+   `AiEditPreviewBanner` accept/reject path instead of committing directly.
+3. **Keep non-mutating AI separate from edit-ops.** Critiques, titles, tags, and
+   alt text should return structured prose/metadata and should not pretend to be
+   edits unless there is a concrete op the user can preview.
+4. **Do not make AndroidX Ink default-on from an art-assist feature.** Features
+   already gated by `inkAuthoring` can be surfaced as experimental, or receive a
+   non-ink fallback in a separate task.
+5. **Design for multiple short sessions.** Each phase below has a shippable end
+   state and a task tracker.
 
-Status legend: ✅ shipped to users · 🟡 built but not user-reachable (no UI, or
-default-off, or partial) · ❌ not built.
+## 2. Phased roadmap and task tracker
 
-1. ✅ **"Beautify my stroke" live assist** — as the pen lifts, offer a one-tap
-   cleanup that snaps wobbly lines to clean shapes. Extends the existing
-   `smooth` / `AUTO_SHAPE` / `replace_with_shape` ops. **Shipped (I5/N3):**
-   `StrokeSmoothing` + `InkBeautifier` ghost with tap-to-accept, palette toggle,
-   wired through `onStrokeBeautifyAccepted`. The only first-wave idea actually
-   reachable by a user.
-2. ❌ **Guided composition / layout critique (ASK + vision)** — "How can I improve
-   this?" returns concrete, beginner-friendly suggestions (balance, spacing,
-   contrast), optionally surfaced as applicable edit-ops. **Not built.** The
-   deterministic `VectorQualityScorer` (vector-tuneup tool) is *not* this — it
-   scores XML, doesn't critique a hand-drawn canvas. **Highest-value gap.**
-3. 🟡 **Reference-driven style presets** — extend GENERATE's style-reference
-   gallery so the user picks a style ("flat", "line-art", "isometric") and the AI
-   restyles the selection to match. **Partial:** the GENERATE style-reference
-   gallery exists (17.5#1) but only *authors new* icons in a reference style;
-   *restyling an existing selection to match a chosen style* is unbuilt. Local
-   `StyleTransfer` does copy/paste of one item's style, not a named-style preset.
-4. 🟡 **Text-to-vector scene/icon from a prompt** — broaden GENERATE beyond single
-   icons to small multi-element scenes via `add_path` / `add_shape`. No
-   image-generation dependency; output stays editable vectors. **Partial:**
-   single-icon GENERATE ships (17.5#1); multi-element *scenes* (layout, grouping,
-   relative placement of several objects) are unbuilt.
-5. ❌ **Palette & color-harmony assistant** — AI suggests a cohesive palette and
-   applies it via `recolor`. Big win for non-artists who struggle with color.
-   **Not built.** `recolor` exists as an op and `aiRecolorPrompt()` recolors to a
-   *user-chosen* color, but nothing *proposes a harmonious palette*.
-6. ✅ **Auto-vectorize a photo (AI-guided trace)** — combine the existing
-   `AiBitmapTracer` with an AI pass that picks tracing parameters and cleans the
-   result into editable strokes. **Shipped:** `AiBitmapTracer` does vision
-   raster→vector with a deterministic local-tracer fallback (Phase 5b).
-7. 🟡 **Step-by-step "draw with me" tutor** — AI breaks a subject into construction
-   shapes and ghosts them on a guide layer for the user to trace (`add_shape` on
-   a dedicated layer). **Built headless (I8/N4) but unreachable:** `TutorGuide` /
-   `TutorSession` / `startDrawWithMe` are ViewModel-only, gated default-off, **no
-   UI entry point and no start button**. Replay's frame-by-frame animation loop is
-   also still unwired.
-8. 🟡 **Smart constraints / snapping suggestions** — AI proposes alignment/symmetry
-   it can enforce (align edges, mirror), surfaced as edit-ops the user accepts.
-   **Built headless (I7/N2) but unreachable:** `ConstraintSnap` + `proposeSnaps` /
-   `selectSimilarTo` are ViewModel-only with **no UI entry point**. (The palette's
-   deterministic grid-snap toggle is a *different*, older feature — not the AI
-   proposal engine.)
-
-## Sequencing notes (revised 2026-06 — supersedes the original recommendation)
-
-The original advice ("items 1–5 first, 6–8 later") was **not** what got built —
-see the reality check at the top. Given today's state, the recommended order is:
-
-- **Wave 1 — close the trust gap, then the unbuilt high-value first wave.** Land
-  the on-canvas visual diff (UX audit P0/A1) so *any* edit-ops feature can be
-  accepted with confidence, then build the two genuinely-missing high-payoff
-  items: **#5 palette/colour-harmony** and **#2 composition critique** (both lean
-  entirely on the shipped vision-ASK + `recolor`/edit-ops infra, no ink needed).
-- **Wave 2 — surface what's already built.** The expensive engine work for
-  **N1 brush designer**, **N2 select-similar/snap**, and **N4 tutor/replay** is
-  done and tested headless; they just need *UI entry points* (and, for N2/N4, the
-  default-off ink-flag decision). This is comparatively cheap UX work with
-  outsized payoff — finished features no user can currently reach.
-- **Wave 3 — finish the partials.** Extend **#3** to restyle-an-existing-selection
-  and **#4** to multi-element scenes; both build on the shipped GENERATE path.
-- **Cross-cutting:** the device-only I2 parity gate still keeps the ink engine
-  (and anything gated behind it) default-off. Surfacing N2/N4 either waits on that
-  flip or needs a non-ink code path.
-
-## Dependency note: AndroidX Ink migration
-
-Some ideas become substantially better after the AndroidX Ink migration,
-especially live beautify, mesh-backed selection/snapping, stroke replay,
-draw-with-me tutor mode, and AI brush design. However, the first wave of AI
-art-assist features — guided critique, palette assistance, style presets, and
-text-to-vector generation — can proceed on the current drawing engine.
-
-See [`ANDROIDX_INK_MIGRATION_PLAN.md`](ANDROIDX_INK_MIGRATION_PLAN.md) for the
-engine migration plan, including `InkInterop`, low-latency authoring, brush
-mapping, mesh-backed geometry, storage decisions, and default-on parity gates.
+Legend: `[ ]` not started, `[~]` in progress, `[x]` done, `[!]` blocked/needs a
+product decision.
 
 ---
 
-# Ink-enhanced AI feature candidates
+## Phase 1 — Re-baseline and harden the shared AI edit surface
 
-These are product ideas that should remain in the AI art-assist roadmap, but
-that either depend on or become more compelling after the AndroidX Ink migration.
-Each names the Ink capability it leans on and how it threads through the
-existing AI pipeline.
+**Goal:** make sure all future AI art-assist features use the already-shipped
+preview/diff infrastructure consistently.
 
-> **Build status (2026-06):** N1–N4 were all **built headless** during the ink
-> migration (phases I4–I8 — see `ANDROIDX_INK_MIGRATION_PLAN.md`). What's missing
-> is the *last mile to the user*: **N3 (beautify) is the only one wired into the
-> UI and reachable today.** **N1 (brush designer), N2 (select-similar/snap), and
-> N4 (tutor/replay)** have working `NoteEditorViewModel` methods (`designBrush`,
-> `selectSimilarTo`/`proposeSnaps`/`aiRankSelection`,
-> `startDrawWithMe`/`buildReplayTimeline`/`tutorNext`) but **no Compose entry
-> points**, and N2/N4 are also default-off behind the experimental ink flag.
-> Treat the remaining N1/N2/N4 work as **UX surfacing**, not engine work.
+**Why first:** the old plan incorrectly listed the visual diff as missing. Before
+adding more buttons, confirm the current diff works for AI-authored edits,
+locally-authored snap/tidy edits, and generated geometry.
 
+### Tasks
 
-### N1. AI brush designer (text → brush)
-- **What:** "Make me a dry-gouache brush" / "an inky brush pen with taper" →
-  the model emits brush parameters; we build a `Brush`/`BrushFamily` and save it
-  as a new user-scope `BrushPreset`. Output is a **reusable, editable brush**,
-  not a one-off render.
-- **Ink:** `ink-brush` 1.1 programmatic `Brush.Builder` / `BrushFamily`,
-  `BrushPaint.TextureLayer`, randomized behaviors; `BrushFamily.decode()` for
-  shareable brush files.
-- **Pipeline:** new `NoteAiService` mode (`DESIGN_BRUSH`) returning a small
-  brush-spec JSON (validated like `edit-ops`); adapter maps spec → ink brush →
-  `BrushPreset`. No canvas mutation, so it's low-risk to ship.
-- **Sequencing:** split this into (a) a deterministic `BrushPreset → Brush`
-  adapter using stable APIs, (b) an isolated experimental path for 1.1
-  programmable brushes, and only then (c) the AI brush-designer UI. That keeps an
-  alpha API out of the core authoring migration.
-- **Why now:** the public brush API (1.1) is what makes text→brush tractable
-  without reverse-engineering a proto, but it remains optional until stable.
+- [ ] Add/verify JVM coverage for `AiEditDiffOverlay`-adjacent behavior at the
+  simulation layer: added, removed, modified, and skipped edit buckets.
+- [ ] Add a small UI smoke test or screenshot test for the banner legend counts
+  and partial-failure message, if the project test stack supports it.
+- [ ] Audit every existing art-assist entry point and document whether it stages
+  `PendingEdit`, mutates locally, or only returns prose.
+- [ ] Ensure locally-authored snap/tidy docs use `stageLocalEdit` so they receive
+  the same visual diff as model-authored edits.
+- [ ] Update stale comments in `NoteEditorScreen` that still describe the visual
+  diff as a future follow-up.
 
-### N2. Magic-wand "select similar" + constraint/snap engine
-- **What:** (a) tap a stroke → find geometrically/stylistically similar strokes
-  for batch `recolor` / `restyle` / `delete`; (b) AI proposes
-  alignment / symmetry / even-spacing and the engine **enforces** it (idea #8).
-- **Ink:** `ink-geometry` `PartitionedMesh` intersection/coverage for "similar
-  shape / overlapping / inside region"; lasso→mesh for the selection itself.
-- **Pipeline:** geometry runs locally (fast, offline); AI optionally ranks
-  "which of these belong together" and emits `group` / `transform` / `recolor`
-  edit-ops the user accepts. Snapping surfaces as accept/decline chips, same UX
-  as existing AI edit suggestions.
-- **Prerequisite:** add a mesh/cache/index layer before product UX: per-stroke
-  mesh cache, invalidation on transform/restyle/delete, bounding-box or spatial
-  prefilter, and a reliable mapping from mesh hits back to note item IDs/layers.
+### Acceptance criteria
 
-### N3. Live beautify via ink smoothing  (upgrade of idea #1)
-- **What:** on pen-lift, offer a one-tap clean snap. ink's input smoothing +
-  our `InkBeautifier` (RDP + Chaikin) + `ShapeRecognizer` combine for a
-  noticeably cleaner result than today.
-- **Ink:** `ink-authoring` input smoothing on the live batch; optionally render
-  the candidate via `CanvasStrokeRenderer` for a crisp preview.
-- **Pipeline:** purely local for the geometric clean; AI only consulted for the
-  ambiguous "did you mean this shape?" cases (reuses `AUTO_SHAPE` /
-  `replace_with_shape`). Ghost-preview the beautified stroke; tap to accept.
-
-### N4. Stroke replay / "draw with me"  (supports ideas #7)
-- **What:** replay drawing order as an animation — timelapse export, and a
-  **tutor** mode that ghosts construction strokes for the user to trace.
-- **Ink:** `StrokeInputBatch` **timestamps** drive ordered playback; ink
-  rendering animates partial strokes; ties into our v2 codec timestamps already
-  synced to audio.
-- **Pipeline:** AI (GENERATE) produces the construction strokes on a dedicated
-  guide layer; replay plays them back at teaching pace. Export reuses
-  `NoteRasterizer` frames → video/GIF.
-- **Hard part:** generated stroke quality is the risk, not partial-stroke
-  rendering. The tutor needs simple construction primitives, sensible stroke
-  order, guide-layer editability, low clutter, and controls to step / skip /
-  redo instructions.
-
-## AI feature sequencing recommendation (original — kept for context)
-
-> ⚠️ **Superseded.** This was the *plan*; the reality check and revised
-> "Sequencing notes" above describe what actually shipped and what to do next.
-> The migration built the third bullet ("best after Ink") in full and skipped
-> most of the first bullet ("can proceed before Ink").
-
-- **Can proceed before AndroidX Ink:** guided composition/layout critique,
-  palette & color-harmony assistant, reference-driven style presets, and
-  text-to-vector scene/icon generation.
-- **Can start on the current engine, then improve with Ink:** live beautify via
-  existing `InkBeautifier` / `ShapeRecognizer`, later upgraded with Ink input
-  smoothing and rendering previews.
-- **Best after the Ink migration foundation:** AI brush designer,
-  mesh-backed select-similar/snapping, stroke replay, and draw-with-me tutor.
+- AI EDIT, GENERATE, REFINE, and locally-staged snap/tidy all preview through the
+  same accept/reject surface.
+- The user can tell what will be added, removed, and modified before accepting.
+- No new AI art-assist feature bypasses `PendingEdit` for canvas mutation.
 
 ---
 
-# New AI ideas (2026-06 brainstorm)
+## Phase 2 — Ship palette & color-harmony assistant
 
-Fresh candidates beyond the original eight, grounded in the current codebase
-(`NoteAiService`, the `edit-ops` pipeline, vision/OCR, audio-synced v2 strokes,
-multi-provider routing). Grouped by how much new infrastructure they need.
+**Goal:** help non-artists choose and apply cohesive colors.
 
-## Tier A — small, leans entirely on shipped infra
+**MVP behavior:** user selects strokes/shapes or uses whole note scope, taps
+“Palette help”, chooses a scheme type, and receives 3–6 swatches plus an optional
+previewable `recolor` batch.
 
-- **B1. Palette & colour-harmony assistant (idea #5, made concrete).** Extract
-  the selection's current colours, ask the model (or a local colour-theory pass)
-  for a cohesive scheme — complementary / analogous / triadic / monochrome — and
-  apply it as a batch `recolor`. Preview as before/after swatch chips. This is the
-  single highest payoff-to-effort item still unbuilt; everything it needs
-  (`recolor`, `VectorCanvasJson`, the pending-edit chip surface) already ships.
-- **B2. Composition critique that yields *actions*, not prose (idea #2).** A
-  vision-ASK "how can I improve this?" that returns a short, structured list of
-  suggestions, each with an *optional* applicable edit-op (e.g. "align these three
-  icons" → `transform`, "thin the outline" → `restyle`) surfaced as the same
-  accept/decline chips as AI edits. Reuses the N2/I7 `PendingEdit` plumbing.
-- **B3. Auto-title & auto-tag a note/icon.** A cheap text-only ASK over the OCR
-  transcript (and, for icons, the `VectorCanvasJson`) that proposes a title and
-  2–4 tags, dropped straight into the existing `note_tags` table (17.1). Low cost,
-  high organisational payoff; no canvas mutation.
-- **B4. "Explain / describe this drawing" → alt-text.** Vision-ASK that emits a
-  one-sentence description, stored as accessibility alt-text on PNG/SVG export.
-  Tiny, and the only accessibility-facing AI feature.
-- **B5. Tidy-pass smart defaults.** `NoteTidy` (simplify + grid-snap + merge)
-  already exists locally; add an AI pre-step that *chooses* the tidy parameters
-  (which strokes are shapes, sensible tolerance) instead of fixed constants.
+### Tasks
 
-## Tier B — moderate, one new mode or surface
+- [ ] Add a structured palette response contract, e.g. `PaletteSuggestion` with
+  scheme name, swatches, rationale, and optional id-to-color assignments.
+- [ ] Add prompt text to ask the model for beginner-friendly color harmony using
+  current canvas colors from `VectorCanvasJson` and, when available, the raster
+  preview.
+- [ ] Add a local color-theory fallback for simple analogous/complementary/triadic
+  palettes so the feature can still suggest swatches when AI is unavailable.
+- [ ] Add a ViewModel entry point such as `suggestPalette(scope, scheme)` that can
+  either return swatches only or stage `recolor` edit-ops.
+- [ ] Add UI in the AI sheet or a compact art-assist menu: scheme chips,
+  swatches, “Preview recolor”, “Apply”, and “Copy palette”.
+- [ ] Ensure recolor preview goes through `PendingEdit` and `AiEditDiffOverlay`.
+- [ ] Add tests for parser validation, fallback palette generation, and recolor
+  op construction.
 
-- **B6. Conversational multi-turn editing (closes UX audit A7).** Pack prior
-  turns into later requests so "make it bigger" → "no, just the circle" → "now
-  blue" threads. Today every turn is one-shot. Pairs with re-scoping the frozen
-  selection (audit A6). The chat-bubble UI already *looks* conversational.
-- **B7. AI brush-designer UI (finishes N1).** The `designBrush` data path is
-  done; add a prompt sheet + live preview stroke so "make me a dry-gouache brush
-  with soft taper" produces a saved `BrushPreset`. Mirror the existing
-  colour-picker / brush-sheet patterns. Pure surfacing of finished work.
-- **B8. Diagram cleanup.** Recognise box-arrow-text clusters as a diagram and
-  propose: align boxes to a grid, normalise box sizes, straighten/re-route
-  connectors, even spacing. Composes `ShapeRecognizer` + `ConstraintSnap` (built)
-  + the connector kind, surfaced as edit-op chips.
-- **B9. Style-consistency enforcer across an icon set.** Over a multi-icon
-  selection, detect inconsistent stroke weights / corner radii / palette and
-  propose a normalising `restyle` batch. Builds directly on `selectSimilarTo`
-  (N2, built) — give that orphaned feature a real product home.
-- **B10. AI flat-fill ("colour this in").** Given line art, detect enclosed
-  regions and propose flat fills (palette from B1), landing as `add_shape` /
-  filled `add_path` behind the strokes. Turns outline sketches into finished art.
+### Acceptance criteria
 
-## Tier C — ambitious, new pipeline or dependency
+- A user can get a palette suggestion without changing the canvas.
+- Applying the palette is previewable and rejectable.
+- Existing colors and locked layers are respected.
 
-- **B11. Narrated timelapse.** v2 strokes already carry audio-synced timestamps
-  and `ReplayTimeline`/`TimelapseFramePlan` are built. Transcribe the recorded
-  audio, align it to the stroke timeline, and export a timelapse with captions /
-  voiceover — a genuinely novel artifact from infra that already exists.
-- **B12. Cross-note semantic search & "find similar art."** Embed OCR text and/or
-  rasterised thumbnails; let the user search notes by meaning or find visually
-  similar icons. Bigger lift (embeddings store, a provider that exposes
-  embeddings) but a strong differentiator for a growing library.
-- **B13. Reference-image → palette / style.** Drop in a photo; extract a palette
-  (feeds B1) and/or a descriptive style the GENERATE/restyle path can target —
-  bridges the shipped `AiBitmapTracer` ingestion with B1/idea #3.
-- **B14. Variations / "show me three."** For GENERATE and "Make real" (REFINE),
-  return 2–3 alternates side-by-side so the user picks rather than re-rolling one
-  at a time. Mostly an orchestration + placement-layout change over shipped modes.
+---
 
-## Cross-cutting prerequisite (do this first)
+## Phase 3 — Ship guided composition / layout critique
 
-**On-canvas visual diff for AI edits (UX audit P0 / A1).** Every edit-ops
-feature — shipped and proposed — currently commits *blind* (the banner shows only
-counts; the `added`/`removed`/`modified` lists are computed but never drawn).
-This is the highest-leverage AI investment in the app: it raises trust in *all*
-of the above at once, and the simulation data already exists. Land it before
-piling more edit-ops features onto a blind-accept surface.
+**Goal:** answer “How can I improve this?” with concrete, beginner-friendly
+feedback and optional previewable actions.
+
+**MVP behavior:** the feature returns 3–5 suggestions. Each suggestion has a
+plain-language reason, confidence/effort label, and optionally an action button
+that stages edit-ops such as align, scale, simplify, restyle, or recolor.
+
+### Tasks
+
+- [ ] Define a structured critique schema: `summary`, `suggestions[]`,
+  `principle`, `why`, `optionalEditOps`, and `safetyNotes`.
+- [ ] Add a critique prompt that uses vision when available and falls back to
+  `VectorCanvasJson`/OCR when not.
+- [ ] Add parser/validator logic that tolerates prose-only suggestions and rejects
+  unsafe or unparseable edit-op payloads.
+- [ ] Add a ViewModel entry point such as `requestCompositionCritique(scope)`.
+- [ ] Add UI to display suggestions as cards with “Preview fix” only when an
+  edit-op is valid.
+- [ ] Route “Preview fix” through the existing staged edit surface.
+- [ ] Add tests for prose-only critique, mixed valid/invalid actions, and locked
+  layer handling.
+
+### Acceptance criteria
+
+- The feature is useful even when no edit-op is returned.
+- Suggested edits are previewed on canvas and can be rejected.
+- The model cannot silently apply broad layout changes.
+
+---
+
+## Phase 4 — Surface AI brush designer (N1)
+
+**Goal:** turn the existing `DESIGN_BRUSH` data path into a user-facing brush
+creation flow.
+
+**MVP behavior:** user opens a brush designer sheet, types “dry gouache with soft
+edges”, sees a sample stroke, saves the generated brush as a user preset, and can
+select it from the brush palette.
+
+### Tasks
+
+- [ ] Add a Brush Designer entry point from the brush palette or AI sheet.
+- [ ] Add prompt input with example chips: “inky brush pen”, “dry gouache”,
+  “soft marker”, “scratchy pencil”.
+- [ ] Wire the UI to `NoteEditorViewModel.designBrush(prompt, turnId)`.
+- [ ] Show streaming/progress state in the sheet.
+- [ ] Render a deterministic preview stroke for the returned `BrushPreset`.
+- [ ] Add save/cancel controls and confirm the preset appears in the palette.
+- [ ] Add validation UX for unsupported spec fields or parser failure.
+- [ ] Add tests for brush-spec parsing, preset persistence, and duplicate names.
+
+### Acceptance criteria
+
+- No canvas mutation occurs during brush design.
+- Saved brushes are reusable, editable presets.
+- Failure states are understandable and do not leave partial presets behind.
+
+---
+
+## Phase 5 — Surface select-similar and snap suggestions (N2 / idea #8)
+
+**Goal:** expose the existing magic-wand and constraint-snap engines safely.
+
+**MVP behavior:** with the experimental ink engine enabled, the user can tap a
+magic-wand action for a selected stroke to select similar strokes, then preview
+snap/alignment suggestions as normal staged edits.
+
+### Tasks
+
+- [ ] Decide product gating: experimental-only while `inkAuthoring` is off by
+  default, or add a non-ink fallback for simple bounds-based selection/snapping.
+- [ ] Add a visible Magic Wand action when a single stroke is selected and
+  `inkSelectionToolsEnabled()` is true.
+- [ ] Wire the action to `selectSimilarTo(itemId)` and update selection chrome.
+- [ ] Add threshold/strictness UI only after the one-tap default feels good.
+- [ ] Add “Snap selection” or “Align suggestion” action for multi-selection when
+  `inkSelectionToolsEnabled()` is true.
+- [ ] Wire snap action to `proposeSnaps(selection)`.
+- [ ] Optionally add “Ask AI to group/refine selection” wired to
+  `aiRankSelection(extraInstruction)`.
+- [ ] Add UI copy explaining why the controls are unavailable when ink is off.
+- [ ] Add tests for selection expansion, locked layers, and staged snap previews.
+
+### Acceptance criteria
+
+- Select-similar changes selection only; it does not mutate the canvas.
+- Snap suggestions stage as previewable `PendingEdit` transforms.
+- Hidden experimental gating is visible and understandable to users.
+
+---
+
+## Phase 6 — Surface draw-with-me tutor and replay (N4 / idea #7)
+
+**Goal:** let users learn from generated construction guides and replay existing
+strokes.
+
+**MVP behavior:** user enters “draw a fox”, reviews generated guide strokes in the
+normal diff preview, accepts them onto a ghost guide layer, and steps through the
+construction with Next/Back/Skip/Redo controls.
+
+### Tasks
+
+- [ ] Decide product gating: experimental-only behind `inkAuthoring`, or split a
+  non-ink guide-layer MVP from ink replay/export work.
+- [ ] Add a “Draw with me” entry point in the AI sheet or art-assist menu.
+- [ ] Wire prompt submission to `startDrawWithMe(prompt)`.
+- [ ] Add tutor controls bound to `tutorNext`, `tutorBack`, `tutorSkip`,
+  `tutorRedo`, and `endTutor`.
+- [ ] Ensure `tutorHiddenIds` is observed by the canvas so unrevealed guide items
+  stay hidden.
+- [ ] Add a replay playhead UI for `buildReplayTimeline()`.
+- [ ] Defer video/GIF export until replay playback is shippable.
+- [ ] Add tests for guide-layer creation, accept flow, step transitions, and
+  hidden-item filtering.
+
+### Acceptance criteria
+
+- Generated tutor geometry is previewed before it becomes a guide layer.
+- Guide strokes are editable and visually distinct from user strokes.
+- Tutor controls are recoverable: Back/Skip/Redo/End never corrupt the note.
+
+---
+
+## Phase 7 — Finish named style preset restyling
+
+**Goal:** let users restyle existing selections into named visual styles, not just
+copy local style or generate new icons from references.
+
+**MVP behavior:** user selects items, chooses “Flat icon”, “Line art”,
+“Isometric”, or “Sticker”, previews restyle ops, and accepts/rejects.
+
+### Tasks
+
+- [ ] Define a small curated preset catalog with prompt text and constraints for
+  each style.
+- [ ] Add style preset chips to the AI sheet, selection toolbar, or art-assist
+  menu.
+- [ ] Route presets through EDIT mode with selection scope and `restyle`,
+  `recolor`, `smooth`, `simplify`, and `replace_with_shape` ops allowed.
+- [ ] Keep `StyleTransfer` as a separate local “copy style from selection” tool;
+  do not conflate it with named AI presets.
+- [ ] Add validation to discourage adding new subject matter during restyle.
+- [ ] Add tests for preset prompt construction and valid/invalid restyle docs.
+
+### Acceptance criteria
+
+- Existing geometry remains recognizably the same subject.
+- Presets are previewable and rejectable.
+- Style-copy and AI named presets are clearly different in UI copy.
+
+---
+
+## Phase 8 — Expand prompt-to-vector from icons to small scenes
+
+**Goal:** broaden GENERATE from a single icon to a compact editable scene made of
+multiple grouped elements.
+
+**MVP behavior:** user prompts “small campsite at night”; the model returns a
+scene plan with groups/layers and editable `add_path`/`add_shape` geometry that
+lands inside the current viewport or selected frame.
+
+### Tasks
+
+- [ ] Add a `generateScene` request variant or prompt flag over existing EDIT +
+  `generate=true` plumbing.
+- [ ] Extend generation prompt constraints for multi-object layout, grouping,
+  relative placement, and layer names.
+- [ ] Ensure generated object ids map cleanly to groups/layers in the edit-op
+  parser and preview simulation.
+- [ ] Add placement UI: current viewport, selected frame, or icon bounds.
+- [ ] Add optional “simple / detailed” complexity chips.
+- [ ] Add tests for grouped add ops, placement transforms, and scene-size limits.
+
+### Acceptance criteria
+
+- Scenes remain editable vectors, not raster images.
+- Generated geometry is bounded and does not appear far off-canvas.
+- The preview clearly shows all added elements before acceptance.
+
+---
+
+## Phase 9 — Metadata and accessibility helpers
+
+**Goal:** add low-risk, non-mutating AI helpers that improve organization and
+exports.
+
+### Candidate tasks
+
+- [ ] Auto-title and auto-tag notes/icons from OCR, `VectorCanvasJson`, and/or
+  raster preview.
+- [ ] Generate alt text / description for PNG and SVG export.
+- [ ] Add settings for auto-suggest vs manual-trigger behavior.
+- [ ] Store generated metadata in existing note/tag/export metadata structures;
+  add migrations only if no suitable fields exist.
+- [ ] Add tests for title/tag validation, duplicate tags, and export metadata.
+
+### Acceptance criteria
+
+- Metadata suggestions never alter canvas geometry.
+- Users can accept, edit, or discard suggested text.
+- Exported alt text is short, accurate, and optional.
+
+---
+
+## Phase 10 — Longer-horizon AI art-assist ideas
+
+Defer these until the core roadmap above is stable:
+
+- **Conversational multi-turn editing:** pack previous turns and edit outcomes so
+  “make it bigger”, “no, just the circle”, and “now blue” resolve correctly.
+- **Diagram cleanup:** recognize boxes/arrows/text and use existing snapping,
+  connector routing, and restyle ops to normalize diagrams.
+- **Style consistency across an icon set:** detect inconsistent stroke weights,
+  corner radii, and palettes across selected icons.
+- **AI flat-fill / color-this-in:** detect enclosed regions in line art and add
+  filled shapes behind strokes.
+- **Narrated timelapse:** align audio transcript/captions to replay timelines.
+- **Semantic art search:** embeddings for OCR text and visual thumbnails.
+- **Reference-image palette/style:** extract palette and style descriptors from a
+  photo to feed palette assistance and style presets.
+- **Variations / show me three:** orchestrate multiple GENERATE/REFINE candidates
+  side-by-side for user selection.
+
+## 3. Suggested session slicing
+
+Use this sequence for multi-session implementation:
+
+1. **Session A:** Phase 1 audit/comment fixes and tests.
+2. **Session B:** Phase 2 palette response contract + local fallback + parser
+   tests.
+3. **Session C:** Phase 2 palette UI and staged recolor preview.
+4. **Session D:** Phase 3 critique schema + prompt/parser tests.
+5. **Session E:** Phase 3 critique UI and preview-action cards.
+6. **Session F:** Phase 4 brush designer UI over existing `designBrush` path.
+7. **Session G:** Phase 5 magic-wand/snap UI over existing headless N2 path.
+8. **Session H:** Phase 6 tutor start/step UI over existing headless N4 path.
+9. **Session I:** Phase 7 named style presets.
+10. **Session J:** Phase 8 scene generation.
+11. **Session K:** Phase 9 metadata/accessibility helpers.
+
+## 4. Out-of-scope for this plan
+
+- Replacing the drawing engine or flipping AndroidX Ink default-on.
+- Raster image generation as the primary output for these features.
+- Any feature that commits canvas changes without a previewable edit-op or an
+  explicit non-canvas metadata confirmation.
