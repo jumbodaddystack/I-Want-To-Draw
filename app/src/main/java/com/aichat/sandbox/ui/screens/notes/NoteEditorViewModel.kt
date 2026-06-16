@@ -4552,12 +4552,19 @@ class NoteEditorViewModel @Inject constructor(
         // [EditorActionCodec.encode] applies the 256 KB cap; if both stacks
         // wind up empty we store `null` so a never-edited note doesn't carry
         // an empty `{schema:1,past:[],future:[]}` blob forever.
-        val undoJson = EditorActionCodec.encode(past.toList(), future.toList())
-        // Persist the geometry bounds the Note model reserves for thumbnails /
-        // the icon list's size readout. These were never written, so reopened
-        // icons showed a blank "—" dimension. Fall back to the existing values
-        // (rather than collapsing to 0,0,0,0) when the note has no geometry.
-        val contentBounds = com.aichat.sandbox.data.notes.NoteRasterizer.computeBounds(items.toList())
+        // Snapshot the in-memory state on the caller's (main) thread, then run
+        // the CPU-heavy serialization + per-stroke bounds decode off the main
+        // thread. Previously both ran on [viewModelScope]'s main dispatcher, so
+        // an autosave a few seconds after drawing decoded every stroke on the UI
+        // thread and showed up as a stutter. The copies make the off-thread work
+        // safe (no concurrent reads of the live [items] list / undo deques).
+        val itemsSnapshot = items.toList()
+        val pastSnapshot = past.toList()
+        val futureSnapshot = future.toList()
+        val (undoJson, contentBounds) = withContext(Dispatchers.Default) {
+            EditorActionCodec.encode(pastSnapshot, futureSnapshot) to
+                com.aichat.sandbox.data.notes.NoteRasterizer.computeBounds(itemsSnapshot)
+        }
         // Persist the viewport for icons so reopening restores the exact view
         // (offset + zoom). Notes leave these null and keep their fit-on-open /
         // default behaviour. Falls back to the existing stored values when the
@@ -4579,7 +4586,7 @@ class NoteEditorViewModel @Inject constructor(
         // FK invariants stay sound across the save.
         repository.saveNoteWithLayers(
             note = toPersist,
-            items = items.toList(),
+            items = itemsSnapshot,
             layers = _layers.value,
         )
         // Sub-phase 8.1 — flush the frame list. Lives in its own table to
