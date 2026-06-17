@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Sub-phase 6.7 image insert.
          API 33+ uses the photo picker (PickVisualMedia) which needs no
          permission; declaring READ_MEDIA_IMAGES lets us also support
@@ -46,7 +45,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
-                    android:scheme="aichat"
+                    android:scheme="doodlepad"
                     android:host="notes" />
             </intent-filter>
             <meta-data

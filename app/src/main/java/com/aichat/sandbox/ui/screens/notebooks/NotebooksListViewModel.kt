@@ -49,7 +49,18 @@ class NotebooksListViewModel @Inject constructor(
     /** Note id to open after [createNotebook] returns. The screen consumes + clears. */
     val pendingNavigation: StateFlow<String?> = _pendingNavigation.asStateFlow()
 
+    private var defaultNotebookRequested = false
+
     fun consumeNavigation() { _pendingNavigation.value = null }
+
+    fun ensureDefaultNotebook() {
+        if (defaultNotebookRequested) return
+        defaultNotebookRequested = true
+        viewModelScope.launch {
+            repository.createDefaultNotebookIfEmpty()
+            refreshSignal.value = System.currentTimeMillis()
+        }
+    }
 
     fun createNotebook(
         title: String,

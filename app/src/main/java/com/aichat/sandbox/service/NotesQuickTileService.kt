@@ -13,7 +13,7 @@ class NotesQuickTileService : TileService() {
         super.onClick()
         val intent = Intent(
             Intent.ACTION_VIEW,
-            Uri.parse("aichat://notes/new?source=tile&stylus=true"),
+            Uri.parse("doodlepad://notes/new?source=tile&stylus=true"),
         ).apply {
             setClass(applicationContext, MainActivity::class.java)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)

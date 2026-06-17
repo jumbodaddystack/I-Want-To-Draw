@@ -11,7 +11,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.aichat.sandbox"
+        applicationId = "com.doodlepad.kids"
         minSdk = 36
         targetSdk = 36
         versionCode = 1

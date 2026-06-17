@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820" role="img" aria-labelledby="title desc">
+  <title id="title">Doodle Pad kid-friendly notebook prototype</title>
+  <desc id="desc">Two tablet mockups: a notebook landing page and an open notebook sheet picker.</desc>
+  <rect width="1400" height="820" fill="#f4f0ff"/>
+  <text x="60" y="70" font-family="Inter, Arial, sans-serif" font-size="38" font-weight="900" fill="#35224f">Doodle Pad prototype</text>
+  <text x="60" y="108" font-family="Inter, Arial, sans-serif" font-size="20" fill="#6f5a8f">Notebook-first home, big playful buttons, no icons tab.</text>
+
+  <g transform="translate(60 150)">
+    <rect width="590" height="610" rx="42" fill="#fff8e7" stroke="#3f2e56" stroke-width="6"/>
+    <text x="42" y="72" font-family="Inter, Arial, sans-serif" font-size="42" font-weight="900" fill="#3f2e56">Doodle Pad</text>
+    <text x="44" y="106" font-family="Inter, Arial, sans-serif" font-size="21" font-weight="700" fill="#7b5e9e">Pick a notebook and start drawing!</text>
+    <rect x="42" y="132" width="220" height="58" rx="29" fill="#ffd166"/>
+    <text x="84" y="169" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="900" fill="#3f2e56">+ Add notebook</text>
+
+    <g transform="translate(42 228)">
+      <rect width="230" height="250" rx="32" fill="#ffd166" filter="url(#shadow)"/>
+      <circle cx="56" cy="58" r="28" fill="#fff" opacity="0.85"/>
+      <text x="38" y="68" font-family="Inter, Arial, sans-serif" font-size="30">📚</text>
+      <text x="28" y="178" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="900" fill="#2f2440">My First</text>
+      <text x="28" y="210" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="900" fill="#2f2440">Notebook</text>
+      <text x="28" y="235" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="800" fill="#5a466f">1 sheet</text>
+    </g>
+    <g transform="translate(306 228)">
+      <rect width="230" height="250" rx="32" fill="#80ed99" filter="url(#shadow)"/>
+      <circle cx="56" cy="58" r="28" fill="#fff" opacity="0.85"/>
+      <text x="38" y="68" font-family="Inter, Arial, sans-serif" font-size="30">📚</text>
+      <text x="28" y="178" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="900" fill="#183c2a">Animals</text>
+      <text x="28" y="210" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="900" fill="#183c2a">&amp; Rainbows</text>
+      <text x="28" y="235" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="800" fill="#275d40">5 sheets</text>
+    </g>
+  </g>
+
+  <g transform="translate(750 150)">
+    <rect width="590" height="610" rx="42" fill="#eaf7ff" stroke="#24405a" stroke-width="6"/>
+    <text x="42" y="72" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="900" fill="#24405a">My First Notebook</text>
+    <text x="44" y="106" font-family="Inter, Arial, sans-serif" font-size="21" font-weight="800" fill="#55728a">Choose a sheet to draw on</text>
+    <rect x="42" y="132" width="506" height="66" rx="33" fill="#ff6b6b"/>
+    <text x="226" y="174" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="900" fill="white">+ New sheet</text>
+
+    <g transform="translate(42 232)">
+      <rect width="150" height="184" rx="28" fill="#ffffff" filter="url(#shadow)"/>
+      <rect x="18" y="18" width="114" height="112" rx="20" fill="#fff7d6"/>
+      <text x="59" y="86" font-family="Inter, Arial, sans-serif" font-size="42">📄</text>
+      <text x="48" y="160" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="900" fill="#24405a">Sheet 1</text>
+    </g>
+    <g transform="translate(220 232)">
+      <rect width="150" height="184" rx="28" fill="#ffffff" filter="url(#shadow)"/>
+      <rect x="18" y="18" width="114" height="112" rx="20" fill="#fff7d6"/>
+      <text x="59" y="86" font-family="Inter, Arial, sans-serif" font-size="42">📄</text>
+      <text x="48" y="160" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="900" fill="#24405a">Sheet 2</text>
+    </g>
+    <g transform="translate(398 232)">
+      <rect width="150" height="184" rx="28" fill="#ffffff" filter="url(#shadow)"/>
+      <rect x="18" y="18" width="114" height="112" rx="20" fill="#fff7d6"/>
+      <text x="59" y="86" font-family="Inter, Arial, sans-serif" font-size="42">📄</text>
+      <text x="48" y="160" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="900" fill="#24405a">Sheet 3</text>
+    </g>
+  </g>
+
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#2f2440" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+</svg>

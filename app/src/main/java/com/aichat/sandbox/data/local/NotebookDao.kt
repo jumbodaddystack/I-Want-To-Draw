@@ -12,6 +12,9 @@ interface NotebookDao {
     @Query("SELECT * FROM notebooks ORDER BY updatedAt DESC")
     fun observeNotebooks(): Flow<List<Notebook>>
 
+    @Query("SELECT COUNT(*) FROM notebooks")
+    suspend fun countNotebooks(): Int
+
     @Query("SELECT * FROM notebooks WHERE id = :id")
     suspend fun getNotebook(id: String): Notebook?
 

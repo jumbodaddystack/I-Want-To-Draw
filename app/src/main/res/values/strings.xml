@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">AI Chat Sandbox</string>
-    <string name="shortcut_new_note_short">New note</string>
-    <string name="shortcut_new_note_long">Start a new handwritten note</string>
-    <string name="tile_new_note_label">New Note</string>
+    <string name="app_name">Doodle Pad</string>
+    <string name="shortcut_new_note_short">New doodle</string>
+    <string name="shortcut_new_note_long">Start a new doodle</string>
+    <string name="tile_new_note_label">New Doodle</string>
 </resources>
