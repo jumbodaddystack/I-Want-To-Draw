@@ -60,7 +60,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -71,7 +70,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aichat.sandbox.ui.components.notes.AudioPlaybackBar
-import com.aichat.sandbox.ui.components.notes.AudioRecordingBar
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import com.aichat.sandbox.ui.components.notes.BrushSheet
 import com.aichat.sandbox.ui.components.notes.ColorPickerSheet
@@ -141,8 +139,6 @@ fun NoteEditorScreen(
     val notebook by viewModel.notebook.collectAsState()
     val pageRailOpen by viewModel.pageRailOpen.collectAsState()
     val audioClips by viewModel.audioClips.collectAsState()
-    val isRecordingAudio by viewModel.isRecordingAudio.collectAsState()
-    val recordingStartedAt by viewModel.recordingStartedAt.collectAsState()
     val audioPosition by viewModel.audioPlayer.positionMs.collectAsState()
     val audioPlaybackState by viewModel.audioPlayer.state.collectAsState()
     val audioActiveClip by viewModel.audioPlayer.activeClip.collectAsState()
@@ -181,17 +177,6 @@ fun NoteEditorScreen(
     // sheet + tool palette rows hide behind a thin handle; the canvas above
     // expands to reclaim ~150dp of vertical space for drawing/writing.
     var palettesExpanded by remember { mutableStateOf(true) }
-    val density = LocalDensity.current
-    val paletteHeightDp = with(density) { paletteHeightPx.toDp() }
-    val recordingBottomOffset = if (palettesExpanded) {
-        // Keep the recording control above the expanded palette while still
-        // allowing palette background to bleed behind system navigation.
-        paletteHeightDp + 12.dp
-    } else {
-        // Collapsed state only needs handle clearance + touch breathing room.
-        56.dp
-    }
-
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -628,7 +613,7 @@ fun NoteEditorScreen(
                     onViewportReady = { viewportController = it },
                     onFrameDrawn = viewModel::onFrameDrawn,
                     onFrameTap = viewModel::onFrameTap,
-                    recordingStartedAt = recordingStartedAt,
+                    recordingStartedAt = 0L,
                     fingerInkEnabled = fingerDrawing,
                     inkAuthoringEnabled = inkAuthoring,
                     tutorHiddenIds = tutorHiddenIds,
@@ -808,9 +793,9 @@ fun NoteEditorScreen(
                     )
                 }
             }
-            // Sub-phase 9.4 — audio recordings strip (playback + scrubber).
-            // Hidden until at least one clip exists; the record button below
-            // surfaces independent of clip count.
+            // Sub-phase 9.4 — existing audio recordings strip (playback + scrubber).
+            // Recording controls are intentionally not surfaced because the app
+            // no longer requests microphone permission.
             if (!presenting) AudioPlaybackBar(
                 clips = audioClips,
                 activeClipPath = audioActiveClip,
@@ -925,20 +910,6 @@ fun NoteEditorScreen(
                     modifier = Modifier.padding(bottom = 24.dp),
                 )
             }
-        }
-        // Sub-phase 9.4 — record button anchored above the AI side sheet.
-        if (!presenting) Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.navigationBars),
-            contentAlignment = Alignment.BottomEnd,
-        ) {
-            AudioRecordingBar(
-                isRecording = isRecordingAudio,
-                onStart = viewModel::startAudioRecording,
-                onStop = viewModel::stopAudioRecording,
-                modifier = Modifier.padding(end = 12.dp, bottom = recordingBottomOffset),
-            )
         }
         // Sub-phase 8.2 — left-edge frame navigator.
         if (frameNavigatorOpen) {

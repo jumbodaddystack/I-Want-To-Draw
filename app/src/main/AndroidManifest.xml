@@ -13,9 +13,6 @@
         android:name="android.permission.READ_MEDIA_IMAGES"
         tools:targetApi="33" />
 
-    <!-- Sub-phase 9.4 audio-synced ink. Requested at first tap on the
-         record button, not at app launch. -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <uses-feature
         android:name="android.hardware.type.stylus"
