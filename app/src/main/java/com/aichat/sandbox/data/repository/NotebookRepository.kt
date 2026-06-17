@@ -50,6 +50,16 @@ class NotebookRepository @Inject constructor(
         notebookDao.underlyingNoteId(notebookId)
     }
 
+    suspend fun createDefaultNotebookIfEmpty(): NotebookCreation? = withContext(Dispatchers.IO) {
+        if (notebookDao.countNotebooks() > 0) return@withContext null
+        createNotebookInternal(
+            title = "My First Notebook",
+            pageSize = NotebookPageSize.LETTER_PORTRAIT,
+            pageStyle = Notebook.STYLE_PLAIN,
+            coverColorArgb = 0xFFFFD166.toInt(),
+        )
+    }
+
     /**
      * Create a notebook with its first page. Returns the new notebook +
      * the id of the underlying note so the caller can navigate straight in.
@@ -60,6 +70,15 @@ class NotebookRepository @Inject constructor(
         pageStyle: String,
         coverColorArgb: Int,
     ): NotebookCreation = withContext(Dispatchers.IO) {
+        createNotebookInternal(title, pageSize, pageStyle, coverColorArgb)
+    }
+
+    private suspend fun createNotebookInternal(
+        title: String,
+        pageSize: NotebookPageSize,
+        pageStyle: String,
+        coverColorArgb: Int,
+    ): NotebookCreation {
         val notebook = Notebook(
             title = title.ifBlank { "Untitled notebook" },
             pageStyle = pageStyle,
@@ -95,7 +114,36 @@ class NotebookRepository @Inject constructor(
         )
         noteDao.upsertNote(note)
         noteFrameDao.upsertFrames(listOf(firstPage))
-        NotebookCreation(notebook = notebook, noteId = note.id)
+        return NotebookCreation(notebook = notebook, noteId = note.id)
+    }
+
+    suspend fun addNotebookPage(noteId: String): NoteFrame? = withContext(Dispatchers.IO) {
+        val note = noteDao.getNote(noteId) ?: return@withContext null
+        val notebookId = note.notebookId ?: return@withContext null
+        val notebook = notebookDao.getNotebook(notebookId) ?: return@withContext null
+        val frames = noteFrameDao.getFrames(noteId)
+        val ordinal = (frames.maxOfOrNull { it.ordinal } ?: -1) + 1
+        val top = ordinal * (notebook.pageHeight + Notebook.PAGE_GUTTER)
+        val frame = NoteFrame(
+            id = UUID.randomUUID().toString(),
+            noteId = noteId,
+            name = "Sheet ${ordinal + 1}",
+            minX = 0f,
+            minY = top,
+            maxX = notebook.pageWidth,
+            maxY = top + notebook.pageHeight,
+            ordinal = ordinal,
+        )
+        noteFrameDao.upsertFrames(listOf(frame))
+        val now = System.currentTimeMillis()
+        noteDao.upsertNote(
+            note.copy(
+                maxY = maxOf(note.maxY, frame.maxY),
+                updatedAt = now,
+            ),
+        )
+        notebookDao.touchUpdatedAt(notebookId, now)
+        frame
     }
 
     suspend fun rename(notebookId: String, title: String) = withContext(Dispatchers.IO) {

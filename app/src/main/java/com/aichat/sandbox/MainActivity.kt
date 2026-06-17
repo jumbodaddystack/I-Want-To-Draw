@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
 
     private fun parseViewDeepLink(intent: Intent): NotesDeepLink? {
         val data: Uri = intent.data ?: return null
-        if (data.scheme != "aichat" || data.host != "notes") return null
+        if (data.scheme != "doodlepad" || data.host != "notes") return null
         if (data.pathSegments.firstOrNull() != "new") return null
         val source = data.getQueryParameter("source")
         val stylus = data.getQueryParameter("stylus")?.equals("true", ignoreCase = true) ?: false

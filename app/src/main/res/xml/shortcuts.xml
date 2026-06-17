@@ -8,8 +8,8 @@
         android:shortcutLongLabel="@string/shortcut_new_note_long">
         <intent
             android:action="android.intent.action.VIEW"
-            android:data="aichat://notes/new?source=shortcut&amp;stylus=true"
-            android:targetPackage="com.aichat.sandbox"
+            android:data="doodlepad://notes/new?source=shortcut&amp;stylus=true"
+            android:targetPackage="com.doodlepad.kids"
             android:targetClass="com.aichat.sandbox.MainActivity" />
         <categories android:name="android.shortcut.conversation" />
     </shortcut>
