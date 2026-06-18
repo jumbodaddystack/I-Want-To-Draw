@@ -44,7 +44,7 @@ import javax.inject.Singleton
  * `StrokeCodec` to embed timestamps is a deliberate `schemaVersion` follow-up.
  */
 /**
- * Minimal recognizer surface used by callers (currently `NoteAiService` in
+ * Minimal recognizer surface used by notes and repository callers.
  * sub-phase 2.5) that need to substitute the ML Kit-backed implementation
  * in unit tests.
  */

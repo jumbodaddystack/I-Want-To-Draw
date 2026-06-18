@@ -17,7 +17,7 @@ import com.google.gson.JsonObject
 /**
  * Sub-phase 7.1 — compact, model-friendly JSON view of a note's item set.
  *
- * Used by the EDIT branch of [NoteAiService] to give the model an addressable
+ * Serializes canvas items into an addressable
  * inventory of items alongside the rasterised PNG. The image stays the
  * lossless representation; this JSON is the *index* the model edits against.
  *

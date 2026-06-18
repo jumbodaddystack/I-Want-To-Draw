@@ -122,7 +122,7 @@ class PinnedNoteCache @Inject constructor(
     private fun cacheFile(noteId: String): File = File(cacheDir(), "$noteId.png")
 
     companion object {
-        /** Sized to match what `NoteAiService` sends — keeps pinned + ask consistent. */
+        /** Sized for pinned-note raster previews. */
         const val MAX_EDGE_PX: Int = 1536
         private const val CACHE_SUBDIR: String = "pinned-notes"
     }

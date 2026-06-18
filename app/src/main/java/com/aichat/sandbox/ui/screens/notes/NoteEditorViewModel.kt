@@ -7,16 +7,13 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.aichat.sandbox.data.local.PreferencesManager
 import com.aichat.sandbox.data.ink.ConstraintSnap
 import com.aichat.sandbox.data.ink.LassoTriangulation
 import com.aichat.sandbox.data.ink.MeshHitTest
 import com.aichat.sandbox.data.ink.SelectSimilar
 import com.aichat.sandbox.data.ink.StrokeMeshCache
 import com.aichat.sandbox.data.ink.StrokeSimilarity
-import com.aichat.sandbox.data.model.ApiProvider
 import com.aichat.sandbox.data.model.BrushPreset
-import com.aichat.sandbox.data.model.Chat
 import com.aichat.sandbox.data.model.Note
 import com.aichat.sandbox.data.model.NoteFrame
 import android.graphics.Bitmap
@@ -24,22 +21,16 @@ import com.aichat.sandbox.data.model.NoteItem
 import com.aichat.sandbox.data.notes.NoteRasterizer
 import com.aichat.sandbox.data.model.NoteLayer
 import com.aichat.sandbox.data.model.Stamp
-import com.aichat.sandbox.data.notes.AiChunk
-import com.aichat.sandbox.data.notes.AskMode
-import com.aichat.sandbox.data.notes.AskRequest
 import com.aichat.sandbox.data.notes.BrushSpec
 import com.aichat.sandbox.data.notes.CannedEditAction
 import com.aichat.sandbox.data.notes.EditOp
 import com.aichat.sandbox.data.notes.EditOpsDoc
 import com.aichat.sandbox.data.notes.HandwritingOcr
-import com.aichat.sandbox.data.notes.aiRecolorPrompt
 import com.aichat.sandbox.data.notes.HandwritingOcr.OcrModelState
-import com.aichat.sandbox.data.notes.NoteAiService
 import com.aichat.sandbox.data.notes.NoteExporter
 import com.aichat.sandbox.data.notes.NoteImageStore
 import com.aichat.sandbox.data.notes.NoteSvgExporter
 import com.aichat.sandbox.data.notes.PdfLayout
-import com.aichat.sandbox.data.notes.PendingDraftStore
 import com.aichat.sandbox.data.notes.RecentColorsStore
 import com.aichat.sandbox.data.notes.ReplayTimeline
 import com.aichat.sandbox.data.notes.StampSearch
@@ -48,7 +39,6 @@ import com.aichat.sandbox.data.notes.TutorGuide
 import com.aichat.sandbox.data.notes.TutorSession
 import com.aichat.sandbox.data.notes.TutorStep
 import com.aichat.sandbox.data.repository.BrushPresetRepository
-import com.aichat.sandbox.data.repository.ChatRepository
 import com.aichat.sandbox.data.repository.NoteRepository
 import com.aichat.sandbox.data.repository.StampRepository
 import com.aichat.sandbox.data.vector.edit.boolean.PathBoolean
@@ -140,10 +130,7 @@ enum class IconCanvasSize(val cells: Int, val world: Float, val label: String) {
 class NoteEditorViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val repository: NoteRepository,
-    private val aiService: NoteAiService,
     private val handwritingOcr: HandwritingOcr,
-    private val preferencesManager: PreferencesManager,
-    private val chatRepository: ChatRepository,
     private val noteExporter: NoteExporter,
     private val noteSvgExporter: NoteSvgExporter,
     private val noteVectorDrawableExporter: com.aichat.sandbox.data.notes.NoteVectorDrawableExporter,
@@ -313,48 +300,9 @@ class NoteEditorViewModel @Inject constructor(
     /** Live draft body — Compose `BasicTextField` writes this on every keystroke. */
     private var textEditDraftBody: String = ""
 
-    // ── AI side sheet (sub-phase 2.6) ────────────────────────────────────
-    //
-    // The sheet hosts a list of one-shot ask/reply turns. State is held here
-    // (rather than in a dedicated VM) because submitting a prompt needs the
-    // live `note` + `items`, the user's selected model from preferences, and
-    // shares lifetime with the editor. Streaming jobs are tracked separately
-    // so cancellation can stop the upstream flow within a frame or two.
-
-    private val _aiSheetState = MutableStateFlow(AiSideSheetState())
-    val aiSheetState: StateFlow<AiSideSheetState> = _aiSheetState.asStateFlow()
-
-    private val streamingJobs: MutableMap<String, Job> = mutableMapOf()
-
-    // ── AI edit preview (sub-phase 7.4) ──────────────────────────────────
-    //
-    // When `runStream` runs in EDIT mode the terminal `AiChunk.EditPreview`
-    // event is staged here as a `PendingEdit` rather than committed to the
-    // canvas. The editor renders a translucent overlay on top of the live
-    // scene from this state; `acceptPendingEdit` / `rejectPendingEdit`
-    // commit-or-discard. Only one preview can be active at a time; firing
-    // another EDIT request while a preview is staged silently replaces it.
 
     private val _pendingEdit = MutableStateFlow<PendingEdit?>(null)
     val pendingEdit: StateFlow<PendingEdit?> = _pendingEdit.asStateFlow()
-
-    /**
-     * Models offered by the in-sheet model picker (sub-phase 2.8). Mirrors
-     * the chat-side `ModelSelector` source: built-in provider catalogue
-     * plus user-added customs from preferences. De-duplicated so a custom
-     * id colliding with a built-in only appears once.
-     */
-    val availableModels: StateFlow<List<String>> = preferencesManager.customModels
-        .map { byProvider ->
-            val builtIns = ApiProvider.defaults.flatMap { it.models }
-            val customs = byProvider.values.flatten()
-            (builtIns + customs.filter { it !in builtIns })
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = ApiProvider.defaults.flatMap { it.models },
-        )
 
     /**
      * Sub-phase 5.3 — twelve most-recent custom colours, app-wide. Surfaced
@@ -367,6 +315,7 @@ class NoteEditorViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000L),
             initialValue = emptyList(),
         )
+
 
     /**
      * Sub-phase 5.3 — whether the colour picker sheet is currently open. The
@@ -383,14 +332,6 @@ class NoteEditorViewModel @Inject constructor(
      * [openShapeFillColorPicker], cleared on confirm or dismiss.
      */
     private var colorPickerTargetsShapeFill = false
-
-    /**
-     * When the colour picker was opened by the AI side sheet's "Recolor"
-     * quick action, this holds the items to recolor. Non-null routes the next
-     * [confirmColorPick] to [applyAiRecolor] instead of changing the ink tool;
-     * cleared on confirm or dismiss.
-     */
-    private val _pendingAiRecolorScope = MutableStateFlow<List<NoteItem>?>(null)
 
     /**
      * Phase 6.3 — snap toggle bitmask. Bit 0 = angle (15°), bit 1 = grid,
@@ -1263,28 +1204,6 @@ class NoteEditorViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Existing chats, newest first — feeds the sub-phase 4.3
-     * [SendToChatSheet] picker. Sourced from the same DAO query that backs
-     * the chat-list tab so ordering stays consistent.
-     */
-    val chats: StateFlow<List<Chat>> = chatRepository.getAllChats()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000L),
-            initialValue = emptyList(),
-        )
-
-    /**
-     * Sub-phase 4.3 send-to-chat sheet state. `null` means hidden; non-null
-     * captures whether the picker was opened from the editor's share menu
-     * (whole-note PNG + OCR snippet) or from an AI reply (selection PNG +
-     * reply text), so the chat-pick callback knows how to build the
-     * payload.
-     */
-    private val _sendToChatMode = MutableStateFlow<SendToChatMode?>(null)
-    val sendToChatMode: StateFlow<SendToChatMode?> = _sendToChatMode.asStateFlow()
-
     init {
         if (entrySource != null || entryStylus) {
             Log.d("NotesEntry", "source=$entrySource stylus=$entryStylus")
@@ -1294,38 +1213,6 @@ class NoteEditorViewModel @Inject constructor(
             // keeps quick-capture entry points anchored to ink even if the
             // palette default ever changes.
             palette.select(Tool.PEN)
-        }
-        // Seed the sheet's active model from the user's chat preferences so
-        // the first ask hits whatever the user last selected for chat. The
-        // header is read-only in 2.6 — the in-sheet model picker lands in 2.8.
-        viewModelScope.launch {
-            val model = preferencesManager.defaultModel.first()
-            _aiSheetState.update { current ->
-                if (current.activeModelId.isEmpty()) current.copy(activeModelId = model)
-                else current
-            }
-        }
-        // Keep the AI sheet's `isIcon` in sync with the note. The note loads
-        // asynchronously for existing notes, so reading it once at sheet-open
-        // time would race; collecting here guarantees the chip set and the
-        // edit-first default are correct before the user can interact. Icons
-        // default the footer to EDIT (they are design surfaces); only flip the
-        // default while the user hasn't typed anything yet so we never stomp an
-        // in-progress ask.
-        viewModelScope.launch {
-            _note.collect { note ->
-                _aiSheetState.update { current ->
-                    if (current.isIcon == note.isIcon) current
-                    else current.copy(
-                        isIcon = note.isIcon,
-                        footerMode = if (note.isIcon && current.turns.isEmpty() && current.inputText.isEmpty()) {
-                            AiFooterMode.EDIT
-                        } else {
-                            current.footerMode
-                        },
-                    )
-                }
-            }
         }
         if (routeArg != NOTE_ID_NEW) {
             initialLoad = viewModelScope.launch {
@@ -1586,7 +1473,6 @@ class NoteEditorViewModel @Inject constructor(
 
     fun dismissColorPicker() {
         _colorPickerOpen.value = false
-        _pendingAiRecolorScope.value = null
         colorPickerTargetsShapeFill = false
     }
 
@@ -1598,16 +1484,6 @@ class NoteEditorViewModel @Inject constructor(
      * next time.
      */
     fun confirmColorPick(colorArgb: Int) {
-        // AI recolor path — the picker was opened from the AI sheet's Recolor
-        // quick action, so apply the colour to the staged scope as a model
-        // edit rather than changing the active ink tool.
-        val recolorScope = _pendingAiRecolorScope.value
-        if (recolorScope != null) {
-            _pendingAiRecolorScope.value = null
-            _colorPickerOpen.value = false
-            applyAiRecolor(colorArgb, recolorScope)
-            return
-        }
         if (colorPickerTargetsShapeFill) {
             // Phase 10.2 — route to the shape-fill slot; picking a colour
             // implies the user wants the fill on.
@@ -1919,12 +1795,10 @@ class NoteEditorViewModel @Inject constructor(
     // Two local-first geometry features that plug into the *existing* surfaces:
     // select-similar lands its result in the [selection] model (like a lasso);
     // snapping emits ordinary `EditOp.Transform`s onto canonical payloads and
-    // stages them as a [pendingEdit] the user accepts/declines with the same
-    // chips as AI edits. Both are gated behind the ink engine ([inkAuthoring],
-    // default-off) — they build on the I6 mesh/cache layer — so with ink off
-    // they are inert and I7 does not flip the I2 default-on switch. The geometry
-    // runs locally; the AI is consulted only optionally ([aiRankSelection]),
-    // and always through the inviolable edit-ops pipeline (Adoption principle 2).
+    // stages them as a [pendingEdit] the user accepts/declines. Both are gated
+    // behind the ink engine ([inkAuthoring], default-off) — they build on the I6
+    // mesh/cache layer — so with ink off they are inert and I7 does not flip the
+    // I2 default-on switch. The geometry runs locally through the edit-ops path.
 
     /** True when select-similar / snap are available (ink engine on + something to act on). */
     fun inkSelectionToolsEnabled(): Boolean = inkAuthoring.value
@@ -2030,21 +1904,6 @@ class NoteEditorViewModel @Inject constructor(
      * through the unchanged [submitAiEdit] EDIT pipeline, so the AI never sees
      * ink and every change stays a reviewable edit-op.
      */
-    fun aiRankSelection(extraInstruction: String = "") {
-        val scope = items.filter { it.id in _selection.value }
-        if (scope.size < 2) return
-        val brief = buildString {
-            append("These ${scope.size} items were selected as visually similar. ")
-            append("Decide which truly belong to the same group and, if helpful, ")
-            append("align or recolor them consistently. Leave out any that don't fit.")
-            if (extraInstruction.isNotBlank()) {
-                append(" ")
-                append(extraInstruction.trim())
-            }
-        }
-        submitAiEdit(description = "AI Group similar", userPrompt = brief, selection = scope)
-    }
-
     /**
      * Stage a locally-authored [doc] (snap / tidy) as a [pendingEdit] using the
      * very same simulator and accept/decline surface as an AI edit. The ops
@@ -2072,18 +1931,10 @@ class NoteEditorViewModel @Inject constructor(
 
     // ── Replay / draw-with-me (phase I8 / N4, idea #7) ───────────────────
     //
-    // Two consumers of the canonical v2 `t` lane and the AI generation pipeline,
-    // both gated behind the ink engine ([inkAuthoring], default-off) so I8 does
-    // not flip the I2 default-on switch:
+    // Local replay tools for the canonical v2 `t` lane.
     //   (a) timestamp-driven replay — [buildReplayTimeline] turns the live items
     //       into a teaching-paced timelapse ([ReplayTimeline]); the felt
     //       animation + video/GIF encoding are device-only.
-    //   (b) tutor "draw with me" — [startDrawWithMe] routes through the unchanged
-    //       GENERATE edit-ops pipeline; on accept the authored construction
-    //       strokes are reparented onto a ghosted, editable guide layer and the
-    //       [TutorSession] steps the reveal. The strokes stay canonical
-    //       `StrokeCodec` payloads accepted through the same surface as any AI
-    //       edit (Adoption principle 2).
 
     private val _tutorSession = MutableStateFlow<TutorSession?>(null)
     val tutorSession: StateFlow<TutorSession?> = _tutorSession.asStateFlow()
@@ -2109,23 +1960,6 @@ class NoteEditorViewModel @Inject constructor(
     ): ReplayTimeline = ReplayTimeline.build(items.toList(), config)
 
     /**
-     * Phase I8(b) — start a "draw with me" tutor: ask the model to author simple
-     * construction strokes for [prompt] through the unchanged GENERATE pipeline.
-     * The staged preview accepts exactly like any AI edit; [acceptPendingEdit]
-     * then reparents the authored geometry onto the guide layer and opens the
-     * [TutorSession]. No-op when the ink engine is off.
-     */
-    fun startDrawWithMe(prompt: String) {
-        if (!inkAuthoring.value || prompt.isBlank()) return
-        pendingTutorGenerate = true
-        submitAiEdit(
-            description = "AI Draw with me",
-            userPrompt = prompt,
-            selection = null,
-            generate = true,
-        )
-    }
-
     /**
      * Accept a tutor generation: ensure a ghosted guide layer exists, reparent
      * the authored construction strokes onto it (canonical payloads untouched),
@@ -3139,471 +2973,6 @@ class NoteEditorViewModel @Inject constructor(
         return best
     }
 
-    // ── AI side sheet (sub-phase 2.6) ────────────────────────────────────
-
-    /**
-     * Open the sheet. [selection] is captured by reference here so the scope
-     * chip stays accurate even if the user clears the canvas selection while
-     * the sheet is open. `null` selection means "ask about the whole note".
-     */
-    fun openAiSheet(selection: List<NoteItem>? = null) {
-        _aiSheetState.update { current ->
-            current.copy(
-                isOpen = true,
-                pendingSelection = selection?.toList(),
-                isIcon = _note.value.isIcon,
-            )
-        }
-    }
-
-    /** Footer Ask|Edit toggle. */
-    fun setAiFooterMode(mode: AiFooterMode) {
-        _aiSheetState.update { it.copy(footerMode = mode) }
-    }
-
-    /**
-     * Single Send entry point for the footer text box. Routes by
-     * [AiSideSheetState.footerMode]: ASK produces a prose reply via
-     * [submitAiPrompt]; EDIT produces a staged preview via [submitAiEdit]. In
-     * EDIT we pass the frozen scope explicitly — a null selection deliberately
-     * edits the whole note/icon (the EDIT pipeline falls back to all items)
-     * rather than grabbing whatever happens to be lasso-selected on the canvas.
-     */
-    fun submitAiFooter() {
-        val snapshot = _aiSheetState.value
-        if (snapshot.inputText.isBlank() || snapshot.isStreaming) return
-        when (snapshot.footerMode) {
-            AiFooterMode.ASK -> submitAiPrompt()
-            AiFooterMode.EDIT -> {
-                // 17.5 #1 — an empty icon artboard + an EDIT instruction means
-                // "generate a new icon" (there's nothing to edit yet); a
-                // populated canvas edits the existing geometry as before.
-                val generate = snapshot.isIcon &&
-                    snapshot.pendingSelection.isNullOrEmpty() &&
-                    items.isEmpty()
-                submitAiEdit(
-                    description = if (generate) "AI Generate icon" else "AI edit",
-                    userPrompt = snapshot.inputText.trim(),
-                    selection = snapshot.pendingSelection,
-                    generate = generate,
-                )
-            }
-        }
-    }
-
-    /**
-     * One-tap icon design action. The first four route through the model-backed
-     * EDIT pipeline ([submitAiEdit]); [IconQuickAction.RECOLOR] opens the colour
-     * picker and applies an AI recolor with the chosen colour (see
-     * [_pendingAiRecolorScope]). All operate on the frozen scope, falling back
-     * to the whole icon when nothing is selected.
-     */
-    fun submitIconQuickAction(action: IconQuickAction) {
-        if (_aiSheetState.value.isStreaming) return
-        val scope = _aiSheetState.value.pendingSelection
-        when (action) {
-            // 17.5 #2 — refine the selected sketch (or the whole icon) into a
-            // clean vector placed beside it; the footer text, if any, steers
-            // the redraw and enables the annotate-and-iterate loop.
-            IconQuickAction.MAKE_REAL -> refineSketch(_aiSheetState.value.inputText)
-            IconQuickAction.SIMPLIFY -> submitAiEdit(
-                CannedEditAction.SIMPLIFY.undoDescription, CannedEditAction.SIMPLIFY.prompt, scope,
-            )
-            IconQuickAction.FLAT_STYLE -> submitAiEdit(
-                CannedEditAction.FLAT_STYLE.undoDescription, CannedEditAction.FLAT_STYLE.prompt, scope,
-            )
-            IconQuickAction.ADD_DETAIL -> submitAiEdit(
-                CannedEditAction.ADD_DETAIL.undoDescription, CannedEditAction.ADD_DETAIL.prompt, scope,
-            )
-            IconQuickAction.AUTO_SHAPE -> submitAiEdit(
-                CannedEditAction.AUTO_SHAPE.undoDescription, CannedEditAction.AUTO_SHAPE.prompt, scope,
-            )
-            IconQuickAction.RECOLOR -> {
-                // Open the picker without the ink-tool side effect of
-                // `openColorPicker` — this pick feeds an AI recolor, not the pen.
-                _pendingAiRecolorScope.value = scope ?: items.toList()
-                _colorPickerOpen.value = true
-            }
-        }
-    }
-
-    /**
-     * Lasso "Ask" entry point (sub-phase 2.7). Snapshots the items matching
-     * the current selection into the sheet's frozen scope so subsequent
-     * background changes to the canvas selection don't drift the scope chip.
-     * Falls back to whole-note scope when nothing is selected (e.g. defensive
-     * call after a lasso cleared itself).
-     */
-    fun openAiSheetForSelection() {
-        val ids = _selection.value
-        val snapshot = if (ids.isEmpty()) null else items.filter { it.id in ids }
-        openAiSheet(snapshot)
-    }
-
-    /**
-     * Drop the frozen selection scope without closing the sheet. The chip
-     * row's "Whole note" pill calls this so the user can pivot the in-flight
-     * conversation from "these strokes" to "this whole note" without losing
-     * prior turns.
-     */
-    fun clearAiSheetScope() {
-        if (_aiSheetState.value.pendingSelection == null) return
-        _aiSheetState.update { it.copy(pendingSelection = null) }
-    }
-
-    /**
-     * A6 fix — re-point the frozen scope at whatever is lasso-selected on the
-     * canvas right now. The scope is captured once at open time and held for
-     * the sheet's life, so a user who selects something new mid-conversation
-     * was silently still asking about the old selection; this gives them an
-     * explicit "ask about *this* instead" without reopening the sheet. No-ops
-     * when nothing is selected (the chip that calls this is hidden in that
-     * case).
-     */
-    fun reScopeAiSheetToSelection() {
-        val ids = _selection.value
-        if (ids.isEmpty()) return
-        val snapshot = items.filter { it.id in ids }
-        if (snapshot.isEmpty()) return
-        _aiSheetState.update { it.copy(pendingSelection = snapshot) }
-    }
-
-    /**
-     * Hide the sheet without losing the conversation. Reopening restores the
-     * turn list so the user can resume reading. Streaming jobs keep running
-     * — closing the sheet is not the same as cancelling.
-     */
-    fun closeAiSheet() {
-        _aiSheetState.update { it.copy(isOpen = false) }
-    }
-
-    /** Compose `OutlinedTextField` callback. */
-    fun onAiInputChanged(text: String) {
-        _aiSheetState.update { it.copy(inputText = text) }
-    }
-
-    /**
-     * Fire a new ask using the current input text and captured selection. The
-     * input field clears immediately so the user can queue the next prompt
-     * while the reply streams in — though Send is disabled while any turn is
-     * still in flight (see [AiSideSheetState.isStreaming]).
-     */
-    fun submitAiPrompt() {
-        val snapshot = _aiSheetState.value
-        val prompt = snapshot.inputText.trim()
-        if (prompt.isEmpty()) return
-        if (snapshot.isStreaming) return
-        val turnId = UUID.randomUUID().toString()
-        val selection = snapshot.pendingSelection
-        val summary = selection?.let { summarizeSelection(it) }
-        val turn = AskTurn(
-            id = turnId,
-            prompt = prompt,
-            selectionSummary = summary,
-            replyBuffer = "",
-            state = TurnState.Streaming,
-        )
-        _aiSheetState.update { current ->
-            current.copy(
-                turns = current.turns + turn,
-                inputText = "",
-            )
-        }
-        streamingJobs[turnId] = viewModelScope.launch {
-            runStream(turnId = turnId, prompt = prompt, selection = selection)
-        }
-    }
-
-    /**
-     * Fire a canned prompt by enum (sub-phase 2.7). [CannedPrompt.CONVERT_TO_TEXT]
-     * routes through the OCR fast path; everything else maps to a
-     * one-tap template and goes through the standard ask pipeline.
-     *
-     * The convert-to-text path silently no-ops when there are no strokes
-     * in scope; the UI is expected to gate the chip in that case, but the
-     * guard here keeps the VM honest if a caller forgets.
-     */
-    fun submitCannedPrompt(canned: CannedPrompt) {
-        if (canned == CannedPrompt.CONVERT_TO_TEXT) {
-            launchConvertToText()
-            return
-        }
-        if (_aiSheetState.value.isStreaming) return
-        _aiSheetState.update { it.copy(inputText = canned.template) }
-        submitAiPrompt()
-    }
-
-    /**
-     * Convert-to-text fast path (sub-phase 2.7).
-     *
-     * Bypasses [NoteAiService] entirely — handwriting OCR runs on the
-     * in-scope strokes and the recognized text is dropped into the
-     * conversation as a finished `Done` turn marked [AskTurn.isConvertResult],
-     * which surfaces a preview "Insert as text box" action on the bubble.
-     * Empty / unrecognizable input lands as an `Error` turn rather than a
-     * blank `Done` so the user sees what happened.
-     *
-     * Works offline (no network call). If no selection is active, the entire
-     * note's strokes are used so the toolbar Convert can still recover the
-     * full transcription.
-     */
-    fun launchConvertToText() {
-        val snapshot = _aiSheetState.value
-        if (snapshot.isStreaming) return
-        val scope = snapshot.pendingSelection ?: items.toList()
-        val strokes = scope.filter { it.kind == STROKE_KIND }
-        val summary = snapshot.pendingSelection?.let { summarizeSelection(it) }
-        val turnId = UUID.randomUUID().toString()
-        val turn = AskTurn(
-            id = turnId,
-            prompt = CannedPrompt.CONVERT_TO_TEXT.label,
-            selectionSummary = summary,
-            replyBuffer = "",
-            state = TurnState.Streaming,
-            isConvertResult = true,
-        )
-        _aiSheetState.update { current ->
-            current.copy(
-                isOpen = true,
-                turns = current.turns + turn,
-                inputText = "",
-            )
-        }
-        if (strokes.isEmpty()) {
-            mutateTurn(turnId) { t -> t.copy(state = TurnState.Error(NO_HANDWRITING_MESSAGE)) }
-            return
-        }
-        streamingJobs[turnId] = viewModelScope.launch {
-            try {
-                val result = handwritingOcr.recognize(strokes)
-                val text = result.text
-                if (text.isBlank()) {
-                    mutateTurn(turnId) { t -> t.copy(state = TurnState.Error(NO_HANDWRITING_MESSAGE)) }
-                } else {
-                    mutateTurn(turnId) { t -> t.copy(replyBuffer = text, state = TurnState.Done) }
-                    // A8 fix — make convert-to-text a single tap: the moment OCR
-                    // succeeds, drop the recognized text onto the canvas (one
-                    // undoable AddItems) instead of waiting for a second
-                    // "Insert as text box" tap. The bubble then offers an
-                    // "Insert again" re-placement rather than a first insert.
-                    placeConvertTextBox(turnId)
-                }
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (t: Throwable) {
-                mutateTurn(turnId) { current ->
-                    current.copy(state = TurnState.Error(t.message ?: "OCR failed"))
-                }
-            } finally {
-                streamingJobs.remove(turnId)
-            }
-        }
-    }
-
-    /**
-     * Convert-to-text fast path triggered from the lasso menu (sub-phase 2.7).
-     * Opens the sheet (if it isn't already), freezes the current canvas
-     * selection as the scope, and kicks the OCR job — all in one call so the
-     * lasso button is a single tap.
-     */
-    fun launchConvertSelectionToText() {
-        val ids = _selection.value
-        if (ids.isEmpty()) return
-        val snapshot = items.filter { it.id in ids }
-        if (snapshot.isEmpty()) return
-        // Capture the scope first so the running turn picks it up via state.
-        openAiSheet(snapshot)
-        launchConvertToText()
-    }
-
-    /**
-     * Drop a `Done` Convert-to-text reply onto the canvas as a new text item.
-     * Goes through [EditorAction.AddItems] so undo / redo round-trips. Sized
-     * at the codec's default font and anchored at the centre of the frozen
-     * selection bounds, or `(0, 0)` world when scope is the whole note.
-     *
-     * This is the sub-phase 2.7 preview of the broader reply-action row that
-     * lands in 2.8; the general "Insert as text box" for arbitrary replies
-     * arrives there.
-     */
-    fun insertConvertResultAsTextBox(turnId: String) {
-        // A8 — the bubble's "Insert again" affordance routes here. Insertion
-        // now happens automatically on OCR success (see [placeConvertTextBox]);
-        // this re-places another copy without dismissing the sheet so the user
-        // can drop a second box or recover after an undo.
-        placeConvertTextBox(turnId)
-    }
-
-    /**
-     * Drop the recognized text of a Done convert-to-text [turnId] onto the
-     * canvas as a new text item (undoable via [EditorAction.AddItems]). Anchors
-     * at the centre of the frozen selection bounds, or `(0, 0)` world for
-     * whole-note scope. Marks the turn [AskTurn.convertInserted] so the UI can
-     * reflect that the placement happened. Leaves the sheet open.
-     */
-    private fun placeConvertTextBox(turnId: String) {
-        val state = _aiSheetState.value
-        val turn = state.turns.firstOrNull { it.id == turnId } ?: return
-        if (turn.state !is TurnState.Done || !turn.isConvertResult) return
-        val body = turn.replyBuffer
-        if (body.isEmpty()) return
-        val (worldX, worldY) = anchorPointForInsert(state.pendingSelection)
-        val payload = TextItemCodec.newAt(
-            worldX = worldX,
-            worldY = worldY,
-            body = body,
-            fontSize = TextItemCodec.DEFAULT_FONT_SIZE_PX,
-            alignment = TextItemCodec.ALIGN_LEFT,
-        )
-        val item = NoteItem(
-            noteId = resolvedNoteId,
-            zIndex = nextInkZIndex++,
-            kind = TextItemCodec.KIND,
-            tool = null,
-            colorArgb = TEXT_DEFAULT_COLOR,
-            baseWidthPx = 0f,
-            payload = TextItemCodec.encode(payload),
-        )
-        apply(EditorAction.AddItems(listOf(item)))
-        mutateTurn(turnId) { t -> t.copy(convertInserted = true) }
-    }
-
-    /**
-     * In-sheet model picker callback (sub-phase 2.8). Switching mid-
-     * conversation affects subsequent turns only — existing turn replies
-     * are immutable, which keeps the conversation log honest about which
-     * model produced what.
-     */
-    fun setAiModelId(modelId: String) {
-        if (modelId.isBlank()) return
-        _aiSheetState.update { it.copy(activeModelId = modelId) }
-    }
-
-    /**
-     * "Insert as text box" reply action (sub-phase 2.8). Drops the reply
-     * onto the canvas as a new text item via [EditorAction.AddItems] so
-     * undo / redo round-trips, then closes the sheet.
-     *
-     * Anchor preference: when the sheet was opened with a selection scope,
-     * anchor at that selection's centre so the reply lands near the
-     * strokes it was about. Otherwise anchor at the supplied viewport
-     * centre (world coords) so the new text appears on-screen. Callers
-     * pass viewport centre because the editor screen owns the viewport
-     * controller — the VM has no direct access to pan/zoom state.
-     *
-     * Streaming turns are rejected (the action row is gated on Done in the
-     * UI, but the guard keeps the VM honest); empty replies are dropped.
-     */
-    fun insertReplyAsTextBox(
-        turnId: String,
-        fallbackWorldX: Float,
-        fallbackWorldY: Float,
-    ) {
-        val state = _aiSheetState.value
-        val turn = state.turns.firstOrNull { it.id == turnId } ?: return
-        if (turn.state !is TurnState.Done) return
-        val body = turn.replyBuffer
-        if (body.isEmpty()) return
-        val (worldX, worldY) = state.pendingSelection
-            ?.takeIf { it.isNotEmpty() }
-            ?.let { anchorPointForInsert(it) }
-            ?: (fallbackWorldX to fallbackWorldY)
-        val payload = TextItemCodec.newAt(
-            worldX = worldX,
-            worldY = worldY,
-            body = body,
-            fontSize = TextItemCodec.DEFAULT_FONT_SIZE_PX,
-            alignment = TextItemCodec.ALIGN_LEFT,
-        )
-        val item = NoteItem(
-            noteId = resolvedNoteId,
-            zIndex = nextInkZIndex++,
-            kind = TextItemCodec.KIND,
-            tool = null,
-            colorArgb = TEXT_DEFAULT_COLOR,
-            baseWidthPx = 0f,
-            payload = TextItemCodec.encode(payload),
-        )
-        apply(EditorAction.AddItems(listOf(item)))
-        closeAiSheet()
-    }
-
-    /**
-     * Open the sub-phase 4.3 chat picker for the editor's share menu. The
-     * picker calls back with the chosen chat id (existing or fresh-via
-     * "+ New chat"); see [finalizeSendToChat].
-     */
-    fun openSendNoteToChatPicker() {
-        _sendToChatMode.value = SendToChatMode.ShareNote
-    }
-
-    /**
-     * Open the sub-phase 4.3 chat picker for an AI side-sheet reply. Only
-     * a Done, non-empty turn qualifies — Streaming/Error turns silently
-     * no-op so the action row in the side sheet doesn't need defensive
-     * gating beyond what it already does.
-     */
-    fun openSendReplyToChatPicker(turnId: String) {
-        val turn = _aiSheetState.value.turns.firstOrNull { it.id == turnId } ?: return
-        if (turn.state !is TurnState.Done) return
-        if (turn.replyBuffer.isEmpty()) return
-        _sendToChatMode.value = SendToChatMode.AiReply(turnId)
-    }
-
-    /** Dismiss the picker without sending. Safe to call when already hidden. */
-    fun dismissSendToChatPicker() {
-        _sendToChatMode.value = null
-    }
-
-    /**
-     * Resolve the picker selection into a navigation target (sub-phase 4.3).
-     *
-     * [chatIdOrNull] is the picked chat's id, or `null` to mint a fresh
-     * one via [ChatRepository.createChat]. Renders the appropriate PNG
-     * (whole-note for share-menu mode, selection-or-whole-note for AI-reply
-     * mode), stashes it on [PendingDraftStore] keyed by the resolved chat
-     * id, and returns that id so the screen can issue a single navigation.
-     *
-     * Closes the picker before doing any work so the sheet animates out
-     * while the rasterizer runs on the IO dispatcher — the user perceives
-     * the chat opening rather than a stalled sheet.
-     *
-     * Returns null when the picker isn't open (callers shouldn't hit this,
-     * but the guard keeps the VM honest under racey UI events).
-     */
-    suspend fun finalizeSendToChat(chatIdOrNull: String?): String? {
-        val mode = _sendToChatMode.value ?: return null
-        _sendToChatMode.value = null
-        // Save first so the rasterized PNG reflects the user's most-recent
-        // strokes — same contract as [sharePng] / [sharePdf].
-        commitTextEdit()
-        save()
-        val targetChatId = chatIdOrNull ?: chatRepository.createChat().id
-        val (renderItems, draftText) = when (mode) {
-            is SendToChatMode.ShareNote -> {
-                val snippet = _note.value.ocrText
-                    ?.take(OCR_SNIPPET_MAX_LEN)
-                    ?.takeIf { it.isNotBlank() }
-                items.toList() to snippet
-            }
-            is SendToChatMode.AiReply -> {
-                val turn = _aiSheetState.value.turns.firstOrNull { it.id == mode.turnId }
-                    ?: return null
-                if (turn.state !is TurnState.Done) return null
-                val body = turn.replyBuffer
-                if (body.isEmpty()) return null
-                val scope = _aiSheetState.value.pendingSelection
-                    ?.takeIf { it.isNotEmpty() }
-                    ?: items.toList()
-                scope to body
-            }
-        }
-        val uri = noteExporter.exportPng(note = _note.value, items = renderItems)
-        PendingDraftStore.put(targetChatId, imageUri = uri, draftText = draftText)
-        if (mode is SendToChatMode.AiReply) closeAiSheet()
-        return targetChatId
-    }
-
     private fun anchorPointForInsert(scope: List<NoteItem>?): Pair<Float, Float> {
         if (scope.isNullOrEmpty()) return 0f to 0f
         val rects = ArrayList<FloatArray>(scope.size)
@@ -3638,20 +3007,6 @@ class NoteEditorViewModel @Inject constructor(
      * [TurnState.Error] with a "Cancelled" message so the user sees what
      * happened rather than a silently-frozen stream.
      */
-    fun cancelAiStreaming() {
-        val jobs = streamingJobs.toMap()
-        streamingJobs.clear()
-        jobs.values.forEach { it.cancel() }
-        _aiSheetState.update { current ->
-            current.copy(
-                turns = current.turns.map { turn ->
-                    if (turn.state is TurnState.Streaming) {
-                        turn.copy(state = TurnState.Error(CANCEL_MESSAGE))
-                    } else turn
-                }
-            )
-        }
-    }
 
     /**
      * Sub-phase 7.5 — fire an AI EDIT request with the current selection.
@@ -3663,63 +3018,12 @@ class NoteEditorViewModel @Inject constructor(
      * reply isn't shown as prose; the user sees a preview overlay and an
      * Accept / Reject affordance from [pendingEdit].
      */
-    fun submitAiEdit(
-        description: String,
-        userPrompt: String,
-        selection: List<NoteItem>? = null,
-        generate: Boolean = false,
-        refine: Boolean = false,
-    ) {
-        val snapshot = _aiSheetState.value
-        if (snapshot.isStreaming) return
-        // From-scratch generation deliberately ignores any frozen selection so
-        // the model isn't asked to "edit" nothing. A refine (17.5 #2) keeps the
-        // selection: it's the sketch the model rasterizes and redraws beside.
-        val resolvedSelection = if (generate && !refine) null else selection
-            ?: snapshot.pendingSelection
-            ?: items.filter { it.id in _selection.value }.takeIf { it.isNotEmpty() }
-        val turnId = UUID.randomUUID().toString()
-        val turn = AskTurn(
-            id = turnId,
-            prompt = userPrompt,
-            selectionSummary = resolvedSelection?.let { summarizeSelection(it) },
-            replyBuffer = "Thinking…",
-            state = TurnState.Streaming,
-        )
-        _aiSheetState.update { current ->
-            current.copy(
-                isOpen = true,
-                turns = current.turns + turn,
-                inputText = "",
-            )
-        }
-        streamingJobs[turnId] = viewModelScope.launch {
-            runStream(
-                turnId = turnId,
-                prompt = userPrompt,
-                selection = resolvedSelection,
-                mode = AskMode.EDIT,
-                editDescription = description,
-                generate = generate,
-                refine = refine,
-            )
-        }
-    }
 
     /**
      * Phase 17.5 #1 — generate a new icon on the current artboard in the style
      * of a few existing gallery icons. Lands as a staged preview (add_path /
      * add_shape ops) the user accepts or rejects, exactly like an AI edit.
      */
-    fun generateIcon(prompt: String) {
-        if (prompt.isBlank()) return
-        submitAiEdit(
-            description = "AI Generate icon",
-            userPrompt = prompt,
-            selection = null,
-            generate = true,
-        )
-    }
 
     /**
      * Phase 17.5 #2 — "Make real" / annotate-and-iterate refine. Rasterizes
@@ -3729,20 +3033,6 @@ class NoteEditorViewModel @Inject constructor(
      * text, if any) lets the user steer or re-prompt the redraw. Falls back to
      * the whole-icon scope when nothing is selected.
      */
-    fun refineSketch(extraInstruction: String = "") {
-        if (_aiSheetState.value.isStreaming) return
-        val scope = _aiSheetState.value.pendingSelection
-            ?: items.filter { it.id in _selection.value }.takeIf { it.isNotEmpty() }
-            ?: items.toList()
-        if (scope.isEmpty()) return
-        submitAiEdit(
-            description = "AI Make real",
-            userPrompt = extraInstruction.trim(),
-            selection = scope,
-            generate = true,
-            refine = true,
-        )
-    }
 
     /**
      * Sub-phase 7.4 — apply the staged AI edit to the canvas as a single
@@ -3784,8 +3074,8 @@ class NoteEditorViewModel @Inject constructor(
 
     /**
      * Sub-phase 7.5 — single entry point for the lasso menu's edit actions.
-     * Local entries (Clean up / Straighten) run synchronously; model-backed
-     * entries route through [submitAiEdit] and stage a preview.
+     * Local entries (Clean up / Straighten) run synchronously; remote/model-backed
+     * entries are unavailable in the kids-only build.
      */
     fun applyCannedEditAction(action: CannedEditAction, selection: List<NoteItem>? = null) {
         val target = selection
@@ -3794,37 +3084,14 @@ class NoteEditorViewModel @Inject constructor(
         when (action) {
             CannedEditAction.CLEAN_UP -> applyLocalCleanUp(target)
             CannedEditAction.STRAIGHTEN -> applyLocalStraighten(target)
-            // Everything else is a model-backed EDIT: smoothing, shape
-            // detection, pattern continuation, and the icon design actions
-            // (Simplify / Flat style / Add detail) all share the same
-            // description + prompt → preview path.
+            // Remote/model-backed actions are disabled in the kids-only build.
             CannedEditAction.AI_CLEAN_UP,
             CannedEditAction.AUTO_SHAPE,
             CannedEditAction.CONTINUE,
             CannedEditAction.SIMPLIFY,
             CannedEditAction.FLAT_STYLE,
-            CannedEditAction.ADD_DETAIL -> submitAiEdit(
-                description = action.undoDescription,
-                userPrompt = action.prompt,
-                selection = target,
-            )
+            CannedEditAction.ADD_DETAIL -> Unit
         }
-    }
-
-    /**
-     * Sub-phase 7.5 — recolor selected items via the model. [colorArgb] is
-     * the colour the picker returned; we hand the model a fully-formed
-     * brief so the only thing it needs to do is emit the op.
-     */
-    fun applyAiRecolor(colorArgb: Int, selection: List<NoteItem>? = null) {
-        val target = selection ?: items.filter { it.id in _selection.value }
-        if (target.isEmpty()) return
-        val hex = "#%06X".format(colorArgb and 0xFFFFFF)
-        submitAiEdit(
-            description = "AI Recolor",
-            userPrompt = aiRecolorPrompt(hex),
-            selection = target,
-        )
     }
 
     /**
@@ -3938,125 +3205,17 @@ class NoteEditorViewModel @Inject constructor(
         return bounds
     }
 
-    private suspend fun runStream(
-        turnId: String,
-        prompt: String,
-        selection: List<NoteItem>?,
-        mode: AskMode = AskMode.ASK,
-        editDescription: String = "AI edit",
-        generate: Boolean = false,
-        refine: Boolean = false,
-    ) {
-        val modelId = _aiSheetState.value.activeModelId
-            .ifEmpty { preferencesManager.defaultModel.first() }
-        val creds = preferencesManager.credentialsFor(modelId)
-        // 17.5 #1: from-scratch generation pulls gallery style references.
-        // 17.5 #2: placement of a refine's cleaned vector. An icon is a
-        // *clipped* artboard — "beside the sketch" lands off-canvas and
-        // invisible — so we fit the result onto the sketch's own footprint and
-        // replace it (Undo restores the sketch to compare). A regular note has
-        // an infinite canvas, so the side-by-side comparison still works.
-        val styleReferences = if (generate && !refine) loadStyleReferenceIcons() else emptyList()
-        val isIcon = _note.value.isIcon
-        val authoredFit = when {
-            !refine -> null
-            isIcon -> refineInPlaceTarget(selection)
-            else -> refinePlacementTarget(selection)
-        }
-        val refineReplaceIds: Set<String> = if (refine && isIcon) {
-            selection?.mapTo(HashSet()) { it.id } ?: emptySet()
-        } else {
-            emptySet()
-        }
-        val request = AskRequest(
-            note = _note.value,
-            allItems = items.toList(),
-            selection = selection,
-            userPrompt = prompt,
-            modelId = modelId,
-            baseUrl = creds.baseUrl,
-            apiKey = creds.apiKey,
-            mode = mode,
-            layers = _layers.value,
-            isIcon = _note.value.isIcon,
-            generate = generate,
-            styleReferences = styleReferences,
-            refine = refine,
-        )
-        try {
-            aiService.ask(request).collect { chunk ->
-                // I4 / N1 — a designed brush is persisted to the user's brush
-                // library (a suspend write), not staged as a canvas edit. Handle
-                // it outside `mutateTurn`, whose lambda is a pure state transform.
-                if (chunk is AiChunk.BrushDesign) {
-                    val saved = saveDesignedBrush(chunk.spec)
-                    mutateTurn(turnId) { turn ->
-                        if (saved) turn.copy(
-                            replyBuffer = "Saved brush “${chunk.spec.name}” to your library.",
-                            state = TurnState.Done,
-                        ) else turn.copy(state = TurnState.Error("Couldn't save the designed brush."))
-                    }
-                    return@collect
-                }
-                mutateTurn(turnId) { turn ->
-                    when (chunk) {
-                        is AiChunk.Delta -> turn.copy(replyBuffer = turn.replyBuffer + chunk.text)
-                        is AiChunk.Complete -> turn.copy(state = TurnState.Done)
-                        is AiChunk.Error -> turn.copy(state = TurnState.Error(chunk.message))
-                        is AiChunk.EditPreview -> {
-                            stagePendingEdit(chunk, editDescription, authoredFit, refineReplaceIds)
-                            val message = chunk.doc.summary.ifBlank {
-                                if (chunk.doc.ops.isEmpty()) "No changes proposed."
-                                else "Preview ready (${chunk.doc.ops.size} ops)."
-                            }
-                            turn.copy(replyBuffer = message, state = TurnState.Done)
-                        }
-                        // Handled above via early return; unreachable here.
-                        is AiChunk.BrushDesign -> turn
-                    }
-                }
-            }
-            // Some upstreams complete the flow without an explicit Complete
-            // event (e.g. early termination); promote any still-Streaming
-            // turn to Done so the action row eventually appears.
-            mutateTurn(turnId) { turn ->
-                if (turn.state is TurnState.Streaming) turn.copy(state = TurnState.Done)
-                else turn
-            }
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            // Caller (cancelAiStreaming) already flipped the turn state; just
-            // let cancellation bubble so the parent scope is informed.
-            throw cancelled
-        } catch (t: Throwable) {
-            mutateTurn(turnId) { turn ->
-                turn.copy(state = TurnState.Error(t.message ?: "Unexpected error"))
-            }
-        } finally {
-            streamingJobs.remove(turnId)
-        }
-    }
 
     /**
      * Phase I4 / N1 — kick off the AI brush designer. A pure text round-trip on
      * its own turn: the model returns a brush-spec JSON that becomes a new
      * user-scope `BrushPreset`. No selection, no canvas mutation.
      */
-    fun designBrush(prompt: String, turnId: String) {
-        val job = viewModelScope.launch {
-            runStream(turnId = turnId, prompt = prompt, selection = null, mode = AskMode.DESIGN_BRUSH)
-        }
-        streamingJobs[turnId] = job
-    }
 
     /**
      * Phase I4 / N1 — persist a designed [BrushSpec] as a user-scope preset,
      * assigning the next ordinal within its tool. Returns true on success.
-     */
-    private suspend fun saveDesignedBrush(spec: BrushSpec): Boolean = try {
-        val ordinal = brushPresets.forTool(spec.tool).size
-        brushPresets.saveUserPreset(spec.toPreset(ordinal))
-        true
-    } catch (t: Throwable) {
+     */ catch (t: Throwable) {
         Log.w("NoteEditorViewModel", "saveDesignedBrush failed", t)
         false
     }
@@ -4067,24 +3226,7 @@ class NoteEditorViewModel @Inject constructor(
      * system prompt with a concrete style reference. Skips the current note and
      * any empty icons. Best-effort: returns empty on any failure so generation
      * still proceeds (just without a style anchor).
-     */
-    private suspend fun loadStyleReferenceIcons(): List<String> = try {
-        val icons = repository.observeIcons().first()
-            .filter { it.id != resolvedNoteId }
-        val refs = ArrayList<String>(3)
-        for (icon in icons) {
-            if (refs.size >= 3) break
-            val iconItems = repository.getItems(icon.id)
-            if (iconItems.isEmpty()) continue
-            val serialized = com.aichat.sandbox.data.notes.VectorCanvasJson.serialize(
-                items = iconItems,
-                bounds = null,
-                layers = repository.getLayers(icon.id),
-            )
-            refs += serialized.json
-        }
-        refs
-    } catch (t: Throwable) {
+     */ catch (t: Throwable) {
         Log.w("NoteEditorViewModel", "style reference load failed", t)
         emptyList()
     }
@@ -4096,50 +3238,7 @@ class NoteEditorViewModel @Inject constructor(
      * the parser already validated, but items could have changed since the
      * request was made).
      */
-    private fun stagePendingEdit(
-        chunk: AiChunk.EditPreview,
-        description: String,
-        authoredFit: FloatArray? = null,
-        replaceIds: Set<String> = emptySet(),
-    ) {
-        val simulation = EditPreviewController.simulate(
-            currentItems = items.toList(),
-            doc = chunk.doc,
-            idMap = chunk.idMap,
-            layerMap = chunk.layerMap,
-            layers = _layers.value,
-            newItemNoteId = _note.value.id,
-            authoredFit = authoredFit,
-        )
-        // Replace-in-place (icon refine): drop the original sketch items in the
-        // same edit so there's no invisible leftover. Guarded on the model
-        // having actually produced geometry — an empty reply must not silently
-        // wipe the sketch with nothing to show for it.
-        val finalSimulation = if (replaceIds.isNotEmpty() && simulation.added.isNotEmpty()) {
-            val alreadyRemoved = simulation.removed.mapTo(HashSet()) { it.id }
-            val extraRemoved = items.filter { it.id in replaceIds && it.id !in alreadyRemoved }
-            simulation.copy(removed = simulation.removed + extraRemoved)
-        } else {
-            simulation
-        }
-        _pendingEdit.value = PendingEdit(
-            description = description,
-            doc = chunk.doc,
-            simulation = finalSimulation,
-        )
-    }
 
-    private fun mutateTurn(turnId: String, block: (AskTurn) -> AskTurn) {
-        _aiSheetState.update { current ->
-            val idx = current.turns.indexOfFirst { it.id == turnId }
-            if (idx < 0) current
-            else current.copy(
-                turns = current.turns.toMutableList().also {
-                    it[idx] = block(it[idx])
-                }
-            )
-        }
-    }
 
     private fun summarizeSelection(selection: List<NoteItem>): String {
         val strokes = selection.count { it.kind == STROKE_KIND }
@@ -4704,84 +3803,4 @@ data class PendingEdit(
     val description: String,
     val doc: EditOpsDoc,
     val simulation: EditPreviewController.Simulation,
-)
-
-/**
- * Sub-phase 4.3 picker mode for the [SendToChatSheet]. Drives both how the
- * outgoing payload is rendered (whole-note PNG vs selection-or-whole-note
- * PNG) and what text lands in the destination composer (OCR snippet vs AI
- * reply body).
- */
-sealed interface SendToChatMode {
-    /** Editor TopAppBar share-menu entry: whole-note PNG + OCR snippet. */
-    data object ShareNote : SendToChatMode
-
-    /**
-     * AI side-sheet per-reply action. The PNG follows the turn's scope
-     * (selection if present, else whole note); the draft text is the reply
-     * body.
-     */
-    data class AiReply(val turnId: String) : SendToChatMode
-}
-
-/**
- * Coarse "is OCR doing something right now?" signal for the editor's TopAppBar
- * indicator (sub-phase 2.4). Combines model-download and per-note in-flight
- * state into the three shapes the UI actually cares about.
- */
-enum class OcrIndicator {
-    /** Nothing to show — model is ready and no job is running for this note. */
-    Idle,
-
-    /** ML Kit is fetching the Digital Ink model from Play Services. */
-    Downloading,
-
-    /** Recognition is in progress for the active note. */
-    Running,
-}
-
-/**
- * Open text-edit target driven by the TEXT tool. Two flavours so the editor
- * overlay can render in screen space and the commit path knows whether to
- * `AddItems` a brand-new item or apply an `UpdateText` to an existing one.
- */
-sealed interface TextEditTarget {
-    /** Screen-positioning origin (world coords). */
-    val worldX: Float
-    val worldY: Float
-    val fontSize: Float
-    val alignment: Byte
-    val initialBody: String
-
-    data class NewAt(
-        override val worldX: Float,
-        override val worldY: Float,
-        override val fontSize: Float,
-        override val alignment: Byte,
-    ) : TextEditTarget {
-        override val initialBody: String get() = ""
-    }
-
-    data class Existing(
-        val itemId: String,
-        override val initialBody: String,
-        override val worldX: Float,
-        override val worldY: Float,
-        override val fontSize: Float,
-        override val alignment: Byte,
-    ) : TextEditTarget
-}
-
-/**
- * Sub-phase 11.1 — open sticky-edit target. The world origin is the text
- * inset corner (rect min + [com.aichat.sandbox.ui.components.notes.StickyCodec.TEXT_INSET_WORLD])
- * so the Compose editor overlays exactly where the renderer lays the body out.
- */
-data class StickyEditTarget(
-    val itemId: String,
-    val initialBody: String,
-    val worldX: Float,
-    val worldY: Float,
-    val fontSize: Float,
-    val maxWidthWorld: Float,
 )
