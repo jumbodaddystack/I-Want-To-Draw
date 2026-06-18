@@ -9,7 +9,7 @@ import androidx.compose.ui.graphics.Color
  * This is the "precise pro tool" identity for the vector-creation surfaces
  * (Icons gallery, Vector Tune-Up workspace, and the drawing canvas in icon
  * mode). It is intentionally NOT the app-wide Material theme: chat / settings
- * keep [com.aichat.sandbox.ui.theme.AIChatSandboxTheme]. Studio Bench is a
+ * keep [com.aichat.sandbox.ui.theme.DoodlePadTheme]. Studio Bench is a
  * scoped overlay applied only where the artwork is the hero.
  *
  * Design rule (see anti-cookie-cutter doctrine): exactly one loud color —

@@ -50,7 +50,7 @@ private val LightColorScheme = lightColorScheme(
 )
 
 @Composable
-fun AIChatSandboxTheme(
+fun DoodlePadTheme(
     darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {

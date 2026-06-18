@@ -33,7 +33,7 @@ object AppModule {
         return Room.databaseBuilder(
             context,
             AppDatabase::class.java,
-            "kids_notebook.db"
+            "doodle_pad.db"
         ).addCallback(object : androidx.room.RoomDatabase.Callback() {
             // `notes_ocr_fts` is not a Room entity, so fresh installs (which
             // skip migrations) must create it here. Upgrades get the same DDL
