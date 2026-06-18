@@ -167,7 +167,6 @@ fun AppNavigation(
             ) {
                 NoteEditorScreen(
                     onNavigateBack = { navController.popBackStack() },
-                    onNavigateToChat = { },
                 )
             }
             composable(
@@ -176,7 +175,6 @@ fun AppNavigation(
             ) {
                 NoteEditorScreen(
                     onNavigateBack = { navController.popBackStack() },
-                    onNavigateToChat = { },
                 )
             }
             composable("notes_search") {

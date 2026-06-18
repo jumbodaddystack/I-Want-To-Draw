@@ -50,7 +50,7 @@ import com.aichat.sandbox.data.notes.PdfLayout
  * single place that answered "how do I get this drawing out?".
  *
  * This bottom sheet collects every export target in one list. Targets with no
- * options (PNG, Send to chat, frame PNG) fire on tap; targets with options
+ * options (PNG, frame PNG) fire on tap; targets with options
  * (PDF, SVG, Android XML, frame SVG) expand their controls *inline* with an
  * Export button — no second dialog. Only one target is expanded at a time so
  * the sheet stays scannable.
@@ -66,7 +66,6 @@ fun ShareExportSheet(
     onExportPdf: (mode: PdfLayout.Mode, pageSize: PdfLayout.PageSize) -> Unit,
     onShareSvg: (preservePressure: Boolean) -> Unit,
     onExportVectorXml: (sizeDp: Int, preservePressure: Boolean) -> Unit,
-    onSendToChat: () -> Unit,
     onExportFramePng: () -> Unit,
     onExportFrameSvg: (preservePressure: Boolean) -> Unit,
     onDismiss: () -> Unit,
@@ -150,16 +149,6 @@ fun ShareExportSheet(
                     onExport = onExportVectorXml,
                 )
             }
-
-            // ---- Send to chat (no options) ----
-            ExportRow(
-                icon = Icons.AutoMirrored.Filled.OpenInNew,
-                title = "Send to chat",
-                subtitle = "Attach a PNG to one of your conversations.",
-                hasOptions = false,
-                expanded = false,
-                onClick = onSendToChat,
-            )
 
             if (hasActiveFrame) {
                 HorizontalDivider()

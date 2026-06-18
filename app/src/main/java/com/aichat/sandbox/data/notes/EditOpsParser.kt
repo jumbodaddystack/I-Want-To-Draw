@@ -389,7 +389,7 @@ object EditOpsParser {
     /**
      * The Phase 7.2 system message the EDIT request injects. Kept here so
      * tests can assert the prompt content without reaching into
-     * [NoteAiService].
+     * the former remote edit pipeline.
      */
     const val SYSTEM_MESSAGE: String =
         "You are an assistant that edits the user's hand-drawn note. You receive " +
@@ -408,7 +408,7 @@ object EditOpsParser {
     /**
      * Icon-mode variant of [SYSTEM_MESSAGE]. Same `edit-ops` schema and rules,
      * but guidance tuned for designing a clean vector icon on a square
-     * artboard. Used when [AskRequest.isIcon] is true.
+     * artboard. Used for icon-mode edit validation.
      */
     const val ICON_SYSTEM_MESSAGE: String =
         "You are an assistant that helps the user turn a rough sketch into a " +

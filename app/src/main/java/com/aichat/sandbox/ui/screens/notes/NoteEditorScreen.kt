@@ -19,7 +19,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AspectRatio
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FolderZip
@@ -92,7 +91,6 @@ import kotlinx.coroutines.launch
 @Composable
 fun NoteEditorScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToChat: (chatId: String) -> Unit = { },
     viewModel: NoteEditorViewModel = hiltViewModel(),
 ) {
     val note by viewModel.note.collectAsState()
@@ -106,10 +104,6 @@ fun NoteEditorScreen(
     val stickyEditTarget by viewModel.stickyEditTarget.collectAsState()
     // Sub-phase 12.3 — non-null while a single path is in node-edit mode.
     val nodeEditTarget by viewModel.nodeEditTarget.collectAsState()
-    val aiSheetState by viewModel.aiSheetState.collectAsState()
-    val availableModels by viewModel.availableModels.collectAsState()
-    val chats by viewModel.chats.collectAsState()
-    val sendToChatMode by viewModel.sendToChatMode.collectAsState()
     val colorPickerOpen by viewModel.colorPickerOpen.collectAsState()
     val recentColors by viewModel.recentColors.collectAsState()
     val snapMask by viewModel.snapMask.collectAsState()
@@ -147,16 +141,7 @@ fun NoteEditorScreen(
     val iconPixelGrid by viewModel.iconPixelGrid.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    // P0.2 (audit A2) — reserve layout for the docked AI rail so the canvas
-    // sits beside it (never underneath), using the same width the sheet draws
-    // at. Animated so opening / closing the panel slides the canvas edge in
-    // step with the sheet instead of snapping.
-    val aiDockWidth = aiSheetWidthFor(LocalConfiguration.current.screenWidthDp.dp)
-    val aiDockPad by animateDpAsState(
-        targetValue = if (aiSheetState.isOpen) aiDockWidth else 0.dp,
-        animationSpec = tween(220),
-        label = "aiDockPad",
-    )
+    val aiDockPad = 0.dp
     var menuExpanded by remember { mutableStateOf(false) }
     var panelsMenuExpanded by remember { mutableStateOf(false) }
     // V7 — single entry point for all share/export formats (replaces the old
@@ -384,22 +369,6 @@ fun NoteEditorScreen(
                             .padding(horizontal = 4.dp),
                     )
                     OcrIndicatorBadge(state = ocrIndicator)
-                    // Hero AI action. Accented (filled-tonal) so it stands out
-                    // from the monochrome toolbar icons — the user said AI
-                    // should be easy to reach. Icons open the sheet edit-first;
-                    // notes open it ask-first (the VM picks the default).
-                    FilledTonalIconButton(
-                        onClick = { viewModel.openAiSheet(selection = null) },
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                        ),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.AutoAwesome,
-                            contentDescription = if (note.isIcon) "Edit icon with AI" else "Ask AI about this note",
-                        )
-                    }
                     // Panels group — frames/pages, stamps and layers fold into
                     // one menu so the bar keeps room for the title on phones
                     // (eight standalone actions used to squeeze it out
@@ -693,8 +662,8 @@ fun NoteEditorScreen(
                     onCut = viewModel::cutSelection,
                     onCopy = viewModel::copySelection,
                     onPaste = viewModel::pasteFromClipboard,
-                    onAsk = viewModel::openAiSheetForSelection,
-                    onConvertToText = viewModel::launchConvertSelectionToText,
+                    onAsk = {},
+                    onConvertToText = {},
                     canPaste = viewModel.hasClipboardContent(),
                     onCannedEdit = { action ->
                         viewModel.applyCannedEditAction(action)
@@ -1065,10 +1034,6 @@ fun NoteEditorScreen(
                         context.startActivity(Intent.createChooser(send, "Share icon as XML"))
                     }
                 },
-                onSendToChat = {
-                    shareExportSheetVisible = false
-                    viewModel.openSendNoteToChatPicker()
-                },
                 onExportFramePng = {
                     shareExportSheetVisible = false
                     scope.launch {
@@ -1165,29 +1130,6 @@ fun NoteEditorScreen(
                 onDismiss = viewModel::dismissColorPicker,
             )
         }
-        if (sendToChatMode != null) {
-            SendToChatSheet(
-                chats = chats,
-                onPickExisting = { chatId ->
-                    scope.launch {
-                        val resolved = viewModel.finalizeSendToChat(chatId) ?: return@launch
-                        onNavigateToChat(resolved)
-                    }
-                },
-                onPickNewChat = {
-                    scope.launch {
-                        val resolved = viewModel.finalizeSendToChat(null) ?: return@launch
-                        onNavigateToChat(resolved)
-                    }
-                },
-                onDismiss = viewModel::dismissSendToChatPicker,
-            )
-        }
-        // Sub-phase 7.4 — staged AI edit preview banner. Rendered above the
-        // AI side sheet so the user sees Accept / Reject as a row at the top
-        // of the canvas. Visual diff overlay (alpha+outline) is a follow-up;
-        // for v1 we show the summary + counts and let the side-sheet turn
-        // carry the model's narrative.
         pendingEdit?.let { pending ->
             AiEditPreviewBanner(
                 pending = pending,
@@ -1197,51 +1139,7 @@ fun NoteEditorScreen(
                 modifier = Modifier.padding(end = aiDockPad),
             )
         }
-        AiSideSheet(
-            modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars),
-            state = aiSheetState,
-            onInputChanged = viewModel::onAiInputChanged,
-            onSubmit = viewModel::submitAiFooter,
-            onCancel = viewModel::cancelAiStreaming,
-            onClose = viewModel::closeAiSheet,
-            onCannedPrompt = viewModel::submitCannedPrompt,
-            onIconQuickAction = viewModel::submitIconQuickAction,
-            onFooterModeChanged = viewModel::setAiFooterMode,
-            onClearScope = viewModel::clearAiSheetScope,
-            onReScopeToSelection = viewModel::reScopeAiSheetToSelection,
-            // A6 — offer "Use selection" only when there's a live canvas
-            // selection that isn't already the frozen scope, so the chip means
-            // something when shown.
-            canReScope = selection.isNotEmpty() &&
-                aiSheetState.pendingSelection?.map { it.id }?.toSet() != selection,
-            onInsertConvertResult = viewModel::insertConvertResultAsTextBox,
-            onInsertReply = { turnId ->
-                // Compute the viewport-centre fallback in world coords at
-                // tap time so panning between reply landing and the tap is
-                // honoured. When the sheet has a selection scope the VM
-                // ignores this and anchors at the selection bounds.
-                val vp = viewportController
-                val cx: Float
-                val cy: Float
-                if (vp != null && canvasSize != IntSize.Zero) {
-                    cx = vp.screenToWorldX(canvasSize.width / 2f)
-                    cy = vp.screenToWorldY(canvasSize.height / 2f)
-                } else {
-                    cx = 0f
-                    cy = 0f
-                }
-                viewModel.insertReplyAsTextBox(turnId, cx, cy)
-            },
-            onSendReplyToChat = { turnId ->
-                // Open the sub-phase 4.3 picker; navigation happens once the
-                // user picks an existing chat or "+ New chat". The VM
-                // already gates on Done / non-empty turns.
-                viewModel.openSendReplyToChatPicker(turnId)
-            },
-            onModelSelected = viewModel::setAiModelId,
-            availableModels = availableModels,
-            customModels = emptyList(),
-        )
+
       }
     }
 }

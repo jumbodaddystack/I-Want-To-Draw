@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.MergeType
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Polyline
-import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Timeline
@@ -602,7 +601,6 @@ private fun FloatingSelectionMenu(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Primary actions — the everyday verbs, always inline.
-            MenuButton(icon = Icons.Filled.QuestionAnswer, label = "Ask", onClick = onAsk)
             MenuButton(
                 icon = Icons.Filled.TextFields,
                 label = "To text",
