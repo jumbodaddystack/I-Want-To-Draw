@@ -18,7 +18,7 @@ import androidx.compose.ui.Modifier
 import com.aichat.sandbox.data.local.PreferencesManager
 import com.aichat.sandbox.ui.navigation.AppNavigation
 import com.aichat.sandbox.ui.navigation.NotesDeepLink
-import com.aichat.sandbox.ui.theme.AIChatSandboxTheme
+import com.aichat.sandbox.ui.theme.DoodlePadTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
         pendingDeepLink.value = parseNotesDeepLink(intent)
         setContent {
             val darkMode by preferencesManager.darkMode.collectAsState(initial = true)
-            AIChatSandboxTheme(darkTheme = darkMode) {
+            DoodlePadTheme(darkTheme = darkMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
