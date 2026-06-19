@@ -790,6 +790,43 @@ class NoteEditorViewModel @Inject constructor(
         viewModelScope.launch { notebookRepository.touchUpdatedAt(book.id) }
     }
 
+
+    /** Kid shortcut: drop a big emoji sticker in the middle of the current page. */
+    fun addStickerShortcut(sticker: String) {
+        val frame = currentFrameBounds() ?: floatArrayOf(0f, 0f, 600f, 600f)
+        val payload = TextItemCodec.newAt(
+            worldX = (frame[0] + frame[2]) * 0.5f - 36f,
+            worldY = (frame[1] + frame[3]) * 0.5f - 36f,
+            body = sticker,
+            fontSize = 96f,
+            alignment = TextItemCodec.ALIGN_CENTER,
+        )
+        val item = NoteItem(
+            noteId = resolvedNoteId,
+            zIndex = nextInkZIndex++,
+            kind = TextItemCodec.KIND,
+            tool = null,
+            colorArgb = TEXT_DEFAULT_COLOR,
+            baseWidthPx = 0f,
+            payload = TextItemCodec.encode(payload),
+            layerId = layerIdForNewItem(),
+        )
+        apply(EditorAction.AddItems(listOf(item)))
+    }
+
+    /** Remove only the art on the selected notebook page/frame. */
+    fun clearCurrentPage() {
+        val frame = currentFrameBounds() ?: return
+        val removed = items.filter { item ->
+            val bounds = itemBounds(item) ?: return@filter false
+            bounds[2] >= frame[0] && bounds[0] <= frame[2] &&
+                bounds[3] >= frame[1] && bounds[1] <= frame[3]
+        }
+        if (removed.isEmpty()) return
+        clearSelection()
+        apply(EditorAction.RemoveItems(removed))
+    }
+
     // ── Audio-synced ink (sub-phase 9.4) ─────────────────────────────────
     //
     // Recording state, the per-note audio list, and the player are all

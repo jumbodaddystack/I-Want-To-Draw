@@ -18,9 +18,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Grid4x4
@@ -155,6 +157,8 @@ fun NoteEditorScreen(
     var brushSheetOpen by remember { mutableStateOf(false) }
     var canvasSizeDialogVisible by remember { mutableStateOf(false) }
     var saveStampDialogVisible by remember { mutableStateOf(false) }
+    var confirmNewPage by remember { mutableStateOf(false) }
+    var confirmClearPage by remember { mutableStateOf(false) }
     var viewportController by remember { mutableStateOf<ViewportController?>(null) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var paletteHeightPx by remember { mutableStateOf(0) }
@@ -817,6 +821,13 @@ fun NoteEditorScreen(
                                     onTextureChange = viewModel::setActiveTextureId,
                                 )
                             }
+                            if (notebook != null) {
+                                KidPageShortcutBar(
+                                    onNewPage = { confirmNewPage = true },
+                                    onClearPage = { confirmClearPage = true },
+                                    onSticker = viewModel::addStickerShortcut,
+                                )
+                            }
                             ToolPalette(
                                 state = viewModel.palette,
                                 onPickCustomColor = viewModel::openColorPicker,
@@ -1113,6 +1124,33 @@ fun NoteEditorScreen(
                 )
             }
         }
+        if (confirmNewPage) {
+            AlertDialog(
+                onDismissRequest = { confirmNewPage = false },
+                title = { Text("Add a fresh page?") },
+                text = { Text("Your drawing stays safe. We’ll jump to a blank new page.") },
+                confirmButton = {
+                    Button(onClick = { confirmNewPage = false; viewModel.addNotebookPage() }) {
+                        Text("New page")
+                    }
+                },
+                dismissButton = { TextButton(onClick = { confirmNewPage = false }) { Text("Not now") } },
+            )
+        }
+        if (confirmClearPage) {
+            AlertDialog(
+                onDismissRequest = { confirmClearPage = false },
+                title = { Text("Clear this page?") },
+                text = { Text("This erases the art on the current page only. You can still use Undo right after.") },
+                confirmButton = {
+                    Button(onClick = { confirmClearPage = false; viewModel.clearCurrentPage() }) {
+                        Text("Clear page")
+                    }
+                },
+                dismissButton = { TextButton(onClick = { confirmClearPage = false }) { Text("Keep drawing") } },
+            )
+        }
+
         if (saveStampDialogVisible) {
             SaveStampDialog(
                 onConfirm = { name ->
@@ -1625,6 +1663,35 @@ private fun PaletteCollapseHandle(
                 modifier = Modifier.size(20.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+private fun KidPageShortcutBar(
+    onNewPage: () -> Unit,
+    onClearPage: () -> Unit,
+    onSticker: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Button(onClick = onNewPage, modifier = Modifier.height(56.dp)) {
+            Icon(Icons.Filled.Add, contentDescription = null)
+            Text("Page")
+        }
+        OutlinedButton(onClick = onClearPage, modifier = Modifier.height(56.dp)) {
+            Icon(Icons.Filled.DeleteSweep, contentDescription = null)
+            Text("Clear")
+        }
+        listOf("⭐", "❤️", "🌈", "🦄").forEach { sticker ->
+            FilledTonalButton(onClick = { onSticker(sticker) }, modifier = Modifier.size(56.dp)) {
+                Text(sticker)
+            }
         }
     }
 }

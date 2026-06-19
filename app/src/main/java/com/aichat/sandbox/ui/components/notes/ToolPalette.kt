@@ -86,8 +86,8 @@ fun ToolPalette(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             ToolRow(state = state)
 
@@ -308,13 +308,13 @@ private fun ToolButtonShell(
     }
     Box(
         modifier = modifier
-            .height(48.dp)
+            .height(64.dp)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .size(38.dp)
+                .size(54.dp)
                 .clip(CircleShape)
                 .background(
                     if (selected) studio.accentSignature else Color.Transparent
@@ -326,7 +326,7 @@ private fun ToolButtonShell(
                 contentDescription = contentDescription,
                 tint = if (selected) studio.onAccent
                 else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(30.dp),
             )
         }
     }
@@ -377,7 +377,7 @@ private fun InkConfigRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ToolPaletteState.DEFAULT_COLOR_SWATCHES.forEach { swatch ->
@@ -440,9 +440,9 @@ private fun WidthPreviewDot(widthPx: Float, colorArgb: Int) {
     // over physical accuracy.
     val fraction = (widthPx - ToolPaletteState.WIDTH_MIN_PX) /
         (ToolPaletteState.WIDTH_MAX_PX - ToolPaletteState.WIDTH_MIN_PX)
-    val diameter = (4f + fraction * 20f).dp
+    val diameter = (10f + fraction * 30f).dp
     Box(
-        modifier = Modifier.size(24.dp),
+        modifier = Modifier.size(40.dp),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -524,7 +524,7 @@ private fun StickyConfigRow(state: ToolPaletteState) {
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = "Sticky",
@@ -742,7 +742,7 @@ private fun ColorSwatch(
     // touch-target minimum and easy to fat-finger.
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(58.dp)
             .pointerInput(colorArgb) {
                 detectTapGestures(
                     onTap = { onSelect() },
@@ -753,7 +753,7 @@ private fun ColorSwatch(
     ) {
         Box(
             modifier = Modifier
-                .size(28.dp)
+                .size(42.dp)
                 .clip(CircleShape)
                 .background(color)
                 .border(
@@ -780,13 +780,13 @@ private fun CustomColorTile(
     }
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(58.dp)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .size(28.dp)
+                .size(42.dp)
                 .clip(CircleShape)
                 .then(
                     if (showingCustom && customColorArgb != null) {
@@ -806,7 +806,7 @@ private fun CustomColorTile(
                 imageVector = Icons.Filled.Add,
                 contentDescription = "Custom colour",
                 tint = Color.White,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(24.dp),
             )
         }
     }
