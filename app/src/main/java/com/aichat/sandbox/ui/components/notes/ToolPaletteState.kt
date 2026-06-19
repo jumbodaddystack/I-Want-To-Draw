@@ -326,12 +326,12 @@ class ToolPaletteState {
             ConnectorCodec.ROUTE_STRAIGHT.toInt()..ConnectorCodec.ROUTE_CURVED.toInt()
 
         val DEFAULT_COLOR_SWATCHES: List<Int> = listOf(
-            Color.BLACK,
-            Color.rgb(45, 45, 45),
-            Color.rgb(214, 40, 40),
-            Color.rgb(36, 99, 235),
-            Color.rgb(16, 159, 92),
-            Color.rgb(255, 159, 28),
+            Color.rgb(30, 30, 30),
+            Color.rgb(255, 59, 48),
+            Color.rgb(0, 122, 255),
+            Color.rgb(52, 199, 89),
+            Color.rgb(255, 204, 0),
+            Color.rgb(175, 82, 222),
         )
     }
 }
