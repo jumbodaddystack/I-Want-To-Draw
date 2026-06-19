@@ -1997,7 +1997,6 @@ class NoteEditorViewModel @Inject constructor(
     ): ReplayTimeline = ReplayTimeline.build(items.toList(), config)
 
     /**
-    /**
      * Accept a tutor generation: ensure a ghosted guide layer exists, reparent
      * the authored construction strokes onto it (canonical payloads untouched),
      * commit through the same [apply] path as any edit, and open the stepped
@@ -3242,31 +3241,6 @@ class NoteEditorViewModel @Inject constructor(
         return bounds
     }
 
-
-    /**
-     * Phase I4 / N1 — kick off the AI brush designer. A pure text round-trip on
-     * its own turn: the model returns a brush-spec JSON that becomes a new
-     * user-scope `BrushPreset`. No selection, no canvas mutation.
-     */
-
-    /**
-     * Phase I4 / N1 — persist a designed [BrushSpec] as a user-scope preset,
-     * assigning the next ordinal within its tool. Returns true on success.
-     */ catch (t: Throwable) {
-        Log.w("NoteEditorViewModel", "saveDesignedBrush failed", t)
-        false
-    }
-
-    /**
-     * Phase 17.5 #1 — load up to three other gallery icons, serialized as
-     * [com.aichat.sandbox.data.notes.VectorCanvasJson], to seed the generation
-     * system prompt with a concrete style reference. Skips the current note and
-     * any empty icons. Best-effort: returns empty on any failure so generation
-     * still proceeds (just without a style anchor).
-     */ catch (t: Throwable) {
-        Log.w("NoteEditorViewModel", "style reference load failed", t)
-        emptyList()
-    }
 
     /**
      * Sub-phase 7.4 — convert an EDIT-mode terminal chunk into a staged
