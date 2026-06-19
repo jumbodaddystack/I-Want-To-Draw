@@ -129,15 +129,17 @@ class NoteVectorDrawableExporter @Inject constructor(
             layers: List<NoteLayer> = emptyList(),
         ): Rendered {
             val size = sizeDp.toFloat()
+            val drawableItems = items.filter(::isVectorDrawableItem)
             val src = frameBounds
-                ?: NoteRasterizer.computeBounds(items)
+                ?: NoteRasterizer.computeBounds(drawableItems)
                 ?: NoteExporter.defaultPaperBounds()
             val visibleItems = if (frameBounds == null) items else items.filter { item ->
+                if (!isVectorDrawableItem(item)) return@filter true
                 val ib = NoteRasterizer.computeBounds(listOf(item)) ?: return@filter false
                 rectsIntersect(ib, frameBounds)
             }.toList()
 
-            val transform = fitTransform(visibleItems, src, size)
+            val transform = fitTransform(visibleItems.filter(::isVectorDrawableItem), src, size)
 
             val sb = StringBuilder(1024)
             sb.append("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n")
@@ -150,9 +152,7 @@ class NoteVectorDrawableExporter @Inject constructor(
             // Skipped count is kind-based (text + image have no <path>
             // equivalent) and independent of layer grouping, so it matches
             // the flat-render warning path exactly.
-            val skipped = visibleItems.count {
-                it.kind != NoteItem.KIND_STROKE && it.kind != Shape.KIND && it.kind != PathCodec.KIND
-            }
+            val skipped = visibleItems.count { !isVectorDrawableItem(it) }
             if (layers.isEmpty()) {
                 for (item in visibleItems.sortedBy { it.zIndex }) {
                     appendItem(sb, item, transform, preservePressure, layerAlpha = 1f)
@@ -585,6 +585,9 @@ class NoteVectorDrawableExporter @Inject constructor(
             val b = argb and 0xFF
             return "#%02X%02X%02X".format(r, g, b)
         }
+
+        private fun isVectorDrawableItem(item: NoteItem): Boolean =
+            item.kind == NoteItem.KIND_STROKE || item.kind == Shape.KIND || item.kind == PathCodec.KIND
 
         private fun rectsIntersect(a: FloatArray, b: FloatArray): Boolean =
             !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3])

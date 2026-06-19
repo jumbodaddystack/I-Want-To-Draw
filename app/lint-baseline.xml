@@ -1,0 +1,1757 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.11.1" type="baseline" client="gradle" dependencies="false" name="AGP (8.11.1)" variant="all" version="8.11.1">
+
+    <issue
+        id="StartActivityAndCollapseDeprecated"
+        message="TileService#startActivityAndCollapse(Intent) is deprecated. Use TileService#startActivityAndCollapse(PendingIntent) instead."
+        errorLine1="            startActivityAndCollapse(intent)"
+        errorLine2="                                     ~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/service/NotesQuickTileService.kt"
+            line="32"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="FullBackupContent"
+        message="`.` is not in an included path"
+        errorLine1="    &lt;exclude domain=&quot;sharedpref&quot; path=&quot;.&quot; />"
+        errorLine2="                                       ~">
+        <location
+            file="src/main/res/xml/backup_rules.xml"
+            line="4"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="SelectedPhotoAccess"
+        message="Your app is currently not handling Selected Photos Access introduced in Android 14+"
+        errorLine1="        android:name=&quot;android.permission.READ_MEDIA_IMAGES&quot;"
+        errorLine2="                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="13"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of Gradle than 8.13 is available: 8.14.5"
+        errorLine1="distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-bin.zip"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="../gradle/wrapper/gradle-wrapper.properties"
+            line="3"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.activity:activity-compose than 1.8.2 is available: 1.13.0"
+        errorLine1="    implementation(&quot;androidx.activity:activity-compose:1.8.2&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="94"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.7.0 is available: 2.11.0"
+        errorLine1="    implementation(&quot;androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="95"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-compose than 2.7.0 is available: 2.11.0"
+        errorLine1="    implementation(&quot;androidx.lifecycle:lifecycle-runtime-compose:2.7.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="96"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.navigation:navigation-compose than 2.7.6 is available: 2.9.8"
+        errorLine1="    implementation(&quot;androidx.navigation:navigation-compose:2.7.6&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="97"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.12.0 is available: 1.19.0"
+        errorLine1="    implementation(&quot;androidx.core:core-ktx:1.12.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="100"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.7.0 is available: 2.11.0"
+        errorLine1="    implementation(&quot;androidx.lifecycle:lifecycle-runtime-ktx:2.7.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="101"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.input:input-motionprediction than 1.0.0-beta05 is available: 1.0.0"
+        errorLine1="    implementation(&quot;androidx.input:input-motionprediction:1.0.0-beta05&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="104"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of com.google.mlkit:digital-ink-recognition than 18.1.0 is available: 19.0.0"
+        errorLine1="    implementation(&quot;com.google.mlkit:digital-ink-recognition:18.1.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="133"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-runtime than 2.6.1 is available: 2.8.4"
+        errorLine1="    implementation(&quot;androidx.room:room-runtime:2.6.1&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="139"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-ktx than 2.6.1 is available: 2.8.4"
+        errorLine1="    implementation(&quot;androidx.room:room-ktx:2.6.1&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="140"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-compiler than 2.6.1 is available: 2.8.4"
+        errorLine1="    ksp(&quot;androidx.room:room-compiler:2.6.1&quot;)"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="141"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.hilt:hilt-navigation-compose than 1.1.0 is available: 1.3.0"
+        errorLine1="    implementation(&quot;androidx.hilt:hilt-navigation-compose:1.1.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="146"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.datastore:datastore-preferences than 1.0.0 is available: 1.2.1"
+        errorLine1="    implementation(&quot;androidx.datastore:datastore-preferences:1.0.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="151"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.ext:junit than 1.1.5 is available: 1.3.0"
+        errorLine1="    androidTestImplementation(&quot;androidx.test.ext:junit:1.1.5&quot;)"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="171"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test:runner than 1.5.2 is available: 1.7.0"
+        errorLine1="    androidTestImplementation(&quot;androidx.test:runner:1.5.2&quot;)"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="172"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test:core than 1.5.0 is available: 1.7.0"
+        errorLine1="    androidTestImplementation(&quot;androidx.test:core:1.5.0&quot;)"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="173"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-testing than 2.6.1 is available: 2.8.4"
+        errorLine1="    androidTestImplementation(&quot;androidx.room:room-testing:2.6.1&quot;)"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="174"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-play-services than 1.7.3 is available: 1.11.0"
+        errorLine1="    implementation(&quot;org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="136"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of com.google.dagger:hilt-android than 2.52 is available: 2.59.2"
+        errorLine1="    implementation(&quot;com.google.dagger:hilt-android:2.52&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="144"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of com.google.dagger:hilt-android-compiler than 2.52 is available: 2.59.2"
+        errorLine1="    ksp(&quot;com.google.dagger:hilt-android-compiler:2.52&quot;)"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="145"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of com.google.code.gson:gson than 2.10.1 is available: 2.14.0"
+        errorLine1="    implementation(&quot;com.google.code.gson:gson:2.10.1&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="148"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of io.coil-kt:coil-compose than 2.5.0 is available: 2.7.0"
+        errorLine1="    implementation(&quot;io.coil-kt:coil-compose:2.5.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="154"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-test than 1.7.3 is available: 1.11.0"
+        errorLine1="    testImplementation(&quot;org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3&quot;)"
+        errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="170"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-test than 1.7.3 is available: 1.11.0"
+        errorLine1="    androidTestImplementation(&quot;org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3&quot;)"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="175"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Source.NORMALIZED_PRESSURE can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            source = BrushBehavior.Source.NORMALIZED_PRESSURE,"
+        errorLine2="                                          ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="126"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Source.TILT_IN_RADIANS can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            source = BrushBehavior.Source.TILT_IN_RADIANS,"
+        errorLine2="                                          ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="138"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        val pressureAlpha = BrushBehavior.Builder()"
+        errorLine2="                                          ~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="145"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSource can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setSource(BrushBehavior.Source.NORMALIZED_PRESSURE)"
+        errorLine2="             ~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="146"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSource can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setSource(BrushBehavior.Source.NORMALIZED_PRESSURE)"
+        errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="146"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Source.NORMALIZED_PRESSURE can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setSource(BrushBehavior.Source.NORMALIZED_PRESSURE)"
+        errorLine2="                                            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="146"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setTarget can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setTarget(BrushBehavior.Target.OPACITY_MULTIPLIER)"
+        errorLine2="             ~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="147"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setTarget can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setTarget(BrushBehavior.Target.OPACITY_MULTIPLIER)"
+        errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="147"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Target.OPACITY_MULTIPLIER can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setTarget(BrushBehavior.Target.OPACITY_MULTIPLIER)"
+        errorLine2="                                            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="147"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSourceValueRangeStart can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setSourceValueRangeStart(0f)"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="148"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSourceValueRangeEnd can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setSourceValueRangeEnd(1f)"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="149"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setTargetModifierRangeStart can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setTargetModifierRangeStart(PENCIL_MIN_OPACITY_MULTIPLIER)"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="150"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setTargetModifierRangeEnd can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setTargetModifierRangeEnd(PENCIL_MAX_OPACITY_MULTIPLIER)"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="151"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setResponseCurve can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setResponseCurve(powCurve(PENCIL_PRESSURE_EXPONENT))"
+        errorLine2="             ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="152"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setResponseCurve can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setResponseCurve(powCurve(PENCIL_PRESSURE_EXPONENT))"
+        errorLine2="                              ~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="152"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSourceOutOfRangeBehavior can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setSourceOutOfRangeBehavior(BrushBehavior.OutOfRange.CLAMP)"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="153"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSourceOutOfRangeBehavior can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setSourceOutOfRangeBehavior(BrushBehavior.OutOfRange.CLAMP)"
+        errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="153"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="OutOfRange.CLAMP can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setSourceOutOfRangeBehavior(BrushBehavior.OutOfRange.CLAMP)"
+        errorLine2="                                                                  ~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="153"
+            column="67"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="BrushBehavior.ALL_TOOL_TYPES can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setEnabledToolTypes(BrushBehavior.ALL_TOOL_TYPES)"
+        errorLine2="                                               ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="154"
+            column="48"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setEnabledToolTypes can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setEnabledToolTypes(BrushBehavior.ALL_TOOL_TYPES)"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="154"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setEnabledToolTypes can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .setEnabledToolTypes(BrushBehavior.ALL_TOOL_TYPES)"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="154"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.build can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            .build()"
+        errorLine2="             ~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="155"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Source can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        source: BrushBehavior.Source,"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="179"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="EasingFunction can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        responseCurve: EasingFunction,"
+        errorLine2="                       ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="184"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="BrushBehavior can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="    ): BrushBehavior = BrushBehavior.Builder()"
+        errorLine2="       ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="185"
+            column="8"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="    ): BrushBehavior = BrushBehavior.Builder()"
+        errorLine2="                                     ~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="185"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSource can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setSource(source)"
+        errorLine2="         ~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="186"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSource can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setSource(source)"
+        errorLine2="                   ~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="186"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setTarget can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setTarget(BrushBehavior.Target.SIZE_MULTIPLIER)"
+        errorLine2="         ~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="187"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setTarget can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setTarget(BrushBehavior.Target.SIZE_MULTIPLIER)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="187"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Target.SIZE_MULTIPLIER can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setTarget(BrushBehavior.Target.SIZE_MULTIPLIER)"
+        errorLine2="                                        ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="187"
+            column="41"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSourceValueRangeStart can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setSourceValueRangeStart(sourceStart)"
+        errorLine2="         ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="188"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSourceValueRangeEnd can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setSourceValueRangeEnd(sourceEnd)"
+        errorLine2="         ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="189"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setTargetModifierRangeStart can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setTargetModifierRangeStart(targetStart)"
+        errorLine2="         ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="190"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setTargetModifierRangeEnd can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setTargetModifierRangeEnd(targetEnd)"
+        errorLine2="         ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="191"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setResponseCurve can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setResponseCurve(responseCurve)"
+        errorLine2="         ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="192"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setResponseCurve can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setResponseCurve(responseCurve)"
+        errorLine2="                          ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="192"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSourceOutOfRangeBehavior can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setSourceOutOfRangeBehavior(BrushBehavior.OutOfRange.CLAMP)"
+        errorLine2="         ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="193"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setSourceOutOfRangeBehavior can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setSourceOutOfRangeBehavior(BrushBehavior.OutOfRange.CLAMP)"
+        errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="193"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="OutOfRange.CLAMP can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setSourceOutOfRangeBehavior(BrushBehavior.OutOfRange.CLAMP)"
+        errorLine2="                                                              ~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="193"
+            column="63"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="BrushBehavior.ALL_TOOL_TYPES can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setEnabledToolTypes(BrushBehavior.ALL_TOOL_TYPES)"
+        errorLine2="                                           ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="194"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setEnabledToolTypes can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setEnabledToolTypes(BrushBehavior.ALL_TOOL_TYPES)"
+        errorLine2="         ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="194"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setEnabledToolTypes can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setEnabledToolTypes(BrushBehavior.ALL_TOOL_TYPES)"
+        errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="194"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.build can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .build()"
+        errorLine2="         ~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="195"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="BrushBehavior can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        behaviors: List&lt;BrushBehavior> = emptyList(),"
+        errorLine2="                        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="201"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="BrushTip can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="    ): BrushTip = BrushTip.Builder()"
+        errorLine2="       ~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="202"
+            column="8"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="    ): BrushTip = BrushTip.Builder()"
+        errorLine2="                           ~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="202"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setScaleX can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setScaleX(scaleX)"
+        errorLine2="         ~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="203"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setScaleX can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setScaleX(scaleX)"
+        errorLine2="                   ~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="203"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setScaleY can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setScaleY(scaleY)"
+        errorLine2="         ~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="204"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setScaleY can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setScaleY(scaleY)"
+        errorLine2="                   ~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="204"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setBehaviors can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setBehaviors(behaviors)"
+        errorLine2="         ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="205"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.setBehaviors can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .setBehaviors(behaviors)"
+        errorLine2="                      ~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="205"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="Builder.build can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        .build()"
+        errorLine2="         ~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="206"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="BrushTip can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="    private fun familyOf(tip: BrushTip, clientId: String): BrushFamily ="
+        errorLine2="                              ~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="208"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="BrushFamily can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        BrushFamily(tip = tip, paint = BrushPaint(), clientBrushFamilyId = clientId)"
+        errorLine2="        ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="209"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="BrushPaint can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        BrushFamily(tip = tip, paint = BrushPaint(), clientBrushFamilyId = clientId)"
+        errorLine2="                                       ~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="209"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="EasingFunction can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="    private fun powCurve(exp: Double): EasingFunction ="
+        errorLine2="                                       ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="216"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="EasingFunction can only be accessed from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="    private fun sineEaseCurve(): EasingFunction ="
+        errorLine2="                                 ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkBrushFamilies.kt"
+            line="228"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="MutableStrokeInputBatch.toImmutable can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="            return BatchConversion(batch.toImmutable(), if (isV2) 0L else null)"
+        errorLine2="                                         ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkInterop.kt"
+            line="107"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="RestrictedApi"
+        message="MutableStrokeInputBatch.toImmutable can only be called from within the same library group (referenced groupId=`androidx.ink` from groupId=`AI-Chat-Sandbox`)"
+        errorLine1="        return BatchConversion(batch.toImmutable(), recordingOrigin)"
+        errorLine2="                                     ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkInterop.kt"
+            line="144"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="VisibleForTests"
+        message="This method should only be accessed from tests or within private scope"
+        errorLine1="                StrokeInput.create("
+        errorLine2="                            ~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/ink/InkInterop.kt"
+            line="130"
+            column="29"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/screens/notes/SelectionOverlay.kt"
+            line="154"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/screens/notes/SelectionOverlay.kt"
+            line="564"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ProduceStateDoesNotAssignValue"
+        message="produceState calls should assign `value` inside the producer lambda"
+        errorLine1="    val bitmap by produceState&lt;android.graphics.Bitmap?>("
+        errorLine2="                  ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/screens/notes/FrameNavigator.kt"
+            line="152"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="ProduceStateDoesNotAssignValue"
+        message="produceState calls should assign `value` inside the producer lambda"
+        errorLine1="    val bitmap by produceState&lt;android.graphics.Bitmap?>("
+        errorLine2="                  ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/screens/notebooks/PageThumbnailRail.kt"
+            line="108"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="Aligned16KB"
+        message="The native library `arm64-v8a/libdigitalink.so` (from `com.google.mlkit:digital-ink-recognition:18.1.0`) is not 16 KB aligned"
+        errorLine1="    implementation(&quot;com.google.mlkit:digital-ink-recognition:18.1.0&quot;)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="133"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="Aligned16KB"
+        message="The native library `arm64-v8a/libdigitalink.so` (from `com.google.mlkit:digital-ink-recognition:18.1.0`) is not 16 KB aligned">
+        <location
+            file="$GRADLE_USER_HOME/caches/8.13/transforms/d7a32192159434e23adf5d1d3c47619e/transformed/digital-ink-recognition-18.1.0/jni/arm64-v8a/libdigitalink.so"/>
+    </issue>
+
+    <issue
+        id="Aligned16KB"
+        message="The native library `arm64-v8a/libdigitalink.so` (from `com.google.mlkit:digital-ink-recognition:18.1.0`) is not 16 KB aligned">
+        <location
+            file="$GRADLE_USER_HOME/caches/8.13/transforms/d7a32192159434e23adf5d1d3c47619e/transformed/digital-ink-recognition-18.1.0/jni/arm64-v8a/libdigitalink.so"/>
+    </issue>
+
+    <issue
+        id="DataExtractionRules"
+        message="The attribute `android:allowBackup` is deprecated from Android 12 and may be removed in future versions. Consider adding the attribute `android:dataExtractionRules` specifying an `@xml` resource which configures backups and device transfers on Android 12 and higher."
+        errorLine1="        android:allowBackup=&quot;true&quot;"
+        errorLine2="                             ~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="23"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="DataExtractionRules"
+        message="The attribute `android:fullBackupContent` is deprecated from Android 12 and higher and may be removed in future versions. Consider adding the attribute `android:dataExtractionRules` specifying an `@xml` resource which configures backups and device transfers on Android 12 and higher."
+        errorLine1="        android:fullBackupContent=&quot;@xml/backup_rules&quot;"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="24"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 33"
+        errorLine1="        tools:targetApi=&quot;33&quot; />"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="14"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 34"
+        errorLine1="        tools:targetApi=&quot;34&quot;>"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="30"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 27"
+        errorLine1="            tools:targetApi=&quot;27&quot;>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="59"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 36"
+        errorLine1="        val mr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/notes/AudioRecorder.kt"
+            line="55"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 36"
+        errorLine1="        val useStylus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {"
+        errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/MainActivity.kt"
+            line="84"
+            column="29"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 36"
+        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/service/NotesQuickTileService.kt"
+            line="22"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 36.0. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <location
+            file="src/main/res/mipmap-anydpi-v26"/>
+    </issue>
+
+    <issue
+        id="UnnecessaryArrayInit"
+        message="This initialization lambda (`{ 0f }`) is unnecessary and is less efficient"
+        errorLine1="        val px = FloatArray(TILE_SIZE * TILE_SIZE) { 0f }"
+        errorLine2="                                                   ~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/TextureRegistry.kt"
+            line="107"
+            column="52"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
+        errorLine1="    var scrubValue by remember { mutableStateOf(0f) }"
+        errorLine2="                                 ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/AudioPlaybackBar.kt"
+            line="147"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var coverColor by remember { mutableStateOf(COVER_COLORS[0]) }"
+        errorLine2="                                 ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/screens/notebooks/NewNotebookSheet.kt"
+            line="51"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var vectorSkippedCount by remember { mutableStateOf(0) }"
+        errorLine2="                                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/screens/notes/NoteEditorScreen.kt"
+            line="156"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var paletteHeightPx by remember { mutableStateOf(0) }"
+        errorLine2="                                      ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/screens/notes/NoteEditorScreen.kt"
+            line="164"
+            column="39"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
+        errorLine1="    var areaEraserRadiusPx: Float by mutableStateOf(24f)"
+        errorLine2="                                     ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/ToolPaletteState.kt"
+            line="103"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var shapeFillColor: Int by mutableStateOf(DEFAULT_SHAPE_FILL_COLOR)"
+        errorLine2="                               ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/ToolPaletteState.kt"
+            line="129"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var shapeStrokeStyle: Int by mutableStateOf(ShapeCodec.STROKE_STYLE_SOLID.toInt())"
+        errorLine2="                                 ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/ToolPaletteState.kt"
+            line="133"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var pathStrokeCap: Int by mutableStateOf(PathCodec.cap(PathCodec.DEFAULT_CAP_JOIN))"
+        errorLine2="                              ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/ToolPaletteState.kt"
+            line="155"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var pathStrokeJoin: Int by mutableStateOf(PathCodec.join(PathCodec.DEFAULT_CAP_JOIN))"
+        errorLine2="                               ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/ToolPaletteState.kt"
+            line="159"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var connectorRouteStyle: Int by mutableStateOf(ConnectorCodec.ROUTE_STRAIGHT.toInt())"
+        errorLine2="                                    ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/ToolPaletteState.kt"
+            line="215"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var stickyFillColor: Int by mutableStateOf(StickyCodec.PRESET_FILLS.first())"
+        errorLine2="                                ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/ToolPaletteState.kt"
+            line="226"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
+        errorLine1="    var offsetX: Float by mutableStateOf(offsetX)"
+        errorLine2="                          ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/ViewportController.kt"
+            line="28"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
+        errorLine1="    var offsetY: Float by mutableStateOf(offsetY)"
+        errorLine2="                          ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/ViewportController.kt"
+            line="30"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
+        errorLine1="    var scale: Float by mutableStateOf(scale.coerceIn(MIN_SCALE, MAX_SCALE))"
+        errorLine2="                        ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/ViewportController.kt"
+            line="32"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-mdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-xhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-xxhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-xxxhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icon used as round icon did not have a circular shape">
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher_round.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icon used as round icon did not have a circular shape">
+        <location
+            file="src/main/res/mipmap-mdpi/ic_launcher_round.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icon used as round icon did not have a circular shape">
+        <location
+            file="src/main/res/mipmap-xhdpi/ic_launcher_round.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icon used as round icon did not have a circular shape">
+        <location
+            file="src/main/res/mipmap-xxhdpi/ic_launcher_round.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icon used as round icon did not have a circular shape">
+        <location
+            file="src/main/res/mipmap-xxxhdpi/ic_launcher_round.png"/>
+    </issue>
+
+    <issue
+        id="MonochromeLauncherIcon"
+        message="The application adaptive icon is missing a monochrome tag"
+        errorLine1="&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;>"
+        errorLine2="^">
+        <location
+            file="src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="MonochromeLauncherIcon"
+        message="The application adaptive roundIcon is missing a monochrome tag"
+        errorLine1="&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;>"
+        errorLine2="^">
+        <location
+            file="src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png">
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher_round.png"/>
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png">
+        <location
+            file="src/main/res/mipmap-mdpi/ic_launcher_round.png"/>
+        <location
+            file="src/main/res/mipmap-mdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png">
+        <location
+            file="src/main/res/mipmap-xhdpi/ic_launcher_round.png"/>
+        <location
+            file="src/main/res/mipmap-xhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png">
+        <location
+            file="src/main/res/mipmap-xxhdpi/ic_launcher_round.png"/>
+        <location
+            file="src/main/res/mipmap-xxhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png">
+        <location
+            file="src/main/res/mipmap-xxxhdpi/ic_launcher_round.png"/>
+        <location
+            file="src/main/res/mipmap-xxxhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/vector/trace/AndroidBitmapPngEncoder.kt"
+            line="15"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val next = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/DrawingSurface.kt"
+            line="709"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withSave` instead?"
+        errorLine1="            canvas.save()"
+        errorLine2="            ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/DrawingSurface.kt"
+            line="790"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withTranslation` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/DrawingSurface.kt"
+            line="1636"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withTranslation` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/DrawingSurface.kt"
+            line="1920"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withTranslation` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/DrawingSurface.kt"
+            line="2009"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withTranslation` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/DrawingSurface.kt"
+            line="2071"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withTranslation` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/DrawingSurface.kt"
+            line="2474"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withTranslation` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/DrawingSurface.kt"
+            line="2672"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withTranslation` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/DrawingSurface.kt"
+            line="2961"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val bitmap = Bitmap.createBitmap(bitmapW, bitmapH, Bitmap.Config.ARGB_8888)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/notes/NoteRasterizer.kt"
+            line="101"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withScale` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/notes/NoteRasterizer.kt"
+            line="105"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            Uri.parse(&quot;doodlepad://notes/new?source=tile&amp;stylus=true&quot;),"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/service/NotesQuickTileService.kt"
+            line="16"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withTranslation` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/StickyRenderer.kt"
+            line="73"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ALPHA_8)"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/StrokeRenderer.kt"
+            line="97"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withSave` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/TextItemRenderer.kt"
+            line="44"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val bmp = Bitmap.createBitmap(TILE_SIZE, TILE_SIZE, Bitmap.Config.ALPHA_8)"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/TextureRegistry.kt"
+            line="75"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val bmp = Bitmap.createBitmap(TILE_SIZE, TILE_SIZE, Bitmap.Config.ALPHA_8)"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/TextureRegistry.kt"
+            line="86"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val bmp = Bitmap.createBitmap(TILE_SIZE, TILE_SIZE, Bitmap.Config.ALPHA_8)"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/TextureRegistry.kt"
+            line="106"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val bmp = Bitmap.createBitmap(TILE_SIZE, TILE_SIZE, Bitmap.Config.ALPHA_8)"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/TextureRegistry.kt"
+            line="138"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val bmp = Bitmap.createBitmap(STUB_WIDTH_PX, STUB_HEIGHT_PX, Bitmap.Config.ARGB_8888)"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/notes/ThumbnailRenderer.kt"
+            line="44"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="ClickableViewAccessibility"
+        message="Custom view `DrawingSurface` overrides `onTouchEvent` but not `performClick`"
+        errorLine1="    override fun onTouchEvent(event: MotionEvent): Boolean {"
+        errorLine2="                 ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/notes/DrawingSurface.kt"
+            line="941"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="ByteOrderMark"
+        message="Found byte-order-mark in the middle of a file"
+        errorLine1="        val trimmed = input.removePrefix(&quot;﻿&quot;).trimStart()"
+        errorLine2="                                          ~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/vector/VectorImportDetector.kt"
+            line="26"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="ByteOrderMark"
+        message="Found byte-order-mark in the middle of a file"
+        errorLine1="        val s = input.removePrefix(&quot;﻿&quot;)"
+        errorLine2="                                    ~">
+        <location
+            file="src/main/java/com/aichat/sandbox/data/vector/VectorImportDetector.kt"
+            line="45"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="ConstantLocale"
+        message="Assigning `Locale.getDefault()` to a final static field is suspicious; this code will not work correctly if the user changes locale while the app is running"
+        errorLine1="private val timeFormat = SimpleDateFormat(&quot;HH:mm&quot;, Locale.getDefault())"
+        errorLine2="                                                   ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/screens/notes/NotePickerSheet.kt"
+            line="163"
+            column="52"/>
+    </issue>
+
+    <issue
+        id="ConstantLocale"
+        message="Assigning `Locale.getDefault()` to a final static field is suspicious; this code will not work correctly if the user changes locale while the app is running"
+        errorLine1="private val dateFormat = SimpleDateFormat(&quot;yyyy/MM/dd&quot;, Locale.getDefault())"
+        errorLine2="                                                        ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/screens/notes/NotePickerSheet.kt"
+            line="164"
+            column="57"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="String literal in `setText` can not be translated. Use Android resources instead."
+        errorLine1="            text = &quot;Copy&quot;"
+        errorLine2="                    ~~~~">
+        <location
+            file="src/main/java/com/aichat/sandbox/ui/components/MarkdownText.kt"
+            line="172"
+            column="21"/>
+    </issue>
+
+</issues>
