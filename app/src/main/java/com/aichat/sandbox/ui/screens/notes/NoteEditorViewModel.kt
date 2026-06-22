@@ -170,6 +170,10 @@ class NoteEditorViewModel @Inject constructor(
     // into the fresh note (frames + shapes + stickies + text + connectors).
     private val entryTemplate: String? = savedStateHandle["template"]
 
+    // Frame to jump to on first open — set when navigating from the notebook
+    // page grid so the editor lands on the right page instead of the origin.
+    private val entryFrame: String? = savedStateHandle["frame"]
+
     private val _note = MutableStateFlow(emptyNote(resolvedNoteId))
     val note: StateFlow<Note> = _note.asStateFlow()
 
@@ -1285,6 +1289,16 @@ class NoteEditorViewModel @Inject constructor(
                 // export uses it as the viewport without a tap first.
                 if (_note.value.isIcon && _currentFrameId.value == null) {
                     _currentFrameId.value = _frames.value.minByOrNull { it.ordinal }?.id
+                }
+                // Notebook page open — jump to the specific frame the user
+                // tapped in the grid. Falls back to the first frame so the
+                // editor never starts at the raw world origin.
+                val notebookIdForEntry = loadedNote?.notebookId
+                if (notebookIdForEntry != null && _currentFrameId.value == null) {
+                    val targetId = entryFrame
+                        ?.let { id -> _frames.value.firstOrNull { it.id == id }?.id }
+                        ?: _frames.value.minByOrNull { it.ordinal }?.id
+                    _currentFrameId.value = targetId
                 }
                 // Sub-phase 9.1 — if this note belongs to a notebook,
                 // grab the header so the editor can render notebook UI

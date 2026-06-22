@@ -137,7 +137,9 @@ fun AppNavigation(
             ) {
                 KidsNotebookScreen(
                     onBack = { navController.popBackStack() },
-                    onOpenSheet = { noteId -> navController.navigate("note/$noteId") },
+                    onOpenSheet = { noteId, frameId ->
+                        navController.navigate("note/$noteId?frame=$frameId")
+                    },
                 )
             }
             // Quick-capture deep link (Phase 3.1). Lives as its own route so
@@ -170,8 +172,15 @@ fun AppNavigation(
                 )
             }
             composable(
-                route = "note/{noteId}",
-                arguments = listOf(navArgument("noteId") { type = NavType.StringType })
+                route = "note/{noteId}?frame={frame}",
+                arguments = listOf(
+                    navArgument("noteId") { type = NavType.StringType },
+                    navArgument("frame") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
             ) {
                 NoteEditorScreen(
                     onNavigateBack = { navController.popBackStack() },

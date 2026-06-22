@@ -41,7 +41,7 @@ import com.aichat.sandbox.ui.theme.kids.KidsTheme
 @Composable
 fun KidsNotebookScreen(
     onBack: () -> Unit,
-    onOpenSheet: (noteId: String) -> Unit,
+    onOpenSheet: (noteId: String, frameId: String) -> Unit,
     viewModel: KidsNotebookViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -50,7 +50,7 @@ fun KidsNotebookScreen(
     LaunchedEffect(pendingOpen) {
         val target = pendingOpen ?: return@LaunchedEffect
         viewModel.consumePendingOpen()
-        onOpenSheet(target)
+        onOpenSheet(target.noteId, target.frameId)
     }
 
     KidsTheme {
@@ -84,7 +84,7 @@ fun KidsNotebookScreen(
                         items(state.frames, key = { it.id }) { frame ->
                             SheetCard(
                                 frame = frame,
-                                onClick = { state.noteId?.let(onOpenSheet) },
+                                onClick = { state.noteId?.let { onOpenSheet(it, frame.id) } },
                             )
                         }
                     }
