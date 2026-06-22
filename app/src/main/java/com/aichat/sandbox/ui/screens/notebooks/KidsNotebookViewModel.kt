@@ -25,8 +25,8 @@ class KidsNotebookViewModel @Inject constructor(
     private val _state = MutableStateFlow(KidsNotebookUiState())
     val state: StateFlow<KidsNotebookUiState> = _state.asStateFlow()
 
-    private val _pendingOpenEditor = MutableStateFlow<String?>(null)
-    val pendingOpenEditor: StateFlow<String?> = _pendingOpenEditor.asStateFlow()
+    private val _pendingOpenEditor = MutableStateFlow<PendingOpen?>(null)
+    val pendingOpenEditor: StateFlow<PendingOpen?> = _pendingOpenEditor.asStateFlow()
 
     init {
         refresh()
@@ -38,9 +38,9 @@ class KidsNotebookViewModel @Inject constructor(
 
     fun addSheet() {
         viewModelScope.launch {
-            notebookRepository.addNotebookPage(noteId)
+            val newFrame = notebookRepository.addNotebookPage(noteId) ?: return@launch
             refresh()
-            _pendingOpenEditor.value = noteId
+            _pendingOpenEditor.value = PendingOpen(noteId, newFrame.id)
         }
     }
 
@@ -63,3 +63,5 @@ data class KidsNotebookUiState(
     val notebookTitle: String = "Notebook",
     val frames: List<NoteFrame> = emptyList(),
 )
+
+data class PendingOpen(val noteId: String, val frameId: String)

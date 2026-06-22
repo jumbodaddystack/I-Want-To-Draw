@@ -157,8 +157,6 @@ fun NoteEditorScreen(
     var brushSheetOpen by remember { mutableStateOf(false) }
     var canvasSizeDialogVisible by remember { mutableStateOf(false) }
     var saveStampDialogVisible by remember { mutableStateOf(false) }
-    var confirmNewPage by remember { mutableStateOf(false) }
-    var confirmClearPage by remember { mutableStateOf(false) }
     var viewportController by remember { mutableStateOf<ViewportController?>(null) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var paletteHeightPx by remember { mutableStateOf(0) }
@@ -262,12 +260,11 @@ fun NoteEditorScreen(
         }
     }
 
-    // Icons are a *bounded* canvas: keep the artboard rubber-banded into the
-    // viewport so it can never be flung off-screen (notes stay infinite). This
-    // effect re-installs the clamp whenever the artboard or canvas size changes
-    // (rotation, artboard resize), and clears it for non-icon notes. setPanBounds
-    // re-clamps immediately, so a now-illegal offset snaps back into range.
-    LaunchedEffect(note.isIcon, frames, currentFrameId, viewportController, canvasSize) {
+    // Bounded canvas: keep the artboard / page rubber-banded so it can never
+    // be flung off-screen. Icons clamp to the artboard; notebook pages clamp
+    // to the currently-selected frame so the user sees exactly one page at a
+    // time. Infinite standalone notes clear the clamp.
+    LaunchedEffect(note.isIcon, notebook, frames, currentFrameId, viewportController, canvasSize) {
         val vp = viewportController ?: return@LaunchedEffect
         if (note.isIcon && canvasSize != IntSize.Zero) {
             viewModel.currentFrameBounds()?.let { artboard ->
@@ -279,7 +276,17 @@ fun NoteEditorScreen(
                     ),
                 )
             }
-        } else if (!note.isIcon) {
+        } else if (notebook != null && currentFrameId != null && canvasSize != IntSize.Zero) {
+            viewModel.currentFrameBounds()?.let { page ->
+                vp.setPanBounds(
+                    bounds = page,
+                    canvasSize = floatArrayOf(
+                        canvasSize.width.toFloat(),
+                        canvasSize.height.toFloat(),
+                    ),
+                )
+            }
+        } else if (!note.isIcon && notebook == null) {
             vp.clearPanBounds()
         }
     }
@@ -290,6 +297,20 @@ fun NoteEditorScreen(
     // viewport (exact view the user left); falls back to fitting the artboard
     // for first opens / pre-v16 icons. Runs once per note (the artboard frame
     // loads asynchronously, so we wait for it).
+    // Notebook page open: fly the viewport to the target page once it and the
+    // canvas are both ready. After the initial fit the user can pan freely
+    // (within the per-frame pan bounds installed above).
+    var didInitialNotebookFit by remember(note.id) { mutableStateOf(false) }
+    LaunchedEffect(note.id, notebook, frames, currentFrameId, viewportController, canvasSize) {
+        if (didInitialNotebookFit || notebook == null || currentFrameId == null) return@LaunchedEffect
+        val vp = viewportController ?: return@LaunchedEffect
+        if (canvasSize == IntSize.Zero) return@LaunchedEffect
+        val page = frames.firstOrNull { it.id == currentFrameId } ?: return@LaunchedEffect
+        val canvasFloats = floatArrayOf(canvasSize.width.toFloat(), canvasSize.height.toFloat())
+        vp.flyTo(bounds = page.bounds(), canvasSize = canvasFloats)
+        didInitialNotebookFit = true
+    }
+
     var didInitialIconFit by remember(note.id) { mutableStateOf(false) }
     LaunchedEffect(note.id, note.isIcon, frames, currentFrameId, viewportController, canvasSize) {
         if (didInitialIconFit || !note.isIcon) return@LaunchedEffect
@@ -647,9 +668,9 @@ fun NoteEditorScreen(
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
                 // Sub-phase 8.1 — frame rectangles + name labels rendered
-                // above the canvas. Hidden while presenting so the audience
-                // sees content, not scaffolding.
-                if (!presenting) FrameOverlay(
+                // above the canvas. Hidden while presenting or in notebook
+                // mode (each page is its own bounded canvas — no labels).
+                if (!presenting && notebook == null) FrameOverlay(
                     frames = frames,
                     currentFrameId = currentFrameId,
                     viewport = viewportController,
@@ -819,13 +840,6 @@ fun NoteEditorScreen(
                                     onLiveEdit = viewModel::setLiveBrushEdit,
                                     onSaveAsPreset = { _, name -> viewModel.saveActiveAsUserPreset(name) },
                                     onTextureChange = viewModel::setActiveTextureId,
-                                )
-                            }
-                            if (notebook != null) {
-                                KidPageShortcutBar(
-                                    onNewPage = { confirmNewPage = true },
-                                    onClearPage = { confirmClearPage = true },
-                                    onSticker = viewModel::addStickerShortcut,
                                 )
                             }
                             ToolPalette(
@@ -1124,33 +1138,6 @@ fun NoteEditorScreen(
                 )
             }
         }
-        if (confirmNewPage) {
-            AlertDialog(
-                onDismissRequest = { confirmNewPage = false },
-                title = { Text("Add a fresh page?") },
-                text = { Text("Your drawing stays safe. We’ll jump to a blank new page.") },
-                confirmButton = {
-                    Button(onClick = { confirmNewPage = false; viewModel.addNotebookPage() }) {
-                        Text("New page")
-                    }
-                },
-                dismissButton = { TextButton(onClick = { confirmNewPage = false }) { Text("Not now") } },
-            )
-        }
-        if (confirmClearPage) {
-            AlertDialog(
-                onDismissRequest = { confirmClearPage = false },
-                title = { Text("Clear this page?") },
-                text = { Text("This erases the art on the current page only. You can still use Undo right after.") },
-                confirmButton = {
-                    Button(onClick = { confirmClearPage = false; viewModel.clearCurrentPage() }) {
-                        Text("Clear page")
-                    }
-                },
-                dismissButton = { TextButton(onClick = { confirmClearPage = false }) { Text("Keep drawing") } },
-            )
-        }
-
         if (saveStampDialogVisible) {
             SaveStampDialog(
                 onConfirm = { name ->
