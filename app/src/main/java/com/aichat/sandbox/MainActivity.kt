@@ -11,8 +11,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import com.aichat.sandbox.data.local.PreferencesManager
@@ -38,8 +36,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         pendingDeepLink.value = parseNotesDeepLink(intent)
         setContent {
-            val darkMode by preferencesManager.darkMode.collectAsState(initial = true)
-            DoodlePadTheme(darkTheme = darkMode) {
+            // The app is committed to one bright, playful identity for its 4–10
+            // audience, so the editor chrome always renders in light. (The old
+            // preference-driven dark path half-worked: the kid surfaces hardcoded
+            // light colours anyway, and the tool palette's accent keyed off the
+            // *system* setting, disagreeing with this preference.)
+            DoodlePadTheme(darkTheme = false) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

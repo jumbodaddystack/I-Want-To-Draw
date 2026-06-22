@@ -114,11 +114,11 @@ fun ToolPalette(
                 } else if (selected.isText) {
                     TextHintRow()
                 } else if (selected.isShape) {
-                    // Phase 6.2 — shape tools reuse the active ink color + width.
+                    // Shape tools reuse the active ink color + width, plus a
+                    // simple fill toggle. (Snap, dashed/dotted outlines and
+                    // cap/join are pro options not surfaced in the kids tray.)
                     InkConfigRow(state = state, onPickCustomColor = onPickCustomColor)
-                    // Phase 10.2/10.3 — fill + outline style for new shapes.
                     ShapeStyleRow(state = state, onPickShapeFillColor = onPickShapeFillColor)
-                    SnapChipRow(snapMask = snapMask, onToggle = onToggleSnap)
                 } else if (selected.isFrame) {
                     FrameHintRow()
                 } else if (selected.isSticky) {
@@ -151,50 +151,27 @@ fun ToolPalette(
  */
 @Composable
 private fun ToolRow(state: ToolPaletteState) {
+    // Kids tray: a small set of big, self-evident tools. The app targets ages
+    // 4–10, so the pro/vector roster (highlighter, pencil, lasso, text,
+    // connector, frame, polygon, path-pen, area-eraser) is intentionally not
+    // surfaced here — the underlying engine still supports it, it's simply not
+    // shown to a young child. What's left: Draw, Eraser, Shapes, Stickers.
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ToolIconButton(state, Tool.PEN, Modifier.weight(1f))
-        ToolIconButton(state, Tool.HIGHLIGHTER, Modifier.weight(1f))
-        ToolIconButton(state, Tool.PENCIL, Modifier.weight(1f))
+        ToolIconButton(state, Tool.ERASER_STROKE, Modifier.weight(1f))
         GroupedToolButton(
             state = state,
-            groupTools = listOf(Tool.ERASER_STROKE, Tool.ERASER_AREA),
-            lastUsed = state.lastEraserTool,
-            // V2 fix — the two eraser variants now carry distinct glyphs
-            // (Backspace for stroke-erase, Deblur for area-erase), and the
-            // group button wears the last-used variant's glyph so the next
-            // tap's outcome is visible before tapping — matching how the
-            // Shapes / Board groups already behave. The old fixed Backspace
-            // glyph made the two erasers indistinguishable on the button.
-            groupIcon = { state.lastEraserTool.icon() },
-            groupDescription = "Eraser",
-            modifier = Modifier.weight(1f),
-        )
-        ToolIconButton(state, Tool.LASSO, Modifier.weight(1f))
-        ToolIconButton(state, Tool.TEXT, Modifier.weight(1f))
-        GroupedToolButton(
-            state = state,
-            // 12.2 — the vector pen joins the shapes roster.
-            groupTools = listOf(
-                Tool.LINE, Tool.RECT, Tool.ELLIPSE, Tool.ARROW, Tool.POLYGON, Tool.PATH_PEN,
-            ),
-            lastUsed = state.lastShapeTool,
-            // The group button wears the last-used shape's glyph so the next
-            // tap's outcome is visible before tapping.
-            groupIcon = { state.lastShapeTool.icon() },
+            // Kid-simple shapes only — no polygon / vector pen.
+            groupTools = listOf(Tool.LINE, Tool.RECT, Tool.ELLIPSE, Tool.ARROW),
+            lastUsed = state.lastShapeTool.takeIf { it.isShape } ?: Tool.RECT,
+            groupIcon = { state.lastShapeTool.takeIf { it.isShape }?.icon() ?: Tool.RECT.icon() },
             groupDescription = "Shapes",
             modifier = Modifier.weight(1f),
         )
-        // V3 fix — the whiteboard "Board" group bundled two conceptually
-        // unrelated tools (a sticky-note *content object* and a *connector*
-        // relationship line) behind one hidden-variant gesture. They're now
-        // two standalone buttons so each is a single, self-evident tap with
-        // its own glyph — no shared picker to reach the other.
         ToolIconButton(state, Tool.STICKY, Modifier.weight(1f))
-        ToolIconButton(state, Tool.CONNECTOR, Modifier.weight(1f))
-        ToolIconButton(state, Tool.FRAME, Modifier.weight(1f))
     }
 }
 
@@ -248,11 +225,7 @@ private fun GroupedToolButton(
             imageVector = Icons.Filled.ArrowDropDown,
             contentDescription = null,
             tint = if (groupActive) {
-                (if (androidx.compose.foundation.isSystemInDarkTheme()) {
-                    com.aichat.sandbox.ui.theme.studio.StudioDarkColors
-                } else {
-                    com.aichat.sandbox.ui.theme.studio.StudioLightColors
-                }).accentSignature
+                MaterialTheme.colorScheme.primary
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
@@ -297,15 +270,11 @@ private fun ToolButtonShell(
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
 ) {
-    // Studio Bench signature moment: the active tool fills with the electric
-    // accent ("glowing active-tool state"), so you feel which tool is live
-    // rather than reading it. Pulled from the Studio tokens directly because
-    // the white drawing canvas is intentionally not wrapped in StudioTheme.
-    val studio = if (androidx.compose.foundation.isSystemInDarkTheme()) {
-        com.aichat.sandbox.ui.theme.studio.StudioDarkColors
-    } else {
-        com.aichat.sandbox.ui.theme.studio.StudioLightColors
-    }
+    // The active tool fills with the app's single primary accent so a child can
+    // *feel* which tool is live rather than read it. It reads the unified
+    // MaterialTheme primary (the app is always-light and the editor chrome
+    // shares the Kids palette), so the active-tool colour matches the colour the
+    // selected-swatch ring uses — one "selected" colour everywhere.
     Box(
         modifier = modifier
             .height(64.dp)
@@ -317,14 +286,14 @@ private fun ToolButtonShell(
                 .size(54.dp)
                 .clip(CircleShape)
                 .background(
-                    if (selected) studio.accentSignature else Color.Transparent
+                    if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
                 ),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                tint = if (selected) studio.onAccent
+                tint = if (selected) MaterialTheme.colorScheme.onPrimary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(30.dp),
             )
@@ -655,7 +624,7 @@ private fun ShapeStyleRow(
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         FilterChip(
             selected = state.shapeFillEnabled,
@@ -668,14 +637,6 @@ private fun ShapeStyleRow(
             selected = state.shapeFillEnabled,
             onSelect = onPickShapeFillColor,
         )
-        Text(
-            text = "Line",
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(start = 4.dp),
-        )
-        StrokeStyleChip(state, ShapeCodec.STROKE_STYLE_SOLID.toInt(), "Solid")
-        StrokeStyleChip(state, ShapeCodec.STROKE_STYLE_DASHED.toInt(), "Dashed")
-        StrokeStyleChip(state, ShapeCodec.STROKE_STYLE_DOTTED.toInt(), "Dotted")
     }
 }
 
@@ -711,18 +672,13 @@ private fun SnapChipRow(snapMask: Int, onToggle: (Int) -> Unit) {
 
 @Composable
 private fun SnapToggleChip(label: String, on: Boolean, onClick: () -> Unit) {
-    val studio = if (androidx.compose.foundation.isSystemInDarkTheme()) {
-        com.aichat.sandbox.ui.theme.studio.StudioDarkColors
-    } else {
-        com.aichat.sandbox.ui.theme.studio.StudioLightColors
-    }
     FilterChip(
         selected = on,
         onClick = onClick,
         label = { Text(label) },
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = studio.accentSignature,
-            selectedLabelColor = studio.onAccent,
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
         ),
     )
 }
