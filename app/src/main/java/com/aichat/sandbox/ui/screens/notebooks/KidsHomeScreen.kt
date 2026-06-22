@@ -6,31 +6,24 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoStories
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -42,14 +35,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.aichat.sandbox.data.model.Notebook
+import com.aichat.sandbox.ui.components.BigKidButton
+import com.aichat.sandbox.ui.components.KidsScaffold
+import com.aichat.sandbox.ui.theme.kids.KidsTheme
+import com.aichat.sandbox.ui.theme.kids.readableInkOn
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KidsHomeScreen(
     onOpenNotebook: (noteId: String) -> Unit,
@@ -69,53 +62,35 @@ fun KidsHomeScreen(
         onOpenNotebook(target)
     }
 
-    Scaffold(
-        containerColor = Color(0xFFFFF8E7),
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 20.dp, vertical = 18.dp),
-        ) {
-            Text(
-                text = "Doodle Pad",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Black,
-                color = Color(0xFF3F2E56),
-            )
-            Text(
-                text = "Pick a notebook and start drawing!",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color(0xFF7B5E9E),
-            )
-            Spacer(Modifier.height(18.dp))
-            TextButton(
-                onClick = { newNotebookOpen = true },
-                colors = ButtonDefaults.textButtonColors(
-                    containerColor = Color(0xFFFFD166),
-                    contentColor = Color(0xFF3F2E56),
-                ),
-                shape = RoundedCornerShape(28.dp),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+    KidsTheme {
+        KidsScaffold(
+            title = "Doodle Pad",
+            subtitle = "Pick a notebook and start drawing!",
+        ) { contentPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(contentPadding),
             ) {
-                Icon(Icons.Filled.Add, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text("Add notebook", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            }
-            Spacer(Modifier.height(18.dp))
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 156.dp),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                items(notebooks, key = { it.notebook.id }) { card ->
-                    KidsNotebookCard(
-                        card = card,
-                        onClick = { card.noteId?.let(onOpenNotebook) },
-                    )
+                BigKidButton(
+                    text = "Add notebook",
+                    icon = Icons.Filled.Add,
+                    onClick = { newNotebookOpen = true },
+                )
+                Spacer(Modifier.size(KidsTheme.spacing.l))
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 156.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = KidsTheme.spacing.xxl),
+                    verticalArrangement = Arrangement.spacedBy(KidsTheme.spacing.l),
+                    horizontalArrangement = Arrangement.spacedBy(KidsTheme.spacing.l),
+                ) {
+                    items(notebooks, key = { it.notebook.id }) { card ->
+                        KidsNotebookCard(
+                            card = card,
+                            onClick = { card.noteId?.let(onOpenNotebook) },
+                        )
+                    }
                 }
             }
         }
@@ -138,15 +113,18 @@ private fun KidsNotebookCard(
     onClick: () -> Unit,
 ) {
     val cover = Color(card.notebook.coverColorArgb)
+    val onCover = readableInkOn(cover)
     Card(
         modifier = Modifier
-            .height(210.dp)
+            .heightIn(min = 200.dp)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(30.dp),
+        shape = KidsTheme.shapes.card,
         colors = CardDefaults.cardColors(containerColor = cover),
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
     ) {
         Box(Modifier.fillMaxSize()) {
+            // Playful translucent bubbles in the corner add personality without
+            // depending on the cover colour.
             repeat(5) { index ->
                 Box(
                     modifier = Modifier
@@ -160,39 +138,41 @@ private fun KidsNotebookCard(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
+                    .padding(KidsTheme.spacing.l),
+                verticalArrangement = Arrangement.spacedBy(KidsTheme.spacing.s, Alignment.Bottom),
             ) {
+                val badgeBg = if (onCover == Color.White) {
+                    Color.White.copy(alpha = 0.88f)
+                } else {
+                    KidsTheme.colors.inkStrong.copy(alpha = 0.12f)
+                }
                 Surface(
                     modifier = Modifier.size(52.dp),
                     shape = CircleShape,
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = badgeBg,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Filled.AutoStories,
                             contentDescription = null,
-                            tint = Color(0xFF3F2E56),
+                            tint = onCover,
                             modifier = Modifier.size(30.dp),
                         )
                     }
                 }
-                Column {
-                    Text(
-                        text = card.notebook.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFF2F2440),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = "${card.pageCount.coerceAtLeast(1)} sheet${if (card.pageCount == 1) "" else "s"}",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF2F2440).copy(alpha = 0.72f),
-                    )
-                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = card.notebook.title,
+                    style = KidsTheme.type.heading,
+                    color = onCover,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${card.pageCount.coerceAtLeast(1)} sheet${if (card.pageCount == 1) "" else "s"}",
+                    style = KidsTheme.type.label,
+                    color = onCover.copy(alpha = 0.85f),
+                )
             }
         }
     }

@@ -35,18 +35,23 @@ private val DarkColorScheme = darkColorScheme(
     outline = Color(0xFF444444)
 )
 
+// The app runs always-light (see MainActivity). This light scheme is aligned to
+// the Kids palette (see ui/theme/kids/KidsColor.kt) so the drawing editor's
+// chrome — which themes off MaterialTheme.colorScheme — shares the one playful
+// identity and the single grape primary accent (no more blue-vs-cyan split).
 private val LightColorScheme = lightColorScheme(
-    primary = AccentBlue,
+    primary = Color(0xFF7048C8),
     onPrimary = Color.White,
-    secondary = AccentBlueDim,
-    background = Color(0xFFF5F5F5),
+    secondary = Color(0xFFFF6B6B),
+    onSecondary = Color.White,
+    background = Color(0xFFFFF6E9),
     surface = Color.White,
-    surfaceVariant = Color(0xFFEEEEEE),
-    onBackground = Color(0xFF1A1A1A),
-    onSurface = Color(0xFF1A1A1A),
-    onSurfaceVariant = Color(0xFF666666),
+    surfaceVariant = Color(0xFFE8F4FF),
+    onBackground = Color(0xFF2A2540),
+    onSurface = Color(0xFF2A2540),
+    onSurfaceVariant = Color(0xFF6E6685),
     error = ErrorRed,
-    outline = Color(0xFFCCCCCC)
+    outline = Color(0xFFECE2D5)
 )
 
 @Composable

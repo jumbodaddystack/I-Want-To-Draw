@@ -73,7 +73,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.aichat.sandbox.ui.components.notes.AudioPlaybackBar
 import com.aichat.sandbox.ui.components.notes.BackgroundLayer
 import com.aichat.sandbox.ui.components.notes.BrushSheet
-import com.aichat.sandbox.ui.components.notes.ColorPickerSheet
+import com.aichat.sandbox.ui.components.notes.KidsColorSheet
 import com.aichat.sandbox.ui.components.notes.DrawingSurfaceView
 import com.aichat.sandbox.ui.components.notes.FavoritesBar
 import com.aichat.sandbox.ui.components.notes.FrameOverlay
@@ -1161,7 +1161,10 @@ fun NoteEditorScreen(
             )
         }
         if (colorPickerOpen) {
-            ColorPickerSheet(
+            // Kid-friendly "crayon box" picker (replaces the pro hue-ring + hex
+            // sheet). Same confirm/dismiss contract, so both the ink-colour and
+            // shape-fill pick flows route through it.
+            KidsColorSheet(
                 initialColorArgb = viewModel.palette.activeInkColor(),
                 recents = recentColors,
                 onConfirm = viewModel::confirmColorPick,
